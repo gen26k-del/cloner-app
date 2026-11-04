@@ -16,7 +16,7 @@
     <application
         android:name=".ClonerApp"
         android:allowBackup="false"
-        android:label="অ্যাপ ক্লোনার"
+        android:label="CloneMe"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
