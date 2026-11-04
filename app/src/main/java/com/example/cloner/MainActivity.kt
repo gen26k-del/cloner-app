@@ -216,12 +216,6 @@ fun ClonerAppScreen() {
         clones.addAll((saved + engineClones).distinct())
         apps.addAll(loaded)
         loading = false
-        // হোম-স্ক্রিন শর্টকাট থেকে এলে সরাসরি চালু করো
-        val lp = MainActivity.launchPkg
-        if (lp != null) {
-            MainActivity.launchPkg = null
-            apps.find { it.pkg == lp }?.let { doLaunch(it) }
-        }
     }
 
     fun persist() = saveClones(ctx, clones.toSet())
@@ -279,6 +273,17 @@ fun ClonerAppScreen() {
                         toast("${app.label} তালিকা থেকে সরানো হয়েছে")
                     }
                 )
+            }
+        }
+    }
+
+    // হোম-স্ক্রিন শর্টকাট থেকে এলে তালিকা লোডের পর সরাসরি চালু করো
+    LaunchedEffect(loading) {
+        if (!loading) {
+            val lp = MainActivity.launchPkg
+            if (lp != null) {
+                MainActivity.launchPkg = null
+                apps.find { it.pkg == lp }?.let { doLaunch(it) }
             }
         }
     }
