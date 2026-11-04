@@ -146,6 +146,13 @@ class ClonerApp : Application() {
         }
         try {
             BlackBoxCore.get().doCreate()
+            // init trace
+            try {
+                val traceFile = java.io.File(cacheDir, "init_trace.txt")
+                val proc = java.io.File("/proc/self/cmdline").readText()
+                    .replace("\u0000", " ").trim()
+                traceFile.appendText("${java.util.Date()} [$proc] ClonerApp.onCreate doCreate done\n")
+            } catch (_: Exception) { }
             Engine.current = BlackBoxCloneEngine()
             Log.i("ClonerApp", "BlackBox engine ready")
         } catch (e: Exception) {
