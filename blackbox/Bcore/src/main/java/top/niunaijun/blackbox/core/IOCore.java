@@ -49,7 +49,10 @@ public class IOCore {
         if (!redirectFile.exists()) {
             FileUtils.mkdirs(redirectPath);
         }
-        NativeCore.addIORule(origPath, redirectPath);
+        // NativeCore রেডি না হলে skip — class-init lock-এ আটকে যাওয়া এড়াতে
+        if (top.niunaijun.blackbox.BlackBoxCore.nativeCoreReady) {
+            NativeCore.addIORule(origPath, redirectPath);
+        }
     }
 
     public void addBlackRedirect(String path) {
@@ -154,7 +157,10 @@ public class IOCore {
         for (String s : blackRule) {
             get().addBlackRedirect(s);
         }
-        NativeCore.enableIO();
+        // NativeCore রেডি না হলে skip — class-init lock-এ আটকে যাওয়া এড়াতে
+        if (top.niunaijun.blackbox.BlackBoxCore.nativeCoreReady) {
+            NativeCore.enableIO();
+        }
     }
 
     private void hideRoot(Map<String, String> rule) {
