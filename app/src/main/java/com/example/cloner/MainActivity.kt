@@ -248,7 +248,7 @@ fun ClonerAppScreen() {
                 ) {
                     Column(Modifier.padding(12.dp)) {
                         Text(
-                            "⚠️ শেষবার অ্যাপ crash করেছিল",
+                            "⚠️ শেষবার সমস্যা হয়েছিল (crash/hang)",
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp
                         )
