@@ -28,10 +28,23 @@ class ClonerApp : Application() {
      */
     private fun startAnrWatchdog() {
         try {
+            val mainThread = Looper.getMainLooper().thread
             val mainHandler = Handler(Looper.getMainLooper())
             val state = longArrayOf(SystemClock.uptimeMillis())
+            // main thread আটকানোর ঠিক আগের অবস্থানগুলো ধরে রাখার জন্য ring buffer
+            val recentStacks = ArrayDeque<String>()
             val ticker = object : Runnable {
                 override fun run() {
+                    try {
+                        val st = mainThread.stackTrace
+                        if (st.isNotEmpty()) {
+                            val top = st.take(8).joinToString("\n") { "  at $it" }
+                            synchronized(recentStacks) {
+                                recentStacks.addLast(top)
+                                if (recentStacks.size > 5) recentStacks.removeFirst()
+                            }
+                        }
+                    } catch (_: Exception) { }
                     state[0] = SystemClock.uptimeMillis()
                     mainHandler.postDelayed(this, 2000)
                 }
@@ -44,26 +57,30 @@ class ClonerApp : Application() {
                         val blockedFor = SystemClock.uptimeMillis() - state[0]
                         if (blockedFor > 6000) {
                             val sb = StringBuilder("ANR ধরা পড়েছে: ${Date()}\n")
-                            val all = Thread.getAllStackTraces()
-                            // সবার আগে MAIN thread — এটাই আসল আটকে থাকা জায়গা
-                            val main = all.keys.find { it.name == "main" }
-                            if (main != null) {
-                                sb.append("\n\"main\" state=${main.state}\n")
-                                for (el in (all[main] ?: emptyArray()).take(60)) {
-                                    sb.append("  at $el\n")
+                            // ১. আটকানোর আগের ১০ সেকেন্ডে main thread কোথায় ছিল
+                            sb.append("\n--- main thread-এর সাম্প্রতিক অবস্থান ---\n")
+                            synchronized(recentStacks) {
+                                if (recentStacks.isEmpty()) sb.append("(কোনো স্যাম্পল নেই)\n")
+                                recentStacks.forEachIndexed { i, s ->
+                                    sb.append("[${i}] $s\n")
                                 }
-                            } else {
-                                sb.append("\nmain thread পাওয়া যায়নি!\n")
                             }
-                            // তারপর RUNNABLE/BLOCKED thread (অলস WAITING বাদ)
-                            for ((t, stack) in all) {
-                                if (t.name == "main") continue
-                                if (t.name.contains("watchdog", ignoreCase = true)) continue
-                                if (t.state == Thread.State.WAITING ||
-                                    t.state == Thread.State.TIMED_WAITING
-                                ) continue
-                                sb.append("\n\"${t.name}\" state=${t.state}\n")
-                                for (el in stack.take(20)) sb.append("  at $el\n")
+                            // ২. main thread-এর সরাসরি dump
+                            try {
+                                val st = mainThread.stackTrace
+                                sb.append("\n\"main\" সরাসরি: state=${mainThread.state}, frames=${st.size}\n")
+                                for (el in st.take(60)) sb.append("  at $el\n")
+                            } catch (e: Exception) {
+                                sb.append("\nmain সরাসরি dump ব্যর্থ: $e\n")
+                            }
+                            // ৩. সব thread-এর নাম ও অবস্থা
+                            sb.append("\n--- সব thread ---\n")
+                            try {
+                                for (t in Thread.getAllStackTraces().keys) {
+                                    sb.append("${t.name} : ${t.state}\n")
+                                }
+                            } catch (e: Exception) {
+                                sb.append("তালিকা ব্যর্থ: $e\n")
                             }
                             File(cacheDir, CRASH_REPORT_FILE)
                                 .writeText(sb.toString().take(8000))
