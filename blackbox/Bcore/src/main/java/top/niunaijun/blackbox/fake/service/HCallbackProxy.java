@@ -166,7 +166,8 @@ public class HCallbackProxy implements IInjectHook, Handler.Callback {
             if (!BActivityThread.currentActivityThread().isInit()) {
                 BActivityThread.currentActivityThread().bindApplication(activityInfo.packageName,
                         activityInfo.processName);
-                return true;
+                // bind শেষ, এখন fall through করে activity launch করো
+                // (আগে return true করে launch মেসেজ গিলে ফেলা হতো)
             }
 
             int taskId = BRIActivityManager.get(BRActivityManagerNative.get().getDefault()).getTaskForActivity(token, false);
