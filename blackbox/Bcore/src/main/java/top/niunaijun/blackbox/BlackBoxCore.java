@@ -1666,9 +1666,15 @@ public class BlackBoxCore extends ClientConfiguration {
         }
 
         try {
-            NativeCore.disableResourceLoading();
-        } catch (Exception e) {
-            Slog.w(TAG, "Failed to call native resource disabling: " + e.getMessage());
+            // disableResourceLoading native কলও আটকে যেতে পারে — timeout সুরক্ষা
+            java.util.concurrent.FutureTask<Boolean> task2 =
+                    new java.util.concurrent.FutureTask<>(NativeCore::disableResourceLoading);
+            Thread t2 = new Thread(task2, "ResourceLoadingDisabler");
+            t2.setDaemon(true);
+            t2.start();
+            task2.get(4, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Throwable e) {
+            Slog.w(TAG, "disableResourceLoading timed out or failed: " + e.getMessage());
         }
         
         
