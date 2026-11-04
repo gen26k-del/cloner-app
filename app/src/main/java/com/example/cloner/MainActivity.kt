@@ -4,6 +4,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
+import android.graphics.drawable.Icon
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -29,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
@@ -64,6 +68,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -130,13 +135,51 @@ private fun saveClones(ctx: Context, clones: Set<String>) {
 }
 
 class MainActivity : ComponentActivity() {
+
+    companion object {
+        /** হোম-স্ক্রিন শর্টকাট থেকে এলে এই প্যাকেজটা সরাসরি চালু হবে */
+        var launchPkg: String? = null
+        const val ACTION_LAUNCH_CLONE = "com.example.cloner.LAUNCH_CLONE"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleShortcutIntent(intent)
         setContent {
             ClonerTheme {
                 ClonerAppScreen()
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleShortcutIntent(intent)
+    }
+
+    private fun handleShortcutIntent(intent: Intent?) {
+        if (intent?.action == ACTION_LAUNCH_CLONE) {
+            intent.getStringExtra("clone_pkg")?.let { launchPkg = it }
+        }
+    }
+
+    /** ক্লোন করা অ্যাপের হোম-স্ক্রিন শর্টকাট পিন করে */
+    fun pinCloneShortcut(app: AppInfo) {
+        val sm = getSystemService(ShortcutManager::class.java)
+        if (sm == null || !sm.isRequestPinShortcutSupported) {
+            Toast.makeText(this, "এই ফোনে শর্টকাট সাপোর্ট করে না", Toast.LENGTH_LONG).show()
+            return
+        }
+        val intent = Intent(this, MainActivity::class.java).apply {
+            action = ACTION_LAUNCH_CLONE
+            putExtra("clone_pkg", app.pkg)
+        }
+        val info = ShortcutInfo.Builder(this, "clone_${app.pkg}")
+            .setShortLabel(app.label)
+            .setIcon(Icon.createWithBitmap(app.icon.asAndroidBitmap()))
+            .setIntent(intent)
+            .build()
+        sm.requestPinShortcut(info, null)
     }
 }
 
@@ -173,6 +216,12 @@ fun ClonerAppScreen() {
         clones.addAll((saved + engineClones).distinct())
         apps.addAll(loaded)
         loading = false
+        // হোম-স্ক্রিন শর্টকাট থেকে এলে সরাসরি চালু করো
+        val lp = MainActivity.launchPkg
+        if (lp != null) {
+            MainActivity.launchPkg = null
+            apps.find { it.pkg == lp }?.let { doLaunch(it) }
+        }
     }
 
     fun persist() = saveClones(ctx, clones.toSet())
@@ -360,7 +409,11 @@ fun ClonerAppScreen() {
                                 app = app,
                                 busy = busyPkg == app.pkg,
                                 onLaunch = { doLaunch(app) },
-                                onDelete = { doDelete(app) }
+                                onDelete = { doDelete(app) },
+                                onShortcut = {
+                                    (ctx as? MainActivity)?.pinCloneShortcut(app)
+                                        ?: toast("শর্টকাট যোগ করা যায়নি")
+                                }
                             )
                         }
                     }
@@ -471,7 +524,8 @@ fun CloneRow(
     app: AppInfo,
     busy: Boolean,
     onLaunch: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onShortcut: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
@@ -506,6 +560,9 @@ fun CloneRow(
                     Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("চালু", fontSize = 13.sp)
+                }
+                IconButton(onClick = onShortcut) {
+                    Icon(Icons.Filled.Home, contentDescription = "হোম স্ক্রিনে যোগ করুন", tint = BrandBlue)
                 }
                 IconButton(onClick = onDelete) {
                     Icon(Icons.Filled.Delete, contentDescription = "মুছুন", tint = Color(0xFFB3261E))
