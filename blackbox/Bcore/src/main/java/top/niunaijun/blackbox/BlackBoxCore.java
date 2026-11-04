@@ -1703,10 +1703,12 @@ public class BlackBoxCore extends ClientConfiguration {
         try {
             String proc = "?";
             try {
-                proc = new java.io.File("/proc/self/cmdline").exists()
-                        ? new String(java.nio.file.Files.readAllBytes(
-                                new java.io.File("/proc/self/cmdline").toPath()))
-                                .replace("\u0000", " ").trim() : "?";
+                java.io.File cmdline = new java.io.File("/proc/self/cmdline");
+                if (cmdline.exists()) {
+                    byte[] bytes = java.nio.file.Files.readAllBytes(cmdline.toPath());
+                    proc = new String(bytes).replace("\u0000", " ").trim();
+                    if (proc.isEmpty()) proc = "?";
+                }
             } catch (Throwable ignored) { }
             java.io.File cacheDir = context != null ? context.getCacheDir()
                     : new java.io.File("/data/data/com.example.cloner/cache");
@@ -1715,6 +1717,10 @@ public class BlackBoxCore extends ClientConfiguration {
             w.write(new java.util.Date() + " [" + proc + "] " + marker + "\n");
             w.close();
         } catch (Throwable ignored) { }
+    }
+
+    public static void traceInitPublic(Context context, String marker) {
+        traceInit(context, marker);
     }
 
     public static volatile boolean nativeCoreReady = false;
