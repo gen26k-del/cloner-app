@@ -69,9 +69,9 @@ class ClonerApp : Application() {
                                 }
                             }
                         } catch (_: Exception) { }
-                        Thread.sleep(1000)
+                        Thread.sleep(3000)
                         val blockedFor = SystemClock.uptimeMillis() - state[0]
-                        if (blockedFor > 6000) {
+                        if (blockedFor > 8000) {
                             val sb = StringBuilder("ANR ধরা পড়েছে: ${Date()} [$procName]\n")
                             sb.append("\n--- main thread-এর সাম্প্রতিক অবস্থান (watchdog স্যাম্পল) ---\n")
                             synchronized(recentStacks) {
