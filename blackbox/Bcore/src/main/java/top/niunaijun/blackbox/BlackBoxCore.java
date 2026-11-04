@@ -967,8 +967,9 @@ public class BlackBoxCore extends ClientConfiguration {
     }
 
     public void doCreate() {
-        
+        traceInit(getContext(), "doCreate start");
         installSystemHooks();
+        traceInit(getContext(), "doCreate after installSystemHooks");
         
         
         long startTime = System.currentTimeMillis();
@@ -977,6 +978,7 @@ public class BlackBoxCore extends ClientConfiguration {
         try {
             
             ensureBlackProcessInitialized();
+            traceInit(getContext(), "doCreate after ensureBlackProcessInitialized");
             
             
             if (System.currentTimeMillis() - startTime > maxInitTime) {
@@ -984,6 +986,7 @@ public class BlackBoxCore extends ClientConfiguration {
             }
             
             ensureProperInitialization();
+            traceInit(getContext(), "doCreate after ensureProperInitialization");
             
             
             if (isBlackProcess()) {
@@ -1706,7 +1709,7 @@ public class BlackBoxCore extends ClientConfiguration {
         } catch (Throwable ignored) { }
     }
 
-    private static boolean runNativeWithTimeout(String methodName, long timeoutMs) {
+    public static boolean runNativeWithTimeout(String methodName, long timeoutMs) {
         java.util.concurrent.FutureTask<Boolean> task =
                 new java.util.concurrent.FutureTask<>(() -> {
                     try {
