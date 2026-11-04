@@ -831,9 +831,11 @@ public class BlackBoxCore extends ClientConfiguration {
 
     public void doAttachBaseContext(Context context,
                                    ClientConfiguration clientConfiguration) {
+        traceInit(context, "doAttachBaseContext start");
         try {
-            
+            traceInit(context, "before setEssentialProperties");
             setEssentialProperties(context, clientConfiguration);
+            traceInit(context, "after setEssentialProperties");
             
             
             try {
@@ -851,11 +853,13 @@ public class BlackBoxCore extends ClientConfiguration {
 
         sContext = context;
         mClientConfiguration = clientConfiguration;
-        
+        traceInit(context, "before installSystemHooks");
         
         installSystemHooks();
+        traceInit(context, "after installSystemHooks");
         
         initNotificationManager();
+        traceInit(context, "after initNotificationManager");
 
         String processName = getProcessName(getContext());
         if (processName.equals(BlackBoxCore.getHostPkg())) {
@@ -1683,6 +1687,25 @@ public class BlackBoxCore extends ClientConfiguration {
      * Main thread কখনো NativeCore ক্লাস load করে না — সব reflection ভেতরে,
      * যাতে class-init / dlopen আটকে গেলেও main thread এগিয়ে যেতে পারে।
      */
+    /**
+     * Init-এর অগ্রগতি ফাইলে লিখে রাখে — hang হলে ঠিক কোথায় আটকেছে বোঝা যায়।
+     */
+    private static void traceInit(Context context, String marker) {
+        try {
+            String proc = "?";
+            try {
+                proc = new java.io.File("/proc/self/cmdline").exists()
+                        ? new String(java.nio.file.Files.readAllBytes(
+                                new java.io.File("/proc/self/cmdline").toPath()))
+                                .replace("\u0000", " ").trim() : "?";
+            } catch (Throwable ignored) { }
+            java.io.File f = new java.io.File(context.getCacheDir(), "init_trace.txt");
+            java.io.FileWriter w = new java.io.FileWriter(f, true);
+            w.write(new java.util.Date() + " [" + proc + "] " + marker + "\n");
+            w.close();
+        } catch (Throwable ignored) { }
+    }
+
     private static boolean runNativeWithTimeout(String methodName, long timeoutMs) {
         java.util.concurrent.FutureTask<Boolean> task =
                 new java.util.concurrent.FutureTask<>(() -> {
