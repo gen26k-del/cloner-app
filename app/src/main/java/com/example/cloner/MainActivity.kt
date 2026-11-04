@@ -74,18 +74,19 @@ data class AppInfo(val label: String, val pkg: String, val icon: ImageBitmap)
 private const val PREFS = "cloner_prefs"
 private const val KEY_CLONES = "clones"
 
-/** ব্র্যান্ড রঙ — লোগোর সাথে মিলিয়ে */
-private val BrandIndigo = Color(0xFF4A3FD4)
-private val BrandViolet = Color(0xFF7C4DFF)
-private val BrandDeep = Color(0xFF2A2370)
+/** ব্র্যান্ড রঙ — CloneMe লোগোর সাথে মিলিয়ে */
+private val BrandBlue = Color(0xFF1B9BF5)
+private val BrandCyan = Color(0xFF4FC3F7)
+private val BrandNavy = Color(0xFF0A1A3C)
+private val BrandDeepBlue = Color(0xFF14337A)
 
 private val ClonerLightColors = lightColorScheme(
-    primary = BrandIndigo,
+    primary = BrandBlue,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFE6E3FF),
-    onPrimaryContainer = BrandDeep,
-    secondary = BrandViolet,
-    background = Color(0xFFF6F5FD),
+    primaryContainer = Color(0xFFDDF1FE),
+    onPrimaryContainer = BrandNavy,
+    secondary = BrandCyan,
+    background = Color(0xFFF4F8FD),
     surface = Color.White,
     onSurface = Color(0xFF1B1B22)
 )
@@ -251,11 +252,11 @@ fun ClonerAppScreen() {
             TabRow(
                 selectedTabIndex = tab,
                 containerColor = MaterialTheme.colorScheme.background,
-                contentColor = BrandIndigo,
+                contentColor = BrandBlue,
                 indicator = { tabPositions ->
                     TabRowDefaults.SecondaryIndicator(
                         Modifier.tabIndicatorOffset(tabPositions[tab]),
-                        color = BrandIndigo
+                        color = BrandBlue
                     )
                 }
             ) {
@@ -274,7 +275,7 @@ fun ClonerAppScreen() {
             if (loading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = BrandIndigo)
+                        CircularProgressIndicator(color = BrandBlue)
                         Text("অ্যাপের তালিকা লোড হচ্ছে…", modifier = Modifier.padding(top = 12.dp))
                     }
                 }
@@ -324,7 +325,7 @@ fun HeaderCard(cloneCount: Int) {
         modifier = Modifier
             .fillMaxWidth()
             .background(
-                Brush.linearGradient(listOf(BrandDeep, BrandIndigo, BrandViolet))
+                Brush.linearGradient(listOf(BrandNavy, BrandDeepBlue))
             )
             .padding(20.dp)
     ) {
@@ -339,9 +340,9 @@ fun HeaderCard(cloneCount: Int) {
             Spacer(Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "অ্যাপ ক্লোনার",
+                    "CloneMe",
                     color = Color.White,
-                    fontSize = 22.sp,
+                    fontSize = 24.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
@@ -401,13 +402,13 @@ fun AppRow(
                 fontSize = 15.sp
             )
             if (busy) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 3.dp, color = BrandIndigo)
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 3.dp, color = BrandBlue)
             } else {
                 Button(
                     onClick = onClick,
                     enabled = buttonEnabled,
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = BrandIndigo)
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandBlue)
                 ) { Text(buttonLabel, fontSize = 13.sp) }
             }
         }
@@ -444,12 +445,12 @@ fun CloneRow(
                 fontSize = 15.sp
             )
             if (busy) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 3.dp, color = BrandIndigo)
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 3.dp, color = BrandBlue)
             } else {
                 Button(
                     onClick = onLaunch,
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = BrandViolet)
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandCyan)
                 ) {
                     Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
