@@ -6,6 +6,12 @@ import android.util.Log
 import top.niunaijun.blackbox.BlackBoxCore
 import top.niunaijun.blackbox.app.configuration.ClientConfiguration
 import java.io.File
+import java.io.PrintWriter
+import java.io.StringWriter
+import java.util.Date
+
+/** শেষ crash-এর রিপোর্ট ফাইলের নাম (cache dir-এ) */
+const val CRASH_REPORT_FILE = "last_crash.txt"
 
 /**
  * অ্যাপের Application ক্লাস — BlackBox ভার্চুয়াল ইঞ্জিনের দুই ধাপের init এখানে হয়।
@@ -28,6 +34,19 @@ class ClonerApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Crash রিপোর্টার: virtual অ্যাপ crash করলে stack trace ফাইলে রেখে দেয়,
+        // যাতে UI থেকে দেখে কারণ বোঝা যায়।
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                val sw = StringWriter()
+                throwable.printStackTrace(PrintWriter(sw))
+                File(cacheDir, CRASH_REPORT_FILE).writeText(
+                    "${Date()}\nThread: ${thread.name}\n${sw}"
+                )
+            } catch (_: Exception) { }
+            previousHandler?.uncaughtException(thread, throwable)
+        }
         try {
             BlackBoxCore.get().doCreate()
             Engine.current = BlackBoxCloneEngine()
