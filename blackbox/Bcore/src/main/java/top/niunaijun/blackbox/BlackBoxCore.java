@@ -1683,7 +1683,7 @@ public class BlackBoxCore extends ClientConfiguration {
      * Main thread কখনো NativeCore ক্লাস load করে না — সব reflection ভেতরে,
      * যাতে class-init / dlopen আটকে গেলেও main thread এগিয়ে যেতে পারে।
      */
-    private boolean runNativeWithTimeout(String methodName, long timeoutMs) {
+    private static boolean runNativeWithTimeout(String methodName, long timeoutMs) {
         java.util.concurrent.FutureTask<Boolean> task =
                 new java.util.concurrent.FutureTask<>(() -> {
                     try {
