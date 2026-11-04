@@ -2,6 +2,9 @@ package com.example.cloner
 
 import android.app.Application
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import top.niunaijun.blackbox.BlackBoxCore
 import top.niunaijun.blackbox.app.configuration.ClientConfiguration
@@ -10,7 +13,7 @@ import java.io.PrintWriter
 import java.io.StringWriter
 import java.util.Date
 
-/** শেষ crash-এর রিপোর্ট ফাইলের নাম (cache dir-এ) */
+/** শেষ crash/ANR-এর রিপোর্ট ফাইলের নাম (cache dir-এ) */
 const val CRASH_REPORT_FILE = "last_crash.txt"
 
 /**
@@ -19,8 +22,55 @@ const val CRASH_REPORT_FILE = "last_crash.txt"
  */
 class ClonerApp : Application() {
 
+    /**
+     * ANR watchdog: main thread 8 সেকেন্ডের বেশি সাড়া না দিলে
+     * সব thread-এর stack trace ফাইলে লিখে রাখে।
+     */
+    private fun startAnrWatchdog() {
+        try {
+            val mainHandler = Handler(Looper.getMainLooper())
+            val state = longArrayOf(SystemClock.uptimeMillis())
+            val ticker = object : Runnable {
+                override fun run() {
+                    state[0] = SystemClock.uptimeMillis()
+                    mainHandler.postDelayed(this, 2000)
+                }
+            }
+            mainHandler.post(ticker)
+            Thread({
+                while (true) {
+                    try {
+                        Thread.sleep(3000)
+                        val blockedFor = SystemClock.uptimeMillis() - state[0]
+                        if (blockedFor > 8000) {
+                            val sb = StringBuilder("ANR ধরা পড়েছে: ${Date()}\n")
+                            sb.append("Main thread সাড়া দেয়নি: ${blockedFor}ms\n")
+                            for ((t, stack) in Thread.getAllStackTraces()) {
+                                if (!t.name.contains("main", ignoreCase = true) &&
+                                    !t.name.contains("watchdog", ignoreCase = true)
+                                ) continue
+                                sb.append("\n\"${t.name}\" state=${t.state}\n")
+                                for (el in stack.take(35)) sb.append("  at $el\n")
+                            }
+                            File(cacheDir, CRASH_REPORT_FILE)
+                                .writeText(sb.toString().take(8000))
+                            // আবার লেখা এড়াতে টাইমার রিসেট
+                            state[0] = SystemClock.uptimeMillis()
+                        }
+                    } catch (_: Exception) { }
+                }
+            }, "AnrWatchdog").apply { isDaemon = true }.start()
+        } catch (e: Exception) {
+            Log.w("ClonerApp", "watchdog start failed", e)
+        }
+    }
+
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
+        // ANR watchdog: main thread 8 সেকেন্ডের বেশি আটকে থাকলে
+        // সব thread-এর stack ফাইলে লিখে রাখে, যাতে hang-এর কারণ বোঝা যায়।
+        startAnrWatchdog()
+
         try {
             BlackBoxCore.get().doAttachBaseContext(base, object : ClientConfiguration() {
                 override fun getHostPackageName(): String = packageName
