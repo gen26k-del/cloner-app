@@ -1708,7 +1708,9 @@ public class BlackBoxCore extends ClientConfiguration {
                                 new java.io.File("/proc/self/cmdline").toPath()))
                                 .replace("\u0000", " ").trim() : "?";
             } catch (Throwable ignored) { }
-            java.io.File f = new java.io.File(context.getCacheDir(), "init_trace.txt");
+            java.io.File cacheDir = context != null ? context.getCacheDir()
+                    : new java.io.File("/data/data/com.example.cloner/cache");
+            java.io.File f = new java.io.File(cacheDir, "init_trace.txt");
             java.io.FileWriter w = new java.io.FileWriter(f, true);
             w.write(new java.util.Date() + " [" + proc + "] " + marker + "\n");
             w.close();
@@ -1792,6 +1794,7 @@ public class BlackBoxCore extends ClientConfiguration {
         try {
             
             Slog.d(TAG, "Ensuring proper initialization order...");
+            traceInit(sContext, "ensureProperInitialization start");
             
             
             try {
@@ -1799,27 +1802,33 @@ public class BlackBoxCore extends ClientConfiguration {
                 boolean ok = runNativeWithTimeout("init", 8000);
                 Slog.d(TAG, ok ? "NativeCore initialized successfully"
                                : "NativeCore init skipped/timed out, continuing");
+                traceInit(sContext, "ensureProperInitialization after NativeCore.init");
             } catch (Exception e) {
                 Slog.w(TAG, "NativeCore initialization failed: " + e.getMessage());
             }
             
             
             try {
+                traceInit(sContext, "ensureProperInitialization before initBlackManager");
                 ServiceManager.initBlackManager();
                 Slog.d(TAG, "ServiceManager initialized successfully");
+                traceInit(sContext, "ensureProperInitialization after initBlackManager");
             } catch (Exception e) {
                 Slog.w(TAG, "ServiceManager initialization failed: " + e.getMessage());
             }
             
             
             try {
+                traceInit(sContext, "ensureProperInitialization before hookActivityThread");
                 BActivityThread.hookActivityThread();
                 Slog.d(TAG, "BActivityThread hooks initialized successfully");
+                traceInit(sContext, "ensureProperInitialization after hookActivityThread");
             } catch (Exception e) {
                 Slog.w(TAG, "BActivityThread hooks initialization failed: " + e.getMessage());
             }
             
             Slog.d(TAG, "Proper initialization order ensured");
+            traceInit(sContext, "ensureProperInitialization done");
         } catch (Exception e) {
             Slog.e(TAG, "Failed to ensure proper initialization order", e);
         }
