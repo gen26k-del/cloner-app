@@ -1644,19 +1644,9 @@ public class BlackBoxCore extends ClientConfiguration {
             throw new IllegalArgumentException("ClientConfiguration is null!");
         }
 
-        // disableHiddenApi native কল stub প্রসেসে আটকে যেতে পারে — 4s timeout দিয়ে সুরক্ষা।
-        // Timeout হলে Reflection.unseal fallback নেবে (যা এমনিতেই failure case-এ হয়)।
-        boolean hiddenApiDisabled = false;
-        try {
-            java.util.concurrent.FutureTask<Boolean> task =
-                    new java.util.concurrent.FutureTask<>(NativeCore::disableHiddenApi);
-            Thread t = new Thread(task, "HiddenApiDisabler");
-            t.setDaemon(true);
-            t.start();
-            hiddenApiDisabled = task.get(4, java.util.concurrent.TimeUnit.SECONDS);
-        } catch (Throwable e) {
-            Slog.w(TAG, "disableHiddenApi timed out or failed, using fallback: " + e.getMessage());
-        }
+        // Native কল background thread-এ timeout সহ — main thread কখনো NativeCore ক্লাস
+        // touch করে না (reflection ভেতরে), যাতে class-init lock-এ আটকে না যায়।
+        boolean hiddenApiDisabled = runNativeWithTimeout("disableHiddenApi", 8000);
         if (!hiddenApiDisabled) {
             try {
                 Reflection.unseal(context);
@@ -1665,17 +1655,7 @@ public class BlackBoxCore extends ClientConfiguration {
             }
         }
 
-        try {
-            // disableResourceLoading native কলও আটকে যেতে পারে — timeout সুরক্ষা
-            java.util.concurrent.FutureTask<Boolean> task2 =
-                    new java.util.concurrent.FutureTask<>(NativeCore::disableResourceLoading);
-            Thread t2 = new Thread(task2, "ResourceLoadingDisabler");
-            t2.setDaemon(true);
-            t2.start();
-            task2.get(4, java.util.concurrent.TimeUnit.SECONDS);
-        } catch (Throwable e) {
-            Slog.w(TAG, "disableResourceLoading timed out or failed: " + e.getMessage());
-        }
+        runNativeWithTimeout("disableResourceLoading", 8000);
         
         
         try {
@@ -1695,6 +1675,44 @@ public class BlackBoxCore extends ClientConfiguration {
             }
         } catch (Exception e) {
             Slog.w(TAG, "Failed to set essential properties: " + e.getMessage());
+        }
+    }
+
+    /**
+     * NativeCore-এর native মেথড background thread-এ timeout সহ চালায়।
+     * Main thread কখনো NativeCore ক্লাস load করে না — সব reflection ভেতরে,
+     * যাতে class-init / dlopen আটকে গেলেও main thread এগিয়ে যেতে পারে।
+     */
+    private boolean runNativeWithTimeout(String methodName, long timeoutMs) {
+        java.util.concurrent.FutureTask<Boolean> task =
+                new java.util.concurrent.FutureTask<>(() -> {
+                    try {
+                        Class<?> clazz = Class.forName("top.niunaijun.blackbox.core.NativeCore");
+                        java.lang.reflect.Method m;
+                        if ("disableHiddenApi".equals(methodName) ||
+                            "disableResourceLoading".equals(methodName)) {
+                            m = clazz.getDeclaredMethod(methodName);
+                            Object r = m.invoke(null);
+                            return r instanceof Boolean ? (Boolean) r : true;
+                        } else if ("init".equals(methodName)) {
+                            m = clazz.getDeclaredMethod("init", int.class);
+                            m.invoke(null, android.os.Build.VERSION.SDK_INT);
+                            return true;
+                        }
+                        return false;
+                    } catch (Throwable t) {
+                        Slog.w(TAG, methodName + " failed: " + t.getMessage());
+                        return false;
+                    }
+                });
+        Thread t = new Thread(task, "NativeTimeout-" + methodName);
+        t.setDaemon(true);
+        t.start();
+        try {
+            return task.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (Throwable e) {
+            Slog.w(TAG, methodName + " timed out after " + timeoutMs + "ms, continuing without it");
+            return false;
         }
     }
     
@@ -1745,8 +1763,10 @@ public class BlackBoxCore extends ClientConfiguration {
             
             
             try {
-                NativeCore.init(android.os.Build.VERSION.SDK_INT);
-                Slog.d(TAG, "NativeCore initialized successfully");
+                // NativeCore.init() আটকে গেলে পুরো doCreate ব্লক হয় — timeout সুরক্ষা
+                boolean ok = runNativeWithTimeout("init", 8000);
+                Slog.d(TAG, ok ? "NativeCore initialized successfully"
+                               : "NativeCore init skipped/timed out, continuing");
             } catch (Exception e) {
                 Slog.w(TAG, "NativeCore initialization failed: " + e.getMessage());
             }
