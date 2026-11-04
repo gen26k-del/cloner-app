@@ -42,7 +42,7 @@ class ClonerApp : Application() {
                     try {
                         Thread.sleep(3000)
                         val blockedFor = SystemClock.uptimeMillis() - state[0]
-                        if (blockedFor > 8000) {
+                        if (blockedFor > 6000) {
                             val sb = StringBuilder("ANR ধরা পড়েছে: ${Date()}\n")
                             sb.append("Main thread সাড়া দেয়নি: ${blockedFor}ms\n")
                             for ((t, stack) in Thread.getAllStackTraces()) {
@@ -67,7 +67,7 @@ class ClonerApp : Application() {
 
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
-        // ANR watchdog: main thread 8 সেকেন্ডের বেশি আটকে থাকলে
+        // ANR watchdog: main thread 6 সেকেন্ডের বেশি আটকে থাকলে
         // সব thread-এর stack ফাইলে লিখে রাখে, যাতে hang-এর কারণ বোঝা যায়।
         startAnrWatchdog()
 
