@@ -88,7 +88,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                ClonerApp()
+                ClonerAppScreen()
             }
         }
     }
@@ -96,7 +96,7 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ClonerApp() {
+fun ClonerAppScreen() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var tab by remember { mutableIntStateOf(0) }
