@@ -44,13 +44,26 @@ class ClonerApp : Application() {
                         val blockedFor = SystemClock.uptimeMillis() - state[0]
                         if (blockedFor > 6000) {
                             val sb = StringBuilder("ANR ধরা পড়েছে: ${Date()}\n")
-                            sb.append("Main thread সাড়া দেয়নি: ${blockedFor}ms\n")
-                            for ((t, stack) in Thread.getAllStackTraces()) {
-                                if (!t.name.contains("main", ignoreCase = true) &&
-                                    !t.name.contains("watchdog", ignoreCase = true)
+                            val all = Thread.getAllStackTraces()
+                            // সবার আগে MAIN thread — এটাই আসল আটকে থাকা জায়গা
+                            val main = all.keys.find { it.name == "main" }
+                            if (main != null) {
+                                sb.append("\n\"main\" state=${main.state}\n")
+                                for (el in (all[main] ?: emptyArray()).take(60)) {
+                                    sb.append("  at $el\n")
+                                }
+                            } else {
+                                sb.append("\nmain thread পাওয়া যায়নি!\n")
+                            }
+                            // তারপর RUNNABLE/BLOCKED thread (অলস WAITING বাদ)
+                            for ((t, stack) in all) {
+                                if (t.name == "main") continue
+                                if (t.name.contains("watchdog", ignoreCase = true)) continue
+                                if (t.state == Thread.State.WAITING ||
+                                    t.state == Thread.State.TIMED_WAITING
                                 ) continue
                                 sb.append("\n\"${t.name}\" state=${t.state}\n")
-                                for (el in stack.take(35)) sb.append("  at $el\n")
+                                for (el in stack.take(20)) sb.append("  at $el\n")
                             }
                             File(cacheDir, CRASH_REPORT_FILE)
                                 .writeText(sb.toString().take(8000))
