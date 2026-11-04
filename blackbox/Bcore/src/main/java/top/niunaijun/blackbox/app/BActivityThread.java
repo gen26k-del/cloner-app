@@ -400,7 +400,9 @@ public class BActivityThread extends IBActivityThread.Stub {
             BRCompatibility.get().setTargetSdkVersion(applicationInfo.targetSdkVersion);
         }
 
-        NativeCore.init(Build.VERSION.SDK_INT);
+        // NativeCore.init() সরাসরি কলে আটকে যেতে পারে — timeout সুরক্ষা
+        boolean nativeOk = top.niunaijun.blackbox.BlackBoxCore.runNativeWithTimeout("init", 8000);
+        top.niunaijun.blackbox.utils.Slog.d("BActivityThread", "NativeCore.init done: " + nativeOk);
         assert packageContext != null;
         IOCore.get().enableRedirect(packageContext);
 
