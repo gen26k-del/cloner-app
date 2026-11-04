@@ -7,19 +7,29 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -29,8 +39,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -42,10 +54,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -55,6 +73,27 @@ data class AppInfo(val label: String, val pkg: String, val icon: ImageBitmap)
 
 private const val PREFS = "cloner_prefs"
 private const val KEY_CLONES = "clones"
+
+/** ব্র্যান্ড রঙ — লোগোর সাথে মিলিয়ে */
+private val BrandIndigo = Color(0xFF4A3FD4)
+private val BrandViolet = Color(0xFF7C4DFF)
+private val BrandDeep = Color(0xFF2A2370)
+
+private val ClonerLightColors = lightColorScheme(
+    primary = BrandIndigo,
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFE6E3FF),
+    onPrimaryContainer = BrandDeep,
+    secondary = BrandViolet,
+    background = Color(0xFFF6F5FD),
+    surface = Color.White,
+    onSurface = Color(0xFF1B1B22)
+)
+
+@Composable
+fun ClonerTheme(content: @Composable () -> Unit) {
+    MaterialTheme(colorScheme = ClonerLightColors, content = content)
+}
 
 fun loadApps(ctx: Context): List<AppInfo> {
     val pm = ctx.packageManager
@@ -87,7 +126,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme {
+            ClonerTheme {
                 ClonerAppScreen()
             }
         }
@@ -180,30 +219,62 @@ fun ClonerAppScreen() {
         }
     }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("অ্যাপ ক্লোনার") }) }) { pad ->
+    Scaffold(containerColor = MaterialTheme.colorScheme.background) { pad ->
         Column(Modifier.padding(pad)) {
+            // ব্র্যান্ড হেডার
+            HeaderCard(cloneCount = clones.size)
+
             if (!Engine.current.isReady()) {
-                Text(
-                    "সতর্কতা: ভার্চুয়ালাইজেশন ইঞ্জিন যুক্ত নেই, তাই ক্লোন কাজ করবে না।",
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(12.dp)
-                )
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                ) {
+                    Text(
+                        "সতর্কতা: ভার্চুয়ালাইজেশন ইঞ্জিন যুক্ত নেই, তাই ক্লোন কাজ করবে না।",
+                        modifier = Modifier.padding(12.dp),
+                        fontSize = 13.sp
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
             }
+
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
                 label = { Text("অ্যাপ খুঁজুন") },
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                singleLine = true
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp)
             )
-            TabRow(selectedTabIndex = tab) {
-                Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("সব অ্যাপ") })
-                Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("ক্লোন (${clones.size})") })
+
+            TabRow(
+                selectedTabIndex = tab,
+                containerColor = MaterialTheme.colorScheme.background,
+                contentColor = BrandIndigo,
+                indicator = { tabPositions ->
+                    TabRowDefaults.SecondaryIndicator(
+                        Modifier.tabIndicatorOffset(tabPositions[tab]),
+                        color = BrandIndigo
+                    )
+                }
+            ) {
+                Tab(
+                    selected = tab == 0,
+                    onClick = { tab = 0 },
+                    text = { Text("সব অ্যাপ", fontWeight = if (tab == 0) FontWeight.Bold else FontWeight.Normal) }
+                )
+                Tab(
+                    selected = tab == 1,
+                    onClick = { tab = 1 },
+                    text = { Text("আমার ক্লোন (${clones.size})", fontWeight = if (tab == 1) FontWeight.Bold else FontWeight.Normal) }
+                )
             }
+
             if (loading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator()
+                        CircularProgressIndicator(color = BrandIndigo)
                         Text("অ্যাপের তালিকা লোড হচ্ছে…", modifier = Modifier.padding(top = 12.dp))
                     }
                 }
@@ -212,33 +283,90 @@ fun ClonerAppScreen() {
                     query.isBlank() || it.label.contains(query, ignoreCase = true) ||
                         it.pkg.contains(query, ignoreCase = true)
                 }
-                LazyColumn {
-                    items(filtered, key = { it.pkg }) { app ->
-                        AppRow(
-                            app = app,
-                            buttonLabel = if (app.pkg in clones) "ক্লোন হয়েছে ✓" else "ক্লোন",
-                            busy = busyPkg == app.pkg,
-                            buttonEnabled = app.pkg !in clones && busyPkg == null
-                        ) { doClone(app) }
+                if (filtered.isEmpty()) {
+                    EmptyHint("কোনো অ্যাপ পাওয়া যায়নি")
+                } else {
+                    LazyColumn(modifier = Modifier.padding(vertical = 4.dp)) {
+                        items(filtered, key = { it.pkg }) { app ->
+                            AppRow(
+                                app = app,
+                                buttonLabel = if (app.pkg in clones) "ক্লোন হয়েছে ✓" else "ক্লোন",
+                                busy = busyPkg == app.pkg,
+                                buttonEnabled = app.pkg !in clones && busyPkg == null
+                            ) { doClone(app) }
+                        }
                     }
                 }
             } else {
                 val cloneApps = apps.filter { it.pkg in clones }
                 if (cloneApps.isEmpty()) {
-                    Text("এখনো কোনো ক্লোন নেই।", modifier = Modifier.padding(16.dp))
-                }
-                LazyColumn {
-                    items(cloneApps, key = { it.pkg }) { app ->
-                        CloneRow(
-                            app = app,
-                            busy = busyPkg == app.pkg,
-                            onLaunch = { doLaunch(app) },
-                            onDelete = { doDelete(app) }
-                        )
+                    EmptyHint("এখনো কোনো ক্লোন নেই।\n\"সব অ্যাপ\" থেকে ক্লোন করুন।")
+                } else {
+                    LazyColumn(modifier = Modifier.padding(vertical = 4.dp)) {
+                        items(cloneApps, key = { it.pkg }) { app ->
+                            CloneRow(
+                                app = app,
+                                busy = busyPkg == app.pkg,
+                                onLaunch = { doLaunch(app) },
+                                onDelete = { doDelete(app) }
+                            )
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+fun HeaderCard(cloneCount: Int) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.linearGradient(listOf(BrandDeep, BrandIndigo, BrandViolet))
+            )
+            .padding(20.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Image(
+                painter = painterResource(id = R.drawable.app_logo),
+                contentDescription = "লোগো",
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(16.dp))
+            )
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "অ্যাপ ক্লোনার",
+                    color = Color.White,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "এক ফোনে দুটো অ্যাকাউন্ট",
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 13.sp
+                )
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "$cloneCount",
+                    color = Color.White,
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text("ক্লোন", color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+@Composable
+fun EmptyHint(text: String) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text(text, modifier = Modifier.padding(24.dp), color = Color.Gray)
     }
 }
 
@@ -250,17 +378,38 @@ fun AppRow(
     buttonEnabled: Boolean,
     onClick: () -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Image(bitmap = app.icon, contentDescription = null, modifier = Modifier.size(44.dp))
-        Text(app.label, modifier = Modifier.weight(1f))
-        if (busy) {
-            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 3.dp)
-        } else {
-            Button(onClick = onClick, enabled = buttonEnabled) { Text(buttonLabel) }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Image(
+                bitmap = app.icon,
+                contentDescription = null,
+                modifier = Modifier.size(46.dp).clip(RoundedCornerShape(12.dp))
+            )
+            Text(
+                app.label,
+                modifier = Modifier.weight(1f),
+                fontWeight = FontWeight.Medium,
+                fontSize = 15.sp
+            )
+            if (busy) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 3.dp, color = BrandIndigo)
+            } else {
+                Button(
+                    onClick = onClick,
+                    enabled = buttonEnabled,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandIndigo)
+                ) { Text(buttonLabel, fontSize = 13.sp) }
+            }
         }
     }
 }
@@ -272,19 +421,43 @@ fun CloneRow(
     onLaunch: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Image(bitmap = app.icon, contentDescription = null, modifier = Modifier.size(44.dp))
-        Text(app.label, modifier = Modifier.weight(1f))
-        if (busy) {
-            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 3.dp)
-        } else {
-            Button(onClick = onLaunch) { Text("চালু করুন") }
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Filled.Delete, contentDescription = "মুছুন")
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Image(
+                bitmap = app.icon,
+                contentDescription = null,
+                modifier = Modifier.size(46.dp).clip(RoundedCornerShape(12.dp))
+            )
+            Text(
+                app.label,
+                modifier = Modifier.weight(1f),
+                fontWeight = FontWeight.Medium,
+                fontSize = 15.sp
+            )
+            if (busy) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 3.dp, color = BrandIndigo)
+            } else {
+                Button(
+                    onClick = onLaunch,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandViolet)
+                ) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("চালু", fontSize = 13.sp)
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Filled.Delete, contentDescription = "মুছুন", tint = Color(0xFFB3261E))
+                }
             }
         }
     }
