@@ -990,22 +990,28 @@ public class BlackBoxCore extends ClientConfiguration {
             
             
             if (isBlackProcess()) {
+                traceInit(getContext(), "doCreate before ContentProviderDelegate");
                 ContentProviderDelegate.init();
+                traceInit(getContext(), "doCreate after ContentProviderDelegate");
             }
             if (!isServerProcess()) {
                 
                 try {
+                    traceInit(getContext(), "doCreate before initBlackManager");
                     ServiceManager.initBlackManager();
+                    traceInit(getContext(), "doCreate after initBlackManager");
                 } catch (Exception e) {
                     Slog.w(TAG, "Failed to initialize ServiceManager, continuing with fallback: " + e.getMessage());
                 }
                 
                 
                 getBPackageManager().resetTransactionThrottler();
+                traceInit(getContext(), "doCreate after resetTransactionThrottler");
             }
             
             long totalTime = System.currentTimeMillis() - startTime;
             Slog.d(TAG, "BlackBox initialization completed in " + totalTime + "ms");
+            traceInit(getContext(), "doCreate completed");
             
         } catch (Exception e) {
             long totalTime = System.currentTimeMillis() - startTime;
