@@ -283,6 +283,25 @@ fun ClonerAppScreen() {
         }
     }
 
+    fun doUninstallGms() {
+        gmsState = "installing"
+        scope.launch(Dispatchers.IO) {
+            val ok = runCatching { BlackBoxCore.get().uninstallGms(0) }
+                .getOrDefault(false)
+            // পুনরায় অবস্থা দেখো
+            val nowInstalled = runCatching {
+                BlackBoxCore.get().isInstallGms(0)
+            }.getOrDefault(true)
+            withContext(Dispatchers.Main) {
+                gmsState = if (!nowInstalled) "ready" else "installed"
+                toast(
+                    if (!nowInstalled) "Google সার্ভিস সরিয়ে ফেলা হয়েছে"
+                    else "সরানো ব্যর্থ — আবার চেষ্টা করো"
+                )
+            }
+        }
+    }
+
     fun doDelete(app: AppInfo) {
         if (busyPkg != null) return
         busyPkg = app.pkg
@@ -375,6 +394,35 @@ fun ClonerAppScreen() {
             }
 
             // Google Play সার্ভিস কার্ড — ইন্টারনেট অ্যাপের জন্য
+            if (gmsState == "installed") {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                    ),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "Google Play সার্ভিস সক্রিয় ✓",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            Text(
+                                "কোনো অ্যাপ আটকে গেলে এটা সরিয়ে আবার চেষ্টা করে দেখতে পারো",
+                                fontSize = 12.sp
+                            )
+                        }
+                        TextButton(onClick = { doUninstallGms() }) {
+                            Text("সরিয়ে ফেলুন")
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
             if (gmsState == "ready" || gmsState == "installing" || gmsState == "failed") {
                 Card(
                     colors = CardDefaults.cardColors(
