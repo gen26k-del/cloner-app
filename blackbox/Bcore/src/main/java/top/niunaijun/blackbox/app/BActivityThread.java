@@ -66,6 +66,7 @@ import top.niunaijun.blackbox.core.CrashHandler;
 import top.niunaijun.blackbox.core.IBActivityThread;
 import top.niunaijun.blackbox.core.IOCore;
 import top.niunaijun.blackbox.core.NativeCore;
+import top.niunaijun.blackbox.core.env.BEnvironment;
 import top.niunaijun.blackbox.core.env.VirtualRuntime;
 import top.niunaijun.blackbox.core.system.user.BUserHandle;
 import top.niunaijun.blackbox.entity.AppConfig;
@@ -636,7 +637,9 @@ public class BActivityThread extends IBActivityThread.Stub {
             
             String sourceDir = appInfo.sourceDir;
             if (sourceDir != null) {
-                return new dalvik.system.PathClassLoader(sourceDir, ClassLoader.getSystemClassLoader());
+                
+                String libDir = BEnvironment.getAppLibDir(appInfo.packageName).getAbsolutePath();
+                return new dalvik.system.PathClassLoader(sourceDir, libDir, ClassLoader.getSystemClassLoader());
             }
             
             
