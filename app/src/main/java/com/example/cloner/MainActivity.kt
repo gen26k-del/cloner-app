@@ -1,5 +1,7 @@
 package com.example.cloner
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
@@ -16,12 +18,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
@@ -42,6 +47,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -143,6 +149,7 @@ fun ClonerAppScreen() {
     var query by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
     var busyPkg by remember { mutableStateOf<String?>(null) }
+    var crashReport by remember { mutableStateOf<String?>(null) }
     val apps = remember { mutableStateListOf<AppInfo>() }
     val clones = remember { mutableStateListOf<String>() }
 
@@ -155,6 +162,13 @@ fun ClonerAppScreen() {
         // ইঞ্জিনের নিজস্ব লিস্টের সাথে সংরক্ষিত লিস্ট মিলিয়ে নাও
         val engineClones = withContext(Dispatchers.IO) {
             runCatching { Engine.current.listClones() }.getOrDefault(emptyList())
+        }
+        // শেষ crash-এর রিপোর্ট থাকলে পড়ে নাও
+        val crashFile = java.io.File(ctx.cacheDir, CRASH_REPORT_FILE)
+        if (crashFile.exists()) {
+            crashReport = withContext(Dispatchers.IO) {
+                runCatching { crashFile.readText().take(4000) }.getOrNull()
+            }
         }
         clones.addAll((saved + engineClones).distinct())
         apps.addAll(loaded)
@@ -224,6 +238,43 @@ fun ClonerAppScreen() {
         Column(Modifier.padding(pad)) {
             // ব্র্যান্ড হেডার
             HeaderCard(cloneCount = clones.size)
+
+            // Crash রিপোর্ট থাকলে দেখাও
+            crashReport?.let { report ->
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(
+                            "⚠️ শেষবার অ্যাপ crash করেছিল",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            report,
+                            fontSize = 11.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 180.dp)
+                                .verticalScroll(rememberScrollState())
+                        )
+                        Row {
+                            TextButton(onClick = {
+                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("crash", report))
+                                toast("রিপোর্ট কপি হয়েছে")
+                            }) { Text("কপি করুন") }
+                            TextButton(onClick = {
+                                java.io.File(ctx.cacheDir, CRASH_REPORT_FILE).delete()
+                                crashReport = null
+                            }) { Text("মুছে ফেলুন") }
+                        }
+                    }
+                }
+            }
 
             if (!Engine.current.isReady()) {
                 Card(
