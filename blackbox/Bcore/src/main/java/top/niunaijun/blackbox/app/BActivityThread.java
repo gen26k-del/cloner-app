@@ -315,6 +315,7 @@ public class BActivityThread extends IBActivityThread.Stub {
     }
 
     public void bindApplication(final String packageName, final String processName) {
+        top.niunaijun.blackbox.utils.Slog.d(TAG, "bindApplication: " + packageName + "/" + processName);
         if (Looper.myLooper() != Looper.getMainLooper()) {
             final ConditionVariable conditionVariable = new ConditionVariable();
             BlackBoxCore.get().getHandler().post(() -> {
@@ -360,11 +361,21 @@ public class BActivityThread extends IBActivityThread.Stub {
         if (isInit())
             return;
         try {
+            top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                "BActivityThread.handleBindApplication start: " + packageName);
+        } catch (Throwable ignored) { }
+        try {
             CrashHandler.create();
         } catch (Throwable ignored) {
         }
 
         PackageInfo packageInfo = BlackBoxCore.getBPackageManager().getPackageInfo(packageName, PackageManager.GET_PROVIDERS, BActivityThread.getUserId());
+        try {
+            top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                "BActivityThread.handleBindApplication got packageInfo");
+        } catch (Throwable ignored) { }
         ApplicationInfo applicationInfo = packageInfo.applicationInfo;
         if (packageInfo.providers == null) {
             packageInfo.providers = new ProviderInfo[]{};
@@ -482,6 +493,11 @@ public class BActivityThread extends IBActivityThread.Stub {
             onAfterApplicationOnCreate(packageName, processName, application);
 
             HookManager.get().checkEnv(HCallbackProxy.class);
+            try {
+                top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                    top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                    "BActivityThread.handleBindApplication done: " + packageName);
+            } catch (Throwable ignored) { }
         } catch (Exception e) {
             Slog.e(TAG, "Critical error in handleBindApplication", e);
             throw new RuntimeException("Unable to makeApplication", e);
