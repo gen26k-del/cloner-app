@@ -43,7 +43,7 @@ class BlackBoxCloneEngine : CloneEngine {
     }
 
     /**
-     * base + সব split APK থেকে lib/<abi>/*.so ইঞ্জিনের
+     * base + সব split APK থেকে native lib (.so ফাইল) ইঞ্জিনের
      * অ্যাপ-lib ডিরেক্টরিতে কপি করে। ব্যর্থ হলে চুপচাপ এড়িয়ে যায় —
      * ইনস্টল ইতিমধ্যে সফল হয়েছে।
      */
