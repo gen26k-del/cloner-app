@@ -66,7 +66,7 @@ class BlackBoxCloneEngine : CloneEngine {
     }
 
     /**
-     * base APK-এর সব এন্ট্রি + প্রতিটা split-এর lib/<abi>/*.so
+     * base APK-এর সব এন্ট্রি + প্রতিটা split-এর lib ফোল্ডারের .so ফাইল
      * একটা নতুন APK-তে জোড়া দেয়। resources.arsc merge করা হয় না
      * (split-এর নিজস্ব arsc base-এর সাথে conflict করে) — lib ছাড়া
      * বাকি resource-এর অভাবে অ্যাপ সাধারণত crash করে না।
