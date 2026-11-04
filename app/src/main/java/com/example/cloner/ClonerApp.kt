@@ -57,18 +57,8 @@ class ClonerApp : Application() {
             Thread({
                 while (true) {
                     try {
-                        // প্রতি সেকেন্ডে আসল main thread-এর stack স্যাম্পল করো
-                        try {
-                            val rm = findRealMain()
-                            val st = rm?.stackTrace
-                            if (rm != null && st != null && st.isNotEmpty()) {
-                                val top = st.take(10).joinToString("\n") { "  at $it" }
-                                synchronized(recentStacks) {
-                                    recentStacks.addLast("[${Date()}] $top")
-                                    if (recentStacks.size > 8) recentStacks.removeFirst()
-                                }
-                            }
-                        } catch (_: Exception) { }
+                        // স্যাম্পলিং বন্ধ — getAllStackTraces() thread suspend করে hang ডেকে আনতে পারে
+                        // শুধু ticker-এর মাধ্যমে blockage detect করো
                         Thread.sleep(3000)
                         val blockedFor = SystemClock.uptimeMillis() - state[0]
                         if (blockedFor > 8000) {
