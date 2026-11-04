@@ -73,6 +73,15 @@ class ClonerApp : Application() {
                         val blockedFor = SystemClock.uptimeMillis() - state[0]
                         if (blockedFor > 8000) {
                             val sb = StringBuilder("ANR ধরা পড়েছে: ${Date()} [$procName]\n")
+                            // init trace ফাইল থাকলে যোগ করো — ঠিক কোথায় আটকেছে দেখাবে
+                            try {
+                                val traceFile = File(cacheDir, "init_trace.txt")
+                                if (traceFile.exists()) {
+                                    sb.append("\n--- init trace ---\n")
+                                    sb.append(traceFile.readText().take(3000))
+                                    sb.append("\n--- end trace ---\n")
+                                }
+                            } catch (_: Exception) { }
                             sb.append("\n--- main thread-এর সাম্প্রতিক অবস্থান (watchdog স্যাম্পল) ---\n")
                             synchronized(recentStacks) {
                                 if (recentStacks.isEmpty()) sb.append("(কোনো স্যাম্পল নেই)\n")
