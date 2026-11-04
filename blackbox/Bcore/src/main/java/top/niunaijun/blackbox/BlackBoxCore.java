@@ -1717,6 +1717,8 @@ public class BlackBoxCore extends ClientConfiguration {
         } catch (Throwable ignored) { }
     }
 
+    public static volatile boolean nativeCoreReady = false;
+
     public static boolean runNativeWithTimeout(String methodName, long timeoutMs) {
         java.util.concurrent.FutureTask<Boolean> task =
                 new java.util.concurrent.FutureTask<>(() -> {
@@ -1743,7 +1745,11 @@ public class BlackBoxCore extends ClientConfiguration {
         t.setDaemon(true);
         t.start();
         try {
-            return task.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+            boolean result = task.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (result) {
+                nativeCoreReady = true;
+            }
+            return result;
         } catch (Throwable e) {
             Slog.w(TAG, methodName + " timed out after " + timeoutMs + "ms, continuing without it");
             return false;
