@@ -76,6 +76,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
+import top.niunaijun.blackbox.BlackBoxCore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -193,6 +194,7 @@ fun ClonerAppScreen() {
     var loading by remember { mutableStateOf(true) }
     var busyPkg by remember { mutableStateOf<String?>(null) }
     var crashReport by remember { mutableStateOf<String?>(null) }
+    var gmsState by remember { mutableStateOf("checking") } // checking/unsupported/installed/ready/installing/failed
     val apps = remember { mutableStateListOf<AppInfo>() }
     val clones = remember { mutableStateListOf<String>() }
 
@@ -212,6 +214,17 @@ fun ClonerAppScreen() {
             crashReport = withContext(Dispatchers.IO) {
                 runCatching { crashFile.readText().take(4000) }.getOrNull()
             }
+        }
+        // Google Play সার্ভিসের অবস্থা দেখো
+        gmsState = withContext(Dispatchers.IO) {
+            runCatching {
+                val core = BlackBoxCore.get()
+                when {
+                    !core.isSupportGms() -> "unsupported"
+                    core.isInstallGms(0) -> "installed"
+                    else -> "ready"
+                }
+            }.getOrDefault("checking")
         }
         clones.addAll((saved + engineClones).distinct())
         apps.addAll(loaded)
@@ -249,6 +262,23 @@ fun ClonerAppScreen() {
             withContext(Dispatchers.Main) {
                 busyPkg = null
                 result.onFailure { toast(it.message ?: "চালু করা যায়নি") }
+            }
+        }
+    }
+
+    // Google Play সার্ভিস ভার্চুয়াল পরিবেশে ইনস্টল (ইন্টারনেট অ্যাপের জন্য)
+    fun doInstallGms() {
+        if (gmsState == "installing") return
+        gmsState = "installing"
+        scope.launch(Dispatchers.IO) {
+            val ok = runCatching { BlackBoxCore.get().installGms(0).success }
+                .getOrDefault(false)
+            withContext(Dispatchers.Main) {
+                gmsState = if (ok) "installed" else "failed"
+                toast(
+                    if (ok) "Google সার্ভিস ইনস্টল হয়েছে — এবার ক্লোনগুলো আবার চালু করে দেখো"
+                    else "Google সার্ভিস ইনস্টল ব্যর্থ — আবার চেষ্টা করো"
+                )
             }
         }
     }
@@ -340,6 +370,48 @@ fun ClonerAppScreen() {
                         modifier = Modifier.padding(12.dp),
                         fontSize = 13.sp
                     )
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+
+            // Google Play সার্ভিস কার্ড — ইন্টারনেট অ্যাপের জন্য
+            if (gmsState == "ready" || gmsState == "installing" || gmsState == "failed") {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (gmsState == "failed")
+                            MaterialTheme.colorScheme.errorContainer
+                        else MaterialTheme.colorScheme.secondaryContainer
+                    ),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "Google Play সার্ভিস",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            Text(
+                                if (gmsState == "failed")
+                                    "ইনস্টল ব্যর্থ হয়েছে — আবার চেষ্টা করুন"
+                                else "ইন্টারনেট অ্যাপ (Facebook, ব্রাউজার) চালাতে এটা দরকার হতে পারে",
+                                fontSize = 12.sp
+                            )
+                        }
+                        if (gmsState == "installing") {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(28.dp),
+                                strokeWidth = 3.dp
+                            )
+                        } else {
+                            Button(onClick = { doInstallGms() }) {
+                                Text(if (gmsState == "failed") "আবার চেষ্টা" else "ইনস্টল করুন")
+                            }
+                        }
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
             }
