@@ -208,12 +208,14 @@ fun ClonerAppScreen() {
         val engineClones = withContext(Dispatchers.IO) {
             runCatching { Engine.current.listClones() }.getOrDefault(emptyList())
         }
-        // শেষ crash-এর রিপোর্ট থাকলে পড়ে নাও
-        val crashFile = java.io.File(ctx.cacheDir, CRASH_REPORT_FILE)
-        if (crashFile.exists()) {
-            crashReport = withContext(Dispatchers.IO) {
-                runCatching { crashFile.readText().take(4000) }.getOrNull()
-            }
+        // শেষ crash/ANR-এর রিপোর্ট থাকলে পড়ে নাও (সব প্রসেসের ফাইল থেকে সবচেয়ে নতুনটা)
+        crashReport = withContext(Dispatchers.IO) {
+            runCatching {
+                ctx.cacheDir.listFiles { f ->
+                    f.name.startsWith("last_crash") && f.name.endsWith(".txt")
+                }?.maxByOrNull { it.lastModified() }
+                    ?.let { it.readText().take(6000) }
+            }.getOrNull()
         }
         // Google Play সার্ভিসের অবস্থা দেখো
         gmsState = withContext(Dispatchers.IO) {
@@ -371,7 +373,9 @@ fun ClonerAppScreen() {
                                 toast("রিপোর্ট কপি হয়েছে")
                             }) { Text("কপি করুন") }
                             TextButton(onClick = {
-                                java.io.File(ctx.cacheDir, CRASH_REPORT_FILE).delete()
+                                ctx.cacheDir.listFiles { f ->
+                                    f.name.startsWith("last_crash") && f.name.endsWith(".txt")
+                                }?.forEach { it.delete() }
                                 crashReport = null
                             }) { Text("মুছে ফেলুন") }
                         }
