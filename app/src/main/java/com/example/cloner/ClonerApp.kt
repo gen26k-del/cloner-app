@@ -74,11 +74,12 @@ class ClonerApp : Application() {
                         if (blockedFor > 8000) {
                             val sb = StringBuilder("ANR ধরা পড়েছে: ${Date()} [$procName]\n")
                             // init trace ফাইল থাকলে যোগ করো — ঠিক কোথায় আটকেছে দেখাবে
+                            // শেষের অংশ নাও (সাম্প্রতিক প্রসেসের এন্ট্রি)
                             try {
                                 val traceFile = File(cacheDir, "init_trace.txt")
                                 if (traceFile.exists()) {
-                                    sb.append("\n--- init trace ---\n")
-                                    sb.append(traceFile.readText().take(3000))
+                                    sb.append("\n--- init trace (শেষাংশ) ---\n")
+                                    sb.append(traceFile.readText().takeLast(4000))
                                     sb.append("\n--- end trace ---\n")
                                 }
                             } catch (_: Exception) { }
