@@ -1644,7 +1644,20 @@ public class BlackBoxCore extends ClientConfiguration {
             throw new IllegalArgumentException("ClientConfiguration is null!");
         }
 
-        if(!NativeCore.disableHiddenApi()){
+        // disableHiddenApi native কল stub প্রসেসে আটকে যেতে পারে — 4s timeout দিয়ে সুরক্ষা।
+        // Timeout হলে Reflection.unseal fallback নেবে (যা এমনিতেই failure case-এ হয়)।
+        boolean hiddenApiDisabled = false;
+        try {
+            java.util.concurrent.FutureTask<Boolean> task =
+                    new java.util.concurrent.FutureTask<>(NativeCore::disableHiddenApi);
+            Thread t = new Thread(task, "HiddenApiDisabler");
+            t.setDaemon(true);
+            t.start();
+            hiddenApiDisabled = task.get(4, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Throwable e) {
+            Slog.w(TAG, "disableHiddenApi timed out or failed, using fallback: " + e.getMessage());
+        }
+        if (!hiddenApiDisabled) {
             try {
                 Reflection.unseal(context);
             } catch (Throwable t) {
