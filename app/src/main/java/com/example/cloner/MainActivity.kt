@@ -432,35 +432,23 @@ fun ClonerAppScreen() {
                 Spacer(Modifier.height(8.dp))
             }
 
-            // Google Play সার্ভিস কার্ড — ইন্টারনেট অ্যাপের জন্য
+            // Google Play সার্ভিস — ইনস্টল থাকলে বড় কার্ড নয়, এক লাইনের ছোট স্ট্যাটাস
             if (gmsState == "installed") {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
-                    ),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                "Google Play সার্ভিস সক্রিয় ✓",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
-                            )
-                            Text(
-                                "কোনো অ্যাপ আটকে গেলে এটা সরিয়ে আবার চেষ্টা করে দেখতে পারো",
-                                fontSize = 12.sp
-                            )
-                        }
-                        TextButton(onClick = { doUninstallGms() }) {
-                            Text("সরিয়ে ফেলুন")
-                        }
+                    Text(
+                        "✓ Google Play সার্ভিস সক্রিয়",
+                        modifier = Modifier.weight(1f),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    TextButton(onClick = { doUninstallGms() }) {
+                        Text("সরিয়ে ফেলুন", fontSize = 12.sp)
                     }
                 }
-                Spacer(Modifier.height(8.dp))
             }
             if (gmsState == "ready" || gmsState == "installing" || gmsState == "failed") {
                 Card(
