@@ -23,9 +23,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -86,6 +87,7 @@ data class AppInfo(val label: String, val pkg: String, val icon: ImageBitmap)
 
 private const val PREFS = "cloner_prefs"
 private const val KEY_CLONES = "clones"
+private const val KEY_CHECKUP_PASSED = "checkup_passed"
 
 /** ব্র্যান্ড রঙ — CloneMe লোগোর সাথে মিলিয়ে */
 private val BrandBlue = Color(0xFF1B9BF5)
@@ -142,6 +144,28 @@ private fun appendCheckupLine(ctx: Context, line: String) {
     }
 }
 
+// প্যাকেজের অ্যাক্টিভিটি থেকে সবচেয়ে সম্ভাব্য লঞ্চার অ্যাক্টিভিটি বাছো।
+// অগ্রাধিকার: exported + নিজের প্যাকেজের লঞ্চার-ধাঁচের → সব (non-exported সহ)
+// + নিজের প্যাকেজের → exported যেকোনো → সব যেকোনো।
+// (android.* সিস্টেম অ্যাক্টিভিটি, যেমন AppDetailsActivity, শেষে।)
+fun pickLauncherActivity(
+    activities: Array<android.content.pm.ActivityInfo>?
+): android.content.pm.ActivityInfo? {
+    val all = activities?.toList() ?: return null
+    val exported = all.filter { it.exported }
+    val ownExp = exported.filter { !it.name.startsWith("android.") }
+    val ownAll = all.filter { !it.name.startsWith("android.") }
+    fun pick(list: List<android.content.pm.ActivityInfo>) =
+        list.firstOrNull { it.name.endsWith(".Main") }
+            ?: list.firstOrNull {
+                it.name.contains("Main") || it.name.contains("Launcher") ||
+                    it.name.contains("Splash") || it.name.contains("Tabbed") ||
+                    it.name.contains("Home")
+            }
+            ?: list.firstOrNull()
+    return pick(ownExp) ?: pick(ownAll) ?: pick(exported) ?: pick(all)
+}
+
 private fun readSavedClones(ctx: Context): MutableSet<String> =
     ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         .getStringSet(KEY_CLONES, emptySet())?.toMutableSet() ?: mutableSetOf()
@@ -149,6 +173,16 @@ private fun readSavedClones(ctx: Context): MutableSet<String> =
 private fun saveClones(ctx: Context, clones: Set<String>) {
     ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         .edit().putStringSet(KEY_CLONES, clones).apply()
+}
+
+// চেকআপে পাস করা অ্যাপের প্যাকেজ নাম — এগুলো পরের চেকআপে আর চেক করা হবে না।
+private fun readPassedPkgs(ctx: Context): MutableSet<String> =
+    ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .getStringSet(KEY_CHECKUP_PASSED, emptySet())?.toMutableSet() ?: mutableSetOf()
+
+private fun savePassedPkgs(ctx: Context, passed: Set<String>) {
+    ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .edit().putStringSet(KEY_CHECKUP_PASSED, passed).apply()
 }
 
 class MainActivity : ComponentActivity() {
@@ -441,18 +475,7 @@ fun ClonerAppScreen() {
                         clone.userId
                     )
                 }.getOrNull()
-                val acts = pkgInfo?.activities?.filter { it.exported } ?: emptyList()
-                // android.* সিস্টেম অ্যাক্টিভিটি (যেমন AppDetailsActivity) আসল লঞ্চার নয় —
-                // Brave-এর ক্ষেত্রে এটাই ভুল করে মূল অ্যাক্টিভিটি হিসেবে উঠে আসছিল।
-                val ownActs = acts.filter { !it.name.startsWith("android.") }
-                val pool = ownActs.ifEmpty { acts }
-                val target = pool.firstOrNull { it.name.endsWith(".Main") }
-                    ?: pool.firstOrNull {
-                        it.name.contains("Main") || it.name.contains("Launcher") ||
-                            it.name.contains("Splash") || it.name.contains("Tabbed") ||
-                            it.name.contains("Home")
-                    }
-                    ?: pool.firstOrNull()
+                val target = pickLauncherActivity(pkgInfo?.activities)
                 var clsName: String? = null
                 var aiFound = false
                 if (target != null) {
@@ -551,11 +574,26 @@ fun ClonerAppScreen() {
         }
     }
 
-    fun runFullCheckup() {
+    // পাস করা অ্যাপ আর চেক করা হয় না — শুধু সমস্যার অ্যাপ আর নতুন অ্যাপ চেক হয়।
+    // recheckAll=true হলে পাস করা অ্যাপগুলোও আবার চেক হয়।
+    fun runFullCheckup(recheckAll: Boolean = false) {
         if (checkupRunning) return
-        val targets = apps.filter { !isGmsSystemPackage(it.pkg) }
+        val passed = if (recheckAll) {
+            savePassedPkgs(ctx, emptySet())
+            mutableSetOf<String>()
+        } else {
+            readPassedPkgs(ctx)
+        }
+        val allTargets = apps.filter { !isGmsSystemPackage(it.pkg) }
+        val skippedPassed = if (recheckAll) 0 else allTargets.count { it.pkg in passed }
+        val targets = if (recheckAll) allTargets
+        else allTargets.filter { it.pkg !in passed }
         if (targets.isEmpty()) {
-            toast("চেক করার মতো কোনো অ্যাপ নেই")
+            if (skippedPassed > 0) {
+                toast("সব অ্যাপই আগে পাস করেছে — আবার চেক করতে 'সব আবার চেক করো' চাপুন")
+            } else {
+                toast("চেক করার মতো কোনো অ্যাপ নেই")
+            }
             return
         }
         checkupRunning = true
@@ -615,16 +653,7 @@ fun ClonerAppScreen() {
                         0
                     )
                 }.getOrNull()
-                val acts = pkgInfo?.activities?.filter { it.exported } ?: emptyList()
-                val ownActs = acts.filter { !it.name.startsWith("android.") }
-                val pool = ownActs.ifEmpty { acts }
-                val target = pool.firstOrNull { it.name.endsWith(".Main") }
-                    ?: pool.firstOrNull {
-                        it.name.contains("Main") || it.name.contains("Launcher") ||
-                            it.name.contains("Splash") || it.name.contains("Tabbed") ||
-                            it.name.contains("Home")
-                    }
-                    ?: pool.firstOrNull()
+                val target = pickLauncherActivity(pkgInfo?.activities)
                 val clsName = target?.let {
                     if (it.name.startsWith(".")) pkg + it.name else it.name
                 }
@@ -665,6 +694,13 @@ fun ClonerAppScreen() {
                     if (verdict.startsWith("✅")) okCount++
                     else if (!verdict.startsWith("⚠️")) failCount++
                 }
+                // পাস করা অ্যাপ মনে রাখো (পরের চেকআপে বাদ যাবে);
+                // ব্যর্থ হলে তালিকা থেকে সরাও, যাতে পরের বার আবার চেক হয়।
+                if (verdict.startsWith("✅")) {
+                    if (passed.add(pkg)) savePassedPkgs(ctx, passed)
+                } else if (passed.remove(pkg)) {
+                    savePassedPkgs(ctx, passed)
+                }
                 appendCheckupLine(ctx, verdict)
                 withContext(Dispatchers.Main) { checkupLines.add(verdict) }
                 // এই অ্যাপের প্রসেস থামাও, পরেরটার জন্য পরিষ্কার রাখো
@@ -675,7 +711,9 @@ fun ClonerAppScreen() {
             val summary = buildString {
                 append("=== CloneMe সব অ্যাপ চেকআপ ===\n")
                 append("সময়: ${java.util.Date()}\n")
-                append("মোট: ${targets.size}টি অ্যাপ\n")
+                append("মোট: ${targets.size}টি অ্যাপ")
+                if (skippedPassed > 0) append(" (+ পাস করা $skippedPassedটি বাদ দেওয়া হয়েছে)")
+                append("\n")
                 append("✅ চালু: $okCount | ❌ ব্যর্থ: $failCount | ⏭️ বাদ: $skipCount\n")
                 if (stopped) append("(মাঝপথে থামানো হয়েছে)\n")
                 append("\n")
@@ -763,7 +801,10 @@ fun ClonerAppScreen() {
     }
 
     Scaffold(containerColor = MaterialTheme.colorScheme.background) { pad ->
-        Column(Modifier.padding(pad)) {
+        // পুরো স্ক্রিন স্ক্রলযোগ্য — লম্বা কার্ড (চেকআপের ফলাফল/রিপোর্ট) যাতে
+        // ট্যাব আর অ্যাপের তালিকাকে স্ক্রিনের বাইরে ঠেলে দিতে না পারে।
+        // (আগে বাইরের Column স্ক্রল হতো না, তাই অ্যাপের তালিকা দেখা যেত না।)
+        Column(Modifier.padding(pad).verticalScroll(rememberScrollState())) {
             // ব্র্যান্ড হেডার
             HeaderCard(cloneCount = clones.size)
 
@@ -924,7 +965,7 @@ fun ClonerAppScreen() {
                         fontSize = 14.sp
                     )
                     Text(
-                        "অ্যাপ নিজেই সব অ্যাপ ক্লোন করে একটা একটা চালিয়ে দেখবে, তারপর রিপোর্ট দেবে। চলাকালীন অ্যাপগুলো একটা একটা করে খুলবে — ফোনটা কিছুক্ষণ ব্যবহার করো না।",
+                        "অ্যাপ নিজেই সব অ্যাপ ক্লোন করে একটা একটা চালিয়ে দেখবে, তারপর রিপোর্ট দেবে। চলাকালীন অ্যাপগুলো একটা একটা করে খুলবে — ফোনটা কিছুক্ষণ ব্যবহার করো না। আগে পাস করা অ্যাপগুলো আর চেক করা হবে না — শুধু সমস্যার অ্যাপ আর নতুন অ্যাপ চেক হবে।",
                         fontSize = 12.sp
                     )
                     Spacer(Modifier.height(6.dp))
@@ -933,6 +974,13 @@ fun ClonerAppScreen() {
                             onClick = { runFullCheckup() },
                             enabled = !checkupRunning
                         ) { Text("চেকআপ শুরু করো") }
+                        // পাস করা অ্যাপগুলোও আবার চেক করতে চাইলে (ইঞ্জিন বদলের পর)
+                        if (!checkupRunning) {
+                            Spacer(Modifier.width(8.dp))
+                            TextButton(onClick = { runFullCheckup(recheckAll = true) }) {
+                                Text("সব আবার চেক করো")
+                            }
+                        }
                         if (checkupRunning) {
                             Spacer(Modifier.width(8.dp))
                             TextButton(onClick = { checkupStop = true }) { Text("থামান") }
@@ -1108,8 +1156,9 @@ fun ClonerAppScreen() {
                 if (filtered.isEmpty()) {
                     EmptyHint("কোনো অ্যাপ পাওয়া যায়নি")
                 } else {
-                    LazyColumn(modifier = Modifier.padding(vertical = 4.dp)) {
-                        items(filtered, key = { it.pkg }) { app ->
+                    // বাইরের Column-ই স্ক্রল করে, তাই ভেতরে LazyColumn নয় — সাধারণ Column।
+                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                        filtered.forEach { app ->
                             val n = clones.count { it.pkg == app.pkg }
                             AppRow(
                                 app = app,
@@ -1124,9 +1173,9 @@ fun ClonerAppScreen() {
                 if (clones.isEmpty()) {
                     EmptyHint("এখনো কোনো ক্লোন নেই।\n\"সব অ্যাপ\" থেকে ক্লোন করুন।")
                 } else {
-                    LazyColumn(modifier = Modifier.padding(vertical = 4.dp)) {
-                        items(clones.sortedWith(compareBy({ it.pkg }, { it.userId })),
-                            key = { it.toString() }) { clone ->
+                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                        clones.sortedWith(compareBy({ it.pkg }, { it.userId }))
+                            .forEach { clone ->
                             val app = apps.find { it.pkg == clone.pkg }
                             if (app != null) {
                                 val siblings = clones.filter { it.pkg == clone.pkg }

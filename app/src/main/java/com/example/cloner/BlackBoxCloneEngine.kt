@@ -120,20 +120,23 @@ class BlackBoxCloneEngine : CloneEngine {
         } catch (_: Exception) {
             null
         }
-        val activities = pkgInfo?.activities
-            ?.filter { it.exported } ?: emptyList()
-        // android.* সিস্টেম অ্যাক্টিভিটি (যেমন AppDetailsActivity) আসল লঞ্চার নয় —
-        // Brave-এর ক্ষেত্রে এটাই ভুল করে উঠে আসছিল। নিজের প্যাকেজের লঞ্চার-ধাঁচের
-        // অ্যাক্টিভিটি (.Main / Launcher / Splash / Tabbed / Home) আগে চেষ্টা করো।
-        val own = activities.filter { !it.name.startsWith("android.") }
-        val pool = own.ifEmpty { activities }
-        val target = pool.firstOrNull { it.name.endsWith(".Main") }
-            ?: pool.firstOrNull {
-                it.name.contains("Main") || it.name.contains("Launcher") ||
-                    it.name.contains("Splash") || it.name.contains("Tabbed") ||
-                    it.name.contains("Home")
-            }
-            ?: pool.firstOrNull()
+        val allActs = pkgInfo?.activities?.toList() ?: emptyList()
+        val exported = allActs.filter { it.exported }
+        // অগ্রাধিকার: (১) exported + নিজের প্যাকেজের লঞ্চার-ধাঁচের,
+        // (২) সব (non-exported সহ) + নিজের প্যাকেজের, (৩) exported যেকোনো,
+        // (৪) সব যেকোনো। Brave-এ ChromeTabbedActivity exported=false
+        // হতে পারে বলে শুধু exported দেখলে AppDetailsActivity-ই মেলে।
+        val ownExp = exported.filter { !it.name.startsWith("android.") }
+        val ownAll = allActs.filter { !it.name.startsWith("android.") }
+        fun pick(list: List<android.content.pm.ActivityInfo>) =
+            list.firstOrNull { it.name.endsWith(".Main") }
+                ?: list.firstOrNull {
+                    it.name.contains("Main") || it.name.contains("Launcher") ||
+                        it.name.contains("Splash") || it.name.contains("Tabbed") ||
+                        it.name.contains("Home")
+                }
+                ?: list.firstOrNull()
+        val target = pick(ownExp) ?: pick(ownAll) ?: pick(exported) ?: pick(allActs)
             ?: throw IllegalStateException("কোনো অ্যাক্টিভিটিই পাওয়া যায়নি (intent null)")
         val clsName = if (target.name.startsWith(".")) packageName + target.name else target.name
         // চূড়ান্ত ডায়াগনস্টিক: এই কম্পোনেন্ট রেজোলভারে আছে কিনা
