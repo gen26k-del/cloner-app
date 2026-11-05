@@ -76,8 +76,20 @@ class BlackBoxCloneEngine : CloneEngine {
         if (!isCloneInstalled(packageName, userId)) {
             throw IllegalStateException("ক্লোন ইনস্টল করা নেই — আগে ক্লোন করুন")
         }
+        // ডায়াগনস্টিক: লঞ্চ intent রেজোলভ হয় কিনা আগেই দেখো
+        // (Chrome-এর মতো অ্যাপে launchApk false হলে কারণটা জানতে)
+        val intent = try {
+            BlackBoxCore.getBPackageManager().getLaunchIntentForPackage(packageName, userId)
+        } catch (_: Exception) {
+            null
+        }
+        if (intent == null) {
+            throw IllegalStateException("লঞ্চার অ্যাক্টিভিটি পাওয়া যায়নি (intent null)")
+        }
         val ok = core().launchApk(packageName, userId)
-        if (!ok) throw IllegalStateException("অ্যাপ চালু করা যায়নি")
+        if (!ok) throw IllegalStateException(
+            "intent আছে (${intent.component?.className}) কিন্তু launchApk false"
+        )
         Unit
     }
 
