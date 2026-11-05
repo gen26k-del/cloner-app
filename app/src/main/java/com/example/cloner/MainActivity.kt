@@ -27,6 +27,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -145,9 +146,10 @@ private fun appendCheckupLine(ctx: Context, line: String) {
 }
 
 // প্যাকেজের অ্যাক্টিভিটি থেকে সবচেয়ে সম্ভাব্য লঞ্চার অ্যাক্টিভিটি বাছো।
-// অগ্রাধিকার: exported + নিজের প্যাকেজের লঞ্চার-ধাঁচের → সব (non-exported সহ)
-// + নিজের প্যাকেজের → exported যেকোনো → সব যেকোনো।
-// (android.* সিস্টেম অ্যাক্টিভিটি, যেমন AppDetailsActivity, শেষে।)
+// প্রথমে সব পুলে লঞ্চার-ধাঁচের নাম (.Main / Launcher / Splash / Tabbed / Home)
+// খুঁজো — কোনো পুলে শুধু বিলিং/সিস্টেম অ্যাক্টিভিটি থাকলে সেটা নিয়ে
+// অন্য পুলে আসল লঞ্চার খোঁজা বন্ধ করো না। লঞ্চার-ধাঁচের কিছু না মিললে
+// তবেই যেকোনো একটা নাও। (android.* সিস্টেম অ্যাক্টিভিটি শেষে।)
 fun pickLauncherActivity(
     activities: Array<android.content.pm.ActivityInfo>?
 ): android.content.pm.ActivityInfo? {
@@ -155,15 +157,16 @@ fun pickLauncherActivity(
     val exported = all.filter { it.exported }
     val ownExp = exported.filter { !it.name.startsWith("android.") }
     val ownAll = all.filter { !it.name.startsWith("android.") }
-    fun pick(list: List<android.content.pm.ActivityInfo>) =
+    fun pickLike(list: List<android.content.pm.ActivityInfo>) =
         list.firstOrNull { it.name.endsWith(".Main") }
             ?: list.firstOrNull {
                 it.name.contains("Main") || it.name.contains("Launcher") ||
                     it.name.contains("Splash") || it.name.contains("Tabbed") ||
                     it.name.contains("Home")
             }
-            ?: list.firstOrNull()
-    return pick(ownExp) ?: pick(ownAll) ?: pick(exported) ?: pick(all)
+    return pickLike(ownExp) ?: pickLike(ownAll) ?: pickLike(exported) ?: pickLike(all)
+        ?: ownExp.firstOrNull() ?: ownAll.firstOrNull()
+        ?: exported.firstOrNull() ?: all.firstOrNull()
 }
 
 private fun readSavedClones(ctx: Context): MutableSet<String> =
@@ -1156,9 +1159,14 @@ fun ClonerAppScreen() {
                 if (filtered.isEmpty()) {
                     EmptyHint("কোনো অ্যাপ পাওয়া যায়নি")
                 } else {
-                    // বাইরের Column-ই স্ক্রল করে, তাই ভেতরে LazyColumn নয় — সাধারণ Column।
-                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                        filtered.forEach { app ->
+                    // তালিকা আবার LazyColumn (লেজি) — সব রো একসাথে কম্পোজ হলে
+                    // মূল থ্রেড ভারী হয়ে ANR ("CloneMe isn't responding") দেয়।
+                    // নির্দিষ্ট উচ্চতা দেওয়া হয়েছে যাতে বাইরের স্ক্রল-করা
+                    // Column-এর ভেতরে LazyColumn কাজ করতে পারে।
+                    LazyColumn(
+                        modifier = Modifier.padding(vertical = 4.dp).height(600.dp)
+                    ) {
+                        items(filtered, key = { it.pkg }) { app ->
                             val n = clones.count { it.pkg == app.pkg }
                             AppRow(
                                 app = app,
@@ -1173,9 +1181,13 @@ fun ClonerAppScreen() {
                 if (clones.isEmpty()) {
                     EmptyHint("এখনো কোনো ক্লোন নেই।\n\"সব অ্যাপ\" থেকে ক্লোন করুন।")
                 } else {
-                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                        clones.sortedWith(compareBy({ it.pkg }, { it.userId }))
-                            .forEach { clone ->
+                    LazyColumn(
+                        modifier = Modifier.padding(vertical = 4.dp).height(600.dp)
+                    ) {
+                        items(
+                            clones.sortedWith(compareBy({ it.pkg }, { it.userId })),
+                            key = { it.toString() }
+                        ) { clone ->
                             val app = apps.find { it.pkg == clone.pkg }
                             if (app != null) {
                                 val siblings = clones.filter { it.pkg == clone.pkg }

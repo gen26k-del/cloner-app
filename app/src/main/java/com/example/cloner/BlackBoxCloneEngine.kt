@@ -126,17 +126,20 @@ class BlackBoxCloneEngine : CloneEngine {
         // (২) সব (non-exported সহ) + নিজের প্যাকেজের, (৩) exported যেকোনো,
         // (৪) সব যেকোনো। Brave-এ ChromeTabbedActivity exported=false
         // হতে পারে বলে শুধু exported দেখলে AppDetailsActivity-ই মেলে।
+        // প্রথমে সব পুলে লঞ্চার-ধাঁচের নাম খুঁজো — এক পুলে বিলিং/
+        // সিস্টেম অ্যাক্টিভিটি থাকলেই অন্য পুল খোঁজা বন্ধ করো না।
         val ownExp = exported.filter { !it.name.startsWith("android.") }
         val ownAll = allActs.filter { !it.name.startsWith("android.") }
-        fun pick(list: List<android.content.pm.ActivityInfo>) =
+        fun pickLike(list: List<android.content.pm.ActivityInfo>) =
             list.firstOrNull { it.name.endsWith(".Main") }
                 ?: list.firstOrNull {
                     it.name.contains("Main") || it.name.contains("Launcher") ||
                         it.name.contains("Splash") || it.name.contains("Tabbed") ||
                         it.name.contains("Home")
                 }
-                ?: list.firstOrNull()
-        val target = pick(ownExp) ?: pick(ownAll) ?: pick(exported) ?: pick(allActs)
+        val target = pickLike(ownExp) ?: pickLike(ownAll) ?: pickLike(exported) ?: pickLike(allActs)
+            ?: ownExp.firstOrNull() ?: ownAll.firstOrNull()
+            ?: exported.firstOrNull() ?: allActs.firstOrNull()
             ?: throw IllegalStateException("কোনো অ্যাক্টিভিটিই পাওয়া যায়নি (intent null)")
         val clsName = if (target.name.startsWith(".")) packageName + target.name else target.name
         // চূড়ান্ত ডায়াগনস্টিক: এই কম্পোনেন্ট রেজোলভারে আছে কিনা
