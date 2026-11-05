@@ -195,6 +195,7 @@ fun ClonerAppScreen() {
     var loading by remember { mutableStateOf(true) }
     var busyClone by remember { mutableStateOf<CloneId?>(null) }
     var crashReport by remember { mutableStateOf<String?>(null) }
+    var logText by remember { mutableStateOf<String?>(null) }
     var gmsState by remember { mutableStateOf("checking") } // checking/unsupported/installed/ready/installing/failed
     var batteryIgnored by remember { mutableStateOf(true) }
     val apps = remember { mutableStateListOf<AppInfo>() }
@@ -319,6 +320,32 @@ fun ClonerAppScreen() {
         }
     }
 
+    // লগ পড়া: Chrome-এর প্রসেস মারা গেলে (নেটিভ ক্র্যাশ) জাভা রিপোর্ট
+    // থাকে না — তখন logcat-ই একমাত্র সূত্র। একই UID-এর প্রসেসের লগ পড়া যায়।
+    fun captureLog() {
+        scope.launch(Dispatchers.IO) {
+            val text = runCatching {
+                val proc = Runtime.getRuntime()
+                    .exec(arrayOf("logcat", "-d", "-t", "1000"))
+                val out = proc.inputStream.bufferedReader().readText()
+                proc.waitFor()
+                val keys = listOf(
+                    "chrome", "fatal", "sigsegv", "sigabrt", "sigbus", "dlopen",
+                    "chromium", "androidruntime", "tombstone", "crash", "linker",
+                    "fatal signal", "native crash", "com.example.cloner",
+                    "com.android.chrome"
+                )
+                val lines = out.lines().filter { line ->
+                    val low = line.lowercase()
+                    keys.any { low.contains(it) }
+                }.takeLast(80)
+                if (lines.isEmpty()) "লগে ক্র্যাশের কোনো লাইন পাওয়া যায়নি (লগ খালি বা এই ফোনে লগ পড়া বন্ধ আছে)"
+                else lines.joinToString("\n").take(6000)
+            }.getOrDefault("লগ পড়া যায়নি — logcat চালানো ব্যর্থ হয়েছে")
+            withContext(Dispatchers.Main) { logText = text }
+        }
+    }
+
     // Google Play সার্ভিস ভার্চুয়াল পরিবেশে ইনস্টল (ইন্টারনেট অ্যাপের জন্য)
     fun doInstallGms() {
         if (gmsState == "installing") return
@@ -430,6 +457,46 @@ fun ClonerAppScreen() {
                                 }?.forEach { it.delete() }
                                 crashReport = null
                             }) { Text("মুছে ফেলুন") }
+                        }
+                    }
+                }
+            }
+
+            // লগ দেখুন: Chrome-এর প্রসেস মারা গেলে এখান থেকে কারণ জানা যাবে
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(onClick = { captureLog() }) { Text("📋 লগ দেখুন") }
+            }
+            logText?.let { log ->
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(
+                            "📋 সিস্টেম লগ (ক্র্যাশের কারণ)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            log,
+                            fontSize = 11.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 220.dp)
+                                .verticalScroll(rememberScrollState())
+                        )
+                        Row {
+                            TextButton(onClick = {
+                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("log", log))
+                                toast("লগ কপি হয়েছে")
+                            }) { Text("কপি করুন") }
+                            TextButton(onClick = { logText = null }) { Text("বন্ধ করুন") }
                         }
                     }
                 }
