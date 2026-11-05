@@ -220,6 +220,31 @@ public class PackageManagerCompat {
                 }
             }
         }
+        // সব অ্যারে ফিল্ড null না রেখে খালি অ্যারে দাও — Lite অ্যাপসহ অনেক অ্যাপ
+        // getPackageInfo().activities/services/receivers/providers/
+        // requestedPermissions .length পড়তে গিয়ে NPE দেয়। ফ্ল্যাগ না দিলে বা
+        // উপাদান না থাকলে এগুলো null-ই থাকত (v1.0.38/39-এর split ফিক্স যথেষ্ট ছিল না)।
+        if (pi.activities == null) {
+            pi.activities = new ActivityInfo[0];
+        }
+        if (pi.services == null) {
+            pi.services = new ServiceInfo[0];
+        }
+        if (pi.receivers == null) {
+            pi.receivers = new ActivityInfo[0];
+        }
+        if (pi.providers == null) {
+            pi.providers = new ProviderInfo[0];
+        }
+        if (pi.requestedPermissions == null) {
+            pi.requestedPermissions = new String[0];
+        }
+        if (pi.instrumentation == null) {
+            pi.instrumentation = new InstrumentationInfo[0];
+        }
+        if (pi.permissions == null) {
+            pi.permissions = new PermissionInfo[0];
+        }
         return pi;
     }
 
@@ -325,6 +350,9 @@ public class PackageManagerCompat {
         }
         if (ai.splitNames == null) {
             ai.splitNames = new String[0];
+        }
+        if (ai.sharedLibraryFiles == null) {
+            ai.sharedLibraryFiles = new String[0];
         }
 
 
