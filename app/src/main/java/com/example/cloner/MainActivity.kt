@@ -196,6 +196,7 @@ fun ClonerAppScreen() {
     var busyClone by remember { mutableStateOf<CloneId?>(null) }
     var crashReport by remember { mutableStateOf<String?>(null) }
     var logText by remember { mutableStateOf<String?>(null) }
+    var traceText by remember { mutableStateOf<String?>(null) }
     var gmsState by remember { mutableStateOf("checking") } // checking/unsupported/installed/ready/installing/failed
     var batteryIgnored by remember { mutableStateOf(true) }
     val apps = remember { mutableStateListOf<AppInfo>() }
@@ -351,6 +352,19 @@ fun ClonerAppScreen() {
         }
     }
 
+    // ট্রেস দেখা: স্টাব প্রসেস কতদূর গেলো (bind → onCreate → onResume)
+    // init_trace.txt-এ সব প্রসেসের লাইন জমা থাকে, মরার পরও ফাইল থাকে।
+    fun captureTrace() {
+        scope.launch(Dispatchers.IO) {
+            val text = runCatching {
+                val f = java.io.File(ctx.cacheDir, "init_trace.txt")
+                if (!f.exists()) "ট্রেস ফাইল নেই (init_trace.txt পাওয়া যায়নি)"
+                else f.readText().takeLast(4000).ifEmpty { "ট্রেস ফাইল খালি" }
+            }.getOrDefault("ট্রেস পড়া যায়নি")
+            withContext(Dispatchers.Main) { traceText = text }
+        }
+    }
+
     // Google Play সার্ভিস ভার্চুয়াল পরিবেশে ইনস্টল (ইন্টারনেট অ্যাপের জন্য)
     fun doInstallGms() {
         if (gmsState == "installing") return
@@ -473,6 +487,7 @@ fun ClonerAppScreen() {
                 horizontalArrangement = Arrangement.End
             ) {
                 TextButton(onClick = { captureLog() }) { Text("📋 লগ দেখুন") }
+                TextButton(onClick = { captureTrace() }) { Text("📜 ট্রেস দেখুন") }
             }
             logText?.let { log ->
                 Card(
@@ -502,6 +517,38 @@ fun ClonerAppScreen() {
                                 toast("লগ কপি হয়েছে")
                             }) { Text("কপি করুন") }
                             TextButton(onClick = { logText = null }) { Text("বন্ধ করুন") }
+                        }
+                    }
+                }
+            }
+            traceText?.let { trace ->
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD)),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(
+                            "📜 স্টার্টআপ ট্রেস (Chrome কতদূর গেলো)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            trace,
+                            fontSize = 11.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 220.dp)
+                                .verticalScroll(rememberScrollState())
+                        )
+                        Row {
+                            TextButton(onClick = {
+                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("trace", trace))
+                                toast("ট্রেস কপি হয়েছে")
+                            }) { Text("কপি করুন") }
+                            TextButton(onClick = { traceText = null }) { Text("বন্ধ করুন") }
                         }
                     }
                 }
