@@ -10,14 +10,18 @@ import top.niunaijun.blackbox.utils.FileUtils;
 
 public class BEnvironment {
     private static final File sVirtualRoot = new File(BlackBoxCore.getContext().getCacheDir().getParent(), "blackbox");
-    private static final File sExternalVirtualRoot = BlackBoxCore.getContext().getExternalFilesDir("blackbox");
+    // বাইরের স্টোরেজ রুট লেজি (অলস) — static final-এ ক্লাস লোডের সময়ই একবার সেট
+    // হতো, আর ক্লোন প্রসেসে তখন বাইরের স্টোরেজ তৈরি না থাকলে getExternalFilesDir
+    // "/dev/null" দিত, সেটাই সারা প্রসেসে আটকে থাকত। এখন প্রথম ব্যবহারের সময়
+    // ঠিক করা হয়, আর তখনো null//dev/null হলে ভেতরের স্টোরেজে ফলব্যাক।
+    private static File sExternalVirtualRoot;
 
     public static File JUNIT_JAR = new File(getCacheDir(), "junit.apk");
     public static File EMPTY_JAR = new File(getCacheDir(), "empty.apk");
 
     public static void load() {
         FileUtils.mkdirs(sVirtualRoot);
-        FileUtils.mkdirs(sExternalVirtualRoot);
+        FileUtils.mkdirs(getExternalVirtualRoot());
         FileUtils.mkdirs(getSystemDir());
         FileUtils.mkdirs(getCacheDir());
         FileUtils.mkdirs(getProcDir());
@@ -28,6 +32,18 @@ public class BEnvironment {
     }
 
     public static File getExternalVirtualRoot() {
+        if (sExternalVirtualRoot == null) {
+            File ext = null;
+            try {
+                ext = BlackBoxCore.getContext().getExternalFilesDir("blackbox");
+            } catch (Throwable ignored) { }
+            // null বা /dev/null হলে ভেতরের স্টোরেজে ফলব্যাক — /dev/null-এ লেখা যায় না,
+            // SecurityException ("Invalid mkdirs path") দিয়ে অ্যাপ মরত।
+            if (ext == null || ext.getAbsolutePath().startsWith("/dev/null")) {
+                ext = new File(getVirtualRoot(), "external");
+            }
+            sExternalVirtualRoot = ext;
+        }
         return sExternalVirtualRoot;
     }
 
@@ -72,7 +88,7 @@ public class BEnvironment {
     }
 
     public static File getExternalUserDir(int userId) {
-        return new File(sExternalVirtualRoot, String.format(Locale.CHINA, "storage/emulated/%d/", userId));
+        return new File(getExternalVirtualRoot(), String.format(Locale.CHINA, "storage/emulated/%d/", userId));
     }
 
     public static File getUserDir(int userId) {
