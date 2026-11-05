@@ -14,8 +14,8 @@ android {
         // BlackBox ফর্ক ইচ্ছা করে targetSdk 28 রাখে — নতুন Android-এর
         // আচরণ পরিবর্তনে hook ভাঙা এড়াতে। ব্যক্তিগত ব্যবহারে ঠিক আছে।
         targetSdk = 28
-        versionCode = 5
-        versionName = "1.0.20 নোটিফিকেশন-ফিক্স"
+        versionCode = 6
+        versionName = "1.0.21 মাল্টি-ক্লোন"
     }
 
     compileOptions {

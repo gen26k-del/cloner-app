@@ -18,8 +18,8 @@ class BlackBoxCloneEngine : CloneEngine {
 
     override val name: String = "BlackBox"
 
-    /** BlackBox-এর ডিফল্ট ভার্চুয়াল ইউজার */
-    private val userId: Int = 0
+    /** এক অ্যাপের সর্বোচ্চ ক্লোন সংখ্যা (userId 0..MAX) */
+    private val maxUserId: Int = 9
 
     private fun core(): BlackBoxCore = BlackBoxCore.get()
 
@@ -31,9 +31,10 @@ class BlackBoxCloneEngine : CloneEngine {
 
     /**
      * সিস্টেমে ইনস্টল থাকা অ্যাপ ক্লোন করে।
+     * userId আলাদা হলে একই অ্যাপের আরেকটা কপি (আলাদা ডেটা) হয়।
      * ইনস্টলের পর split/base APK থেকে native lib কপি করা হয় (best-effort)।
      */
-    override fun installClone(packageName: String): Result<Unit> = runCatching {
+    override fun installClone(packageName: String, userId: Int): Result<Unit> = runCatching {
         val result = core().installPackageAsUser(packageName, userId)
         if (!result.success) {
             throw IllegalStateException(result.msg ?: "ইনস্টল ব্যর্থ হয়েছে")
@@ -64,15 +65,15 @@ class BlackBoxCloneEngine : CloneEngine {
     /** ডাউনলোড করা APK ফাইল থেকে ভার্চুয়াল অ্যাপ ইনস্টল করে */
     fun installApk(apkFile: File): Result<Unit> = runCatching {
         require(apkFile.exists()) { "APK ফাইল পাওয়া যায়নি: ${apkFile.path}" }
-        val result = core().installPackageAsUser(apkFile, userId)
+        val result = core().installPackageAsUser(apkFile, 0)
         if (!result.success) {
             throw IllegalStateException(result.msg ?: "ইনস্টল ব্যর্থ হয়েছে")
         }
         Unit
     }
 
-    override fun launchClone(packageName: String): Result<Unit> = runCatching {
-        if (!isCloneInstalled(packageName)) {
+    override fun launchClone(packageName: String, userId: Int): Result<Unit> = runCatching {
+        if (!isCloneInstalled(packageName, userId)) {
             throw IllegalStateException("ক্লোন ইনস্টল করা নেই — আগে ক্লোন করুন")
         }
         val ok = core().launchApk(packageName, userId)
@@ -81,18 +82,33 @@ class BlackBoxCloneEngine : CloneEngine {
     }
 
     /** sandbox থেকে ক্লোন মুছে ফেলে */
-    override fun uninstallClone(packageName: String): Result<Unit> = runCatching {
+    override fun uninstallClone(packageName: String, userId: Int): Result<Unit> = runCatching {
         core().uninstallPackageAsUser(packageName, userId)
         Unit
     }
 
-    override fun listClones(): List<String> = try {
-        core().getInstalledApplications(0, userId).map { it.packageName }
+    override fun listClones(): List<CloneId> = try {
+        val out = mutableListOf<CloneId>()
+        for (uid in 0..maxUserId) {
+            try {
+                core().getInstalledApplications(0, uid).mapTo(out) {
+                    CloneId(it.packageName, uid)
+                }
+            } catch (_: Exception) { }
+        }
+        out
     } catch (_: Exception) {
         emptyList()
     }
 
-    fun isCloneInstalled(packageName: String): Boolean = try {
+    override fun nextUserId(packageName: String): Int {
+        for (uid in 0..maxUserId) {
+            if (!isCloneInstalled(packageName, uid)) return uid
+        }
+        return -1
+    }
+
+    fun isCloneInstalled(packageName: String, userId: Int = 0): Boolean = try {
         core().isInstalled(packageName, userId)
     } catch (_: Exception) {
         false

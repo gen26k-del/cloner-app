@@ -164,8 +164,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** ক্লোন করা অ্যাপের হোম-স্ক্রিন শর্টকাট পিন করে */
-    fun pinCloneShortcut(app: AppInfo) {
+    /** ক্লোনের হোম-স্ক্রিন শর্টকাট পিন করে (প্রতি ইনস্ট্যান্সে আলাদা) */
+    fun pinCloneShortcut(clone: CloneId, app: AppInfo, title: String) {
         val sm = getSystemService(ShortcutManager::class.java)
         if (sm == null || !sm.isRequestPinShortcutSupported) {
             Toast.makeText(this, "এই ফোনে শর্টকাট সাপোর্ট করে না", Toast.LENGTH_LONG).show()
@@ -173,10 +173,11 @@ class MainActivity : ComponentActivity() {
         }
         val intent = Intent(this, ShortcutLaunchActivity::class.java).apply {
             action = ACTION_LAUNCH_CLONE
-            putExtra("clone_pkg", app.pkg)
+            putExtra("clone_pkg", clone.pkg)
+            putExtra("clone_user", clone.userId)
         }
-        val info = ShortcutInfo.Builder(this, "clone_${app.pkg}")
-            .setShortLabel(app.label)
+        val info = ShortcutInfo.Builder(this, "clone_${clone.pkg}_${clone.userId}")
+            .setShortLabel(title)
             .setIcon(Icon.createWithBitmap(app.icon.asAndroidBitmap()))
             .setIntent(intent)
             .build()
@@ -192,12 +193,12 @@ fun ClonerAppScreen() {
     var tab by remember { mutableIntStateOf(0) }
     var query by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
-    var busyPkg by remember { mutableStateOf<String?>(null) }
+    var busyClone by remember { mutableStateOf<CloneId?>(null) }
     var crashReport by remember { mutableStateOf<String?>(null) }
     var gmsState by remember { mutableStateOf("checking") } // checking/unsupported/installed/ready/installing/failed
     var batteryIgnored by remember { mutableStateOf(true) }
     val apps = remember { mutableStateListOf<AppInfo>() }
-    val clones = remember { mutableStateListOf<String>() }
+    val clones = remember { mutableStateListOf<CloneId>() }
 
     fun toast(msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
 
@@ -218,7 +219,24 @@ fun ClonerAppScreen() {
                     ?.let { it.readText().take(6000) }
             }.getOrNull()
         }
-        // ব্যাটারি অপটিমাইজেশন অবস্থা দেখো (নোটিফিকেশনের জন্য)
+        // Google Play সার্ভিসের অবস্থা দেখো
+        gmsState = withContext(Dispatchers.IO) {
+            runCatching {
+                val core = BlackBoxCore.get()
+                when {
+                    !core.isSupportGms() -> "unsupported"
+                    core.isInstallGms(0) -> "installed"
+                    else -> "ready"
+                }
+            }.getOrDefault("checking")
+        }
+        val parsed = saved.mapNotNull { CloneId.parse(it) }
+        clones.addAll((parsed + engineClones).distinct())
+        apps.addAll(loaded)
+        loading = false
+    }
+
+    // ব্যাটারি অপটিমাইজেশন অবস্থা দেখো (নোটিফিকেশনের জন্য)
     LaunchedEffect(Unit) {
         batteryIgnored = withContext(Dispatchers.IO) {
             runCatching {
@@ -240,38 +258,31 @@ fun ClonerAppScreen() {
         }
     }
 
-    // Google Play সার্ভিসের অবস্থা দেখো
-        gmsState = withContext(Dispatchers.IO) {
-            runCatching {
-                val core = BlackBoxCore.get()
-                when {
-                    !core.isSupportGms() -> "unsupported"
-                    core.isInstallGms(0) -> "installed"
-                    else -> "ready"
-                }
-            }.getOrDefault("checking")
-        }
-        clones.addAll((saved + engineClones).distinct())
-        apps.addAll(loaded)
-        loading = false
-    }
-
-    fun persist() = saveClones(ctx, clones.toSet())
+    fun persist() = saveClones(ctx, clones.map { it.toString() }.toSet())
 
     fun doClone(app: AppInfo) {
-        if (busyPkg != null) return
-        busyPkg = app.pkg
+        if (busyClone != null) return
         scope.launch(Dispatchers.IO) {
-            val result = Engine.current.installClone(app.pkg)
+            val uid = Engine.current.nextUserId(app.pkg)
+            if (uid < 0) {
+                withContext(Dispatchers.Main) {
+                    toast("সর্বোচ্চ ক্লোন সংখ্যা পূর্ণ হয়েছে")
+                }
+                return@launch
+            }
+            val newClone = CloneId(app.pkg, uid)
+            withContext(Dispatchers.Main) { busyClone = newClone }
+            val result = Engine.current.installClone(app.pkg, uid)
             withContext(Dispatchers.Main) {
-                busyPkg = null
+                busyClone = null
                 result.fold(
                     onSuccess = {
-                        if (app.pkg !in clones) {
-                            clones.add(app.pkg)
+                        if (!clones.contains(newClone)) {
+                            clones.add(newClone)
                             persist()
                         }
-                        toast("${app.label} ক্লোন হয়েছে")
+                        val n = clones.count { it.pkg == app.pkg }
+                        toast("${app.label} ক্লোন হয়েছে" + if (n > 1) " ($n)" else "")
                     },
                     onFailure = { toast(it.message ?: "ক্লোন করা যায়নি") }
                 )
@@ -279,13 +290,13 @@ fun ClonerAppScreen() {
         }
     }
 
-    fun doLaunch(app: AppInfo) {
-        if (busyPkg != null) return
-        busyPkg = app.pkg
+    fun doLaunch(clone: CloneId) {
+        if (busyClone != null) return
+        busyClone = clone
         scope.launch(Dispatchers.IO) {
-            val result = Engine.current.launchClone(app.pkg)
+            val result = Engine.current.launchClone(clone.pkg, clone.userId)
             withContext(Dispatchers.Main) {
-                busyPkg = null
+                busyClone = null
                 result.onFailure { toast(it.message ?: "চালু করা যায়নি") }
             }
         }
@@ -327,24 +338,24 @@ fun ClonerAppScreen() {
         }
     }
 
-    fun doDelete(app: AppInfo) {
-        if (busyPkg != null) return
-        busyPkg = app.pkg
+    fun doDelete(clone: CloneId) {
+        if (busyClone != null) return
+        busyClone = clone
         scope.launch(Dispatchers.IO) {
-            val result = Engine.current.uninstallClone(app.pkg)
+            val result = Engine.current.uninstallClone(clone.pkg, clone.userId)
             withContext(Dispatchers.Main) {
-                busyPkg = null
+                busyClone = null
                 result.fold(
                     onSuccess = {
-                        clones.remove(app.pkg)
+                        clones.remove(clone)
                         persist()
-                        toast("${app.label} মুছে ফেলা হয়েছে")
+                        toast("ক্লোন মুছে ফেলা হয়েছে")
                     },
                     onFailure = {
                         // ইঞ্জিনে ডিলিট না থাকলে শুধু লিস্ট থেকে সরাও
-                        clones.remove(app.pkg)
+                        clones.remove(clone)
                         persist()
-                        toast("${app.label} তালিকা থেকে সরানো হয়েছে")
+                        toast("তালিকা থেকে সরানো হয়েছে")
                     }
                 )
             }
@@ -352,12 +363,13 @@ fun ClonerAppScreen() {
     }
 
     // হোম-স্ক্রিন শর্টকাট থেকে এলে তালিকা লোডের পর সরাসরি চালু করো
+    // (পুরনো শর্টকাটের জন্য, userId 0 ধরে)
     LaunchedEffect(loading) {
         if (!loading) {
             val lp = MainActivity.launchPkg
             if (lp != null) {
                 MainActivity.launchPkg = null
-                apps.find { it.pkg == lp }?.let { doLaunch(it) }
+                doLaunch(CloneId(lp, 0))
             }
         }
     }
@@ -572,32 +584,42 @@ fun ClonerAppScreen() {
                 } else {
                     LazyColumn(modifier = Modifier.padding(vertical = 4.dp)) {
                         items(filtered, key = { it.pkg }) { app ->
+                            val n = clones.count { it.pkg == app.pkg }
                             AppRow(
                                 app = app,
-                                buttonLabel = if (app.pkg in clones) "ক্লোন হয়েছে ✓" else "ক্লোন",
-                                busy = busyPkg == app.pkg,
-                                buttonEnabled = app.pkg !in clones && busyPkg == null
+                                buttonLabel = if (n > 0) "ক্লোন ($n)" else "ক্লোন",
+                                busy = busyClone?.pkg == app.pkg,
+                                buttonEnabled = busyClone == null
                             ) { doClone(app) }
                         }
                     }
                 }
             } else {
-                val cloneApps = apps.filter { it.pkg in clones }
-                if (cloneApps.isEmpty()) {
+                if (clones.isEmpty()) {
                     EmptyHint("এখনো কোনো ক্লোন নেই।\n\"সব অ্যাপ\" থেকে ক্লোন করুন।")
                 } else {
                     LazyColumn(modifier = Modifier.padding(vertical = 4.dp)) {
-                        items(cloneApps, key = { it.pkg }) { app ->
-                            CloneRow(
-                                app = app,
-                                busy = busyPkg == app.pkg,
-                                onLaunch = { doLaunch(app) },
-                                onDelete = { doDelete(app) },
-                                onShortcut = {
-                                    (ctx as? MainActivity)?.pinCloneShortcut(app)
-                                        ?: toast("শর্টকাট যোগ করা যায়নি")
-                                }
-                            )
+                        items(clones.sortedWith(compareBy({ it.pkg }, { it.userId })),
+                            key = { it.toString() }) { clone ->
+                            val app = apps.find { it.pkg == clone.pkg }
+                            if (app != null) {
+                                val siblings = clones.filter { it.pkg == clone.pkg }
+                                    .sortedBy { it.userId }
+                                val idx = siblings.indexOf(clone) + 1
+                                val title = if (siblings.size > 1)
+                                    "${app.label} $idx" else app.label
+                                CloneRow(
+                                    app = app,
+                                    title = title,
+                                    busy = busyClone == clone,
+                                    onLaunch = { doLaunch(clone) },
+                                    onDelete = { doDelete(clone) },
+                                    onShortcut = {
+                                        (ctx as? MainActivity)?.pinCloneShortcut(clone, app, title)
+                                            ?: toast("শর্টকাট যোগ করা যায়নি")
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -705,6 +727,7 @@ fun AppRow(
 @Composable
 fun CloneRow(
     app: AppInfo,
+    title: String? = null,
     busy: Boolean,
     onLaunch: () -> Unit,
     onDelete: () -> Unit,
@@ -727,7 +750,7 @@ fun CloneRow(
                 modifier = Modifier.size(46.dp).clip(RoundedCornerShape(12.dp))
             )
             Text(
-                app.label,
+                title ?: app.label,
                 modifier = Modifier.weight(1f),
                 fontWeight = FontWeight.Medium,
                 fontSize = 15.sp

@@ -14,12 +14,13 @@ class ShortcutLaunchActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val pkg = intent.getStringExtra("clone_pkg")
+        val userId = intent.getIntExtra("clone_user", 0)
         if (pkg.isNullOrEmpty()) {
             finish()
             return
         }
         CoroutineScope(Dispatchers.IO).launch {
-            val result = Engine.current.launchClone(pkg)
+            val result = Engine.current.launchClone(pkg, userId)
             if (result.isFailure) {
                 val msg = result.exceptionOrNull()?.message ?: "চালু করা যায়নি"
                 runOnUiThread {
