@@ -131,7 +131,17 @@ public final class AppInstrumentation extends BaseInstrumentationDelegate implem
     @Override
     public void callActivityOnCreate(Activity activity, Bundle icicle) {
         checkActivity(activity);
+        try {
+            top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                "AppInstrumentation.callActivityOnCreate start: " + activity.getClass().getName());
+        } catch (Throwable ignored) { }
         super.callActivityOnCreate(activity, icicle);
+        try {
+            top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                "AppInstrumentation.callActivityOnCreate done: " + activity.getClass().getName());
+        } catch (Throwable ignored) { }
     }
 
     @Override
