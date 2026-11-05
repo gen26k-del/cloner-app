@@ -314,9 +314,11 @@ fun ClonerAppScreen() {
                             if (!alive) {
                                 android.widget.Toast.makeText(
                                     ctx,
-                                    "${clone.pkg}-এর প্রসেস চালু হয়নি / বন্ধ হয়ে গেছে — লগ দেখুন বোতামে চাপ দাও",
+                                    "${clone.pkg}-এর প্রসেস চালু হয়নি / বন্ধ হয়ে গেছে — নিচের ট্রেসটা কপি করে পাঠাও",
                                     android.widget.Toast.LENGTH_SHORT
                                 ).show()
+                                // ট্রেস কার্ড নিজে থেকেই দেখাও — ব্যবহারকারীকে আর বোতাম চাপতে হবে না
+                                captureTrace()
                             }
                         }
                     }
