@@ -301,7 +301,7 @@ fun ClonerAppScreen() {
                 busyClone = null
                 result.onFailure { toast(it.message ?: "চালু করা যায়নি") }
                 result.onSuccess {
-                    toast("লঞ্চ কল পাঠানো হয়েছে — ${clone.pkg} আসছে...")
+                    // সফল লঞ্চে আর মেসেজ দেখানো হয় না (বিরক্তিকর বলে ব্যবহারকারী জানিয়েছে)।
                     // ৫ সেকেন্ড পর: স্টাব প্রসেস (:p0/:p1...) বেঁচে আছে কিনা
                     scope.launch(Dispatchers.IO) {
                         kotlinx.coroutines.delay(5000)
@@ -311,7 +311,11 @@ fun ClonerAppScreen() {
                             ?.any { it.processName.startsWith("${ctx.packageName}:p") } == true
                         withContext(Dispatchers.Main) {
                             if (!alive) {
-                                toast("${clone.pkg}-এর প্রসেস চালু হয়নি / বন্ধ হয়ে গেছে — লাল ক্র্যাশ রিপোর্ট কার্ডটা দেখো")
+                                android.widget.Toast.makeText(
+                                    ctx,
+                                    "${clone.pkg}-এর প্রসেস চালু হয়নি / বন্ধ হয়ে গেছে — লগ দেখুন বোতামে চাপ দাও",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
                             }
                         }
                     }
@@ -333,14 +337,15 @@ fun ClonerAppScreen() {
                     "chrome", "fatal", "sigsegv", "sigabrt", "sigbus", "dlopen",
                     "chromium", "androidruntime", "tombstone", "crash", "linker",
                     "fatal signal", "native crash", "com.example.cloner",
-                    "com.android.chrome"
+                    "com.android.chrome", "has died", "win death"
                 )
                 val lines = out.lines().filter { line ->
                     val low = line.lowercase()
+                    !low.contains("packageparser") &&
                     keys.any { low.contains(it) }
-                }.takeLast(80)
+                }.takeLast(60)
                 if (lines.isEmpty()) "লগে ক্র্যাশের কোনো লাইন পাওয়া যায়নি (লগ খালি বা এই ফোনে লগ পড়া বন্ধ আছে)"
-                else lines.joinToString("\n").take(6000)
+                else lines.joinToString("\n").take(4000)
             }.getOrDefault("লগ পড়া যায়নি — logcat চালানো ব্যর্থ হয়েছে")
             withContext(Dispatchers.Main) { logText = text }
         }
