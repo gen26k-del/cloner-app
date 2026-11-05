@@ -23,6 +23,28 @@ data class CloneId(val pkg: String, val userId: Int) {
 }
 
 /**
+ * ভার্চুয়াল GMS-এর সাথে আসা সিস্টেম প্যাকেজ — এগুলো ব্যবহারকারীর ক্লোন না,
+ * তাই ক্লোন লিস্টে দেখানো উচিত না (না হলে GMS ইনস্টল করলেই ৪টা "এক্সট্রা ক্লোন" দেখায়)।
+ */
+val GmsSystemPackages = setOf(
+    "com.google.android.gms",
+    "com.google.android.gsf",
+    "com.google.android.gsf.login",
+    "com.android.vending",
+    "com.google.android.backuptransport",
+    "com.google.android.backup",
+    "com.google.android.configupdater",
+    "com.google.android.syncadapters.contacts",
+    "com.google.android.feedback",
+    "com.google.android.onetimeinitializer",
+    "com.google.android.partnersetup",
+    "com.google.android.setupwizard",
+    "com.google.android.syncadapters.calendar"
+)
+
+fun isGmsSystemPackage(pkg: String): Boolean = pkg in GmsSystemPackages
+
+/**
  * ভার্চুয়ালাইজেশন ইঞ্জিনের সংযোগস্থল।
  * আসল ইঞ্জিন (যেমন BlackBox-ভিত্তিক) যুক্ত করার পর
  * এই ইন্টারফেস ইমপ্লিমেন্ট করে Engine.current-এ বসাতে হবে।

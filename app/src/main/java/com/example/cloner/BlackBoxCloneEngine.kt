@@ -91,9 +91,9 @@ class BlackBoxCloneEngine : CloneEngine {
         val out = mutableListOf<CloneId>()
         for (uid in 0..maxUserId) {
             try {
-                core().getInstalledApplications(0, uid).mapTo(out) {
-                    CloneId(it.packageName, uid)
-                }
+                core().getInstalledApplications(0, uid)
+                    .filter { !isGmsSystemPackage(it.packageName) }
+                    .mapTo(out) { CloneId(it.packageName, uid) }
             } catch (_: Exception) { }
         }
         out

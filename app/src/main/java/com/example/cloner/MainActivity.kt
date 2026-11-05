@@ -231,6 +231,7 @@ fun ClonerAppScreen() {
             }.getOrDefault("checking")
         }
         val parsed = saved.mapNotNull { CloneId.parse(it) }
+            .filter { !isGmsSystemPackage(it.pkg) }
         clones.addAll((parsed + engineClones).distinct())
         apps.addAll(loaded)
         loading = false
