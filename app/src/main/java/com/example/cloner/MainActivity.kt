@@ -318,7 +318,14 @@ fun ClonerAppScreen() {
                                     android.widget.Toast.LENGTH_SHORT
                                 ).show()
                                 // ট্রেস কার্ড নিজে থেকেই দেখাও — ব্যবহারকারীকে আর বোতাম চাপতে হবে না
-                                captureTrace()
+                                scope.launch(Dispatchers.IO) {
+                                    val text = runCatching {
+                                        val f = java.io.File(ctx.cacheDir, "init_trace.txt")
+                                        if (!f.exists()) "ট্রেস ফাইল নেই (init_trace.txt পাওয়া যায়নি)"
+                                        else f.readText().takeLast(4000).ifEmpty { "ট্রেস ফাইল খালি" }
+                                    }.getOrDefault("ট্রেস পড়া যায়নি")
+                                    withContext(Dispatchers.Main) { traceText = text }
+                                }
                             }
                         }
                     }
