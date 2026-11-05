@@ -40,7 +40,26 @@ class BlackBoxCloneEngine : CloneEngine {
             throw IllegalStateException(result.msg ?: "ইনস্টল ব্যর্থ হয়েছে")
         }
         copyNativeLibs(packageName)
+        // যাচাই: লঞ্চ intent রেজোলভ হয় কিনা (Chrome-এর ক্ষেত্রে SYSTEM
+        // ইনস্টলে হয় না)। না হলে STORAGE পদ্ধতিতে আবার ইনস্টল চেষ্টা করো —
+        // ব্যর্থ হলে SYSTEM ক্লোনটাই থাকে, কিছু হারায় না।
+        if (!isLaunchable(packageName, userId)) {
+            try {
+                val ctx = BlackBoxCore.getContext()
+                val appInfo = ctx.packageManager.getApplicationInfo(packageName, 0)
+                val r2 = core().installPackageAsUser(File(appInfo.sourceDir), userId)
+                if (r2.success) copyNativeLibs(packageName)
+            } catch (_: Exception) { }
+        }
         Unit
+    }
+
+    /** লঞ্চ intent রেজোলভ হয় কিনা (ক্লোন চালুযোগ্য কিনা) */
+    private fun isLaunchable(packageName: String, userId: Int): Boolean = try {
+        BlackBoxCore.getBPackageManager()
+            .getLaunchIntentForPackage(packageName, userId) != null
+    } catch (_: Exception) {
+        false
     }
 
     /**
@@ -90,7 +109,8 @@ class BlackBoxCloneEngine : CloneEngine {
             return@runCatching Unit
         }
         // ফলব্যাক: লঞ্চ intent না মিললে (Chrome-এর ক্ষেত্রে) প্যাকেজের
-        // অ্যাক্টিভিটি তালিকা থেকে সরাসরি মূল অ্যাক্টিভিটি চালু করো
+        // অ্যাক্টিভিটি তালিকা থেকে সরাসরি মূল অ্যাক্টিভিটি চালু করো।
+        // enabled ফিল্টার দেওয়া হয়নি — disabled Main-ও চেষ্টা করতে হবে।
         val pkgInfo = try {
             pm.getPackageInfo(
                 packageName,
@@ -101,7 +121,7 @@ class BlackBoxCloneEngine : CloneEngine {
             null
         }
         val activities = pkgInfo?.activities
-            ?.filter { it.enabled && it.exported } ?: emptyList()
+            ?.filter { it.exported } ?: emptyList()
         val target = activities.firstOrNull { it.name.endsWith(".Main") }
             ?: activities.firstOrNull()
             ?: throw IllegalStateException("কোনো অ্যাক্টিভিটিই পাওয়া যায়নি (intent null)")
