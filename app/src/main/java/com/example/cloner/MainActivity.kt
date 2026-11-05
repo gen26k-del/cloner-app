@@ -712,7 +712,7 @@ fun ClonerAppScreen() {
                 append("=== CloneMe সব অ্যাপ চেকআপ ===\n")
                 append("সময়: ${java.util.Date()}\n")
                 append("মোট: ${targets.size}টি অ্যাপ")
-                if (skippedPassed > 0) append(" (+ পাস করা $skippedPassedটি বাদ দেওয়া হয়েছে)")
+                if (skippedPassed > 0) append(" (+ পাস করা ${skippedPassed}টি বাদ দেওয়া হয়েছে)")
                 append("\n")
                 append("✅ চালু: $okCount | ❌ ব্যর্থ: $failCount | ⏭️ বাদ: $skipCount\n")
                 if (stopped) append("(মাঝপথে থামানো হয়েছে)\n")
