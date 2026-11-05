@@ -145,6 +145,16 @@ public final class AppInstrumentation extends BaseInstrumentationDelegate implem
     }
 
     @Override
+    public void callActivityOnResume(Activity activity) {
+        try {
+            top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                "AppInstrumentation.callActivityOnResume: " + activity.getClass().getName());
+        } catch (Throwable ignored) { }
+        super.callActivityOnResume(activity);
+    }
+
+    @Override
     public void callApplicationOnCreate(Application app) {
         checkHCallback();
         super.callApplicationOnCreate(app);

@@ -171,7 +171,7 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this, "এই ফোনে শর্টকাট সাপোর্ট করে না", Toast.LENGTH_LONG).show()
             return
         }
-        val intent = Intent(this, MainActivity::class.java).apply {
+        val intent = Intent(this, ShortcutLaunchActivity::class.java).apply {
             action = ACTION_LAUNCH_CLONE
             putExtra("clone_pkg", app.pkg)
         }
@@ -195,6 +195,7 @@ fun ClonerAppScreen() {
     var busyPkg by remember { mutableStateOf<String?>(null) }
     var crashReport by remember { mutableStateOf<String?>(null) }
     var gmsState by remember { mutableStateOf("checking") } // checking/unsupported/installed/ready/installing/failed
+    var batteryIgnored by remember { mutableStateOf(true) }
     val apps = remember { mutableStateListOf<AppInfo>() }
     val clones = remember { mutableStateListOf<String>() }
 
@@ -217,7 +218,29 @@ fun ClonerAppScreen() {
                     ?.let { it.readText().take(6000) }
             }.getOrNull()
         }
-        // Google Play সার্ভিসের অবস্থা দেখো
+        // ব্যাটারি অপটিমাইজেশন অবস্থা দেখো (নোটিফিকেশনের জন্য)
+    LaunchedEffect(Unit) {
+        batteryIgnored = withContext(Dispatchers.IO) {
+            runCatching {
+                val pm = ctx.getSystemService(android.os.PowerManager::class.java)
+                pm.isIgnoringBatteryOptimizations(ctx.packageName)
+            }.getOrDefault(true)
+        }
+    }
+
+    fun doRequestBatteryExemption() {
+        try {
+            val intent = android.content.Intent(
+                android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                android.net.Uri.parse("package:${ctx.packageName}")
+            )
+            ctx.startActivity(intent)
+        } catch (_: Exception) {
+            toast("Settings → Battery → CloneMe → Unrestricted করুন")
+        }
+    }
+
+    // Google Play সার্ভিসের অবস্থা দেখো
         gmsState = withContext(Dispatchers.IO) {
             runCatching {
                 val core = BlackBoxCore.get()
@@ -462,6 +485,37 @@ fun ClonerAppScreen() {
                             Button(onClick = { doInstallGms() }) {
                                 Text(if (gmsState == "failed") "আবার চেষ্টা" else "ইনস্টল করুন")
                             }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+
+            // ব্যাটারি অপটিমাইজেশন কার্ড — নোটিফিকেশন বাঁচিয়ে রাখতে
+            if (!batteryIgnored) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    ),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "ব্যাকগ্রাউন্ড চালু রাখুন",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            Text(
+                                "মেসেঞ্জারের নোটিফিকেশন ঠিকমতো পেতে ব্যাটারি সেভিং থেকে CloneMe-কে ছাড় দিন",
+                                fontSize = 12.sp
+                            )
+                        }
+                        Button(onClick = { doRequestBatteryExemption() }) {
+                            Text("ছাড় দিন")
                         }
                     }
                 }

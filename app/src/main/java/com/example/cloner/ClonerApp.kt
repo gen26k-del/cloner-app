@@ -149,5 +149,20 @@ class ClonerApp : Application() {
             Log.e("ClonerApp", "BlackBox init failed, using NoEngine", e)
             Engine.current = NoEngine
         }
+        // নোটিফিকেশন বাঁচিয়ে রাখার জন্য keep-alive সার্ভিস (শুধু মেইন প্রসেসে)
+        try {
+            val proc = java.io.File("/proc/self/cmdline").readText()
+                .replace("\u0000", " ").trim()
+            if (proc == packageName) {
+                val svc = android.content.Intent(this, KeepAliveService::class.java)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    startForegroundService(svc)
+                } else {
+                    startService(svc)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("ClonerApp", "KeepAlive start failed", e)
+        }
     }
 }
