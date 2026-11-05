@@ -126,6 +126,16 @@ class BlackBoxCloneEngine : CloneEngine {
             ?: activities.firstOrNull()
             ?: throw IllegalStateException("কোনো অ্যাক্টিভিটিই পাওয়া যায়নি (intent null)")
         val clsName = if (target.name.startsWith(".")) packageName + target.name else target.name
+        // চূড়ান্ত ডায়াগনস্টিক: এই কম্পোনেন্ট রেজোলভারে আছে কিনা
+        val comp = android.content.ComponentName(packageName, clsName)
+        val ai = try {
+            pm.getActivityInfo(comp, 0, userId)
+        } catch (_: Exception) {
+            null
+        }
+        if (ai == null) {
+            throw IllegalStateException("কম্পোনেন্ট রেজোলভারে নেই: $clsName")
+        }
         val explicit = android.content.Intent(android.content.Intent.ACTION_MAIN).apply {
             addCategory(android.content.Intent.CATEGORY_LAUNCHER)
             setClassName(packageName, clsName)
