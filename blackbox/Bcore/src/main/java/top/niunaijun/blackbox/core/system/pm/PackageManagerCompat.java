@@ -306,6 +306,19 @@ public class PackageManagerCompat {
         ai.sourceDir = sourceDir;
         ai.uid = p.mExtras.appId;
 
+        // Split APK তথ্য না থাকলে Lite অ্যাপ (Instagram Lite / Facebook Lite) স্টার্টআপে
+        // splitSourceDirs.length পড়তে গিয়ে NPE দেয় — বেস APK পার্স করলে split
+        // ফিল্ডগুলো null থাকে। খালি অ্যারে দিলে ক্র্যাশ এড়ানো যায় ("কোনো split নেই" অবস্থা)।
+        if (ai.splitSourceDirs == null) {
+            ai.splitSourceDirs = new String[0];
+        }
+        if (ai.splitPublicSourceDirs == null) {
+            ai.splitPublicSourceDirs = new String[0];
+        }
+        if (ai.splitNames == null) {
+            ai.splitNames = new String[0];
+        }
+
 
         if (BuildCompat.isL()) {
             BRApplicationInfoL.get(ai)._set_primaryCpuAbi(Build.CPU_ABI);
