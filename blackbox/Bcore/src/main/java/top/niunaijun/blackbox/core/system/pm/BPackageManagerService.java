@@ -258,8 +258,37 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
                 if (ps == null) return null;
                 return PackageManagerCompat.generateActivityInfo(a, flags, ps.readUserState(userId), userId);
             }
+            // ভার্চুয়াল PM-এ কম্পোনেন্ট নেই — হোস্ট PM থেকে আসল ActivityInfo নাও।
+            // Chromium অ্যাপের (Chrome/Brave) Main/Tabbed অ্যাক্টিভিটি ভার্চুয়াল
+            // পার্সে অনেক সময় ওঠে না, কিন্তু ফোনে ইনস্টল করা আসল অ্যাপে আছেই।
+            // না হলে explicit intent-ও resolve হয় না, আর ActivityStack
+            // চুপচাপ 0 ফেরত দিয়ে লঞ্চ ফেলে দেয় (Chrome কখনো আসে না)।
+            BPackageSettings ps = mSettings.mPackages.get(component.getPackageName());
+            if (ps == null) return null;
+            try {
+                ActivityInfo hostAi = BlackBoxCore.getPackageManager()
+                        .getActivityInfo(component, flags);
+                if (hostAi == null) return null;
+                // activity-alias হলে টার্গেট অ্যাক্টিভিটির তথ্য নাও — alias নামে
+                // কোনো ক্লাস নেই, stub সেটা লোড করতে পারবে না।
+                if (hostAi.targetActivity != null) {
+                    ComponentName target = new ComponentName(
+                            component.getPackageName(), hostAi.targetActivity);
+                    ActivityInfo targetAi = BlackBoxCore.getPackageManager()
+                            .getActivityInfo(target, flags);
+                    if (targetAi != null) hostAi = targetAi;
+                }
+                // ভার্চুয়াল অ্যাপের ApplicationInfo বসাও — আসল পাথ নয়,
+                // ভার্চুয়াল পাথ/প্রসেস ব্যবহার করতে হবে।
+                ActivityInfo ai = new ActivityInfo(hostAi);
+                ai.applicationInfo = PackageManagerCompat.generateApplicationInfo(
+                        ps.pkg, flags, ps.readUserState(userId), userId);
+                ai.processName = fixProcessName(ai.packageName, hostAi.processName);
+                return ai;
+            } catch (Exception e) {
+                return null;
+            }
         }
-        return null;
     }
 
     @Override

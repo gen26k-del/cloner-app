@@ -109,6 +109,15 @@ public class BPackageManager extends BlackManager<IBPackageManagerService> {
                     userId);
         }
         if (ris == null || ris.size() <= 0) {
+            // ভার্চুয়াল PM-এ লঞ্চার intent মেলেনি — হোস্ট PM থেকে আসল লঞ্চ
+            // intent নাও। Chromium অ্যাপের Main অ্যাক্টিভিটি ভার্চুয়াল পার্সে
+            // ওঠে না বলে getLaunchIntentForPackage null দেয়, আর Chrome/Brave
+            // কখনো চালু হয় না। হোস্ট PM-এর intent explicit, আর getActivity-র
+            // হোস্ট fallback সেটা ভার্চুয়াল AM-এ resolve করে দেবে।
+            Intent hostIntent = createFallbackLaunchIntent(packageName);
+            if (hostIntent != null && hostIntent.getComponent() != null) {
+                return hostIntent;
+            }
             return null;
         }
         Intent intent = new Intent(intentToResolve);
