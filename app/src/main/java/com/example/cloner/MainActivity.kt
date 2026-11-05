@@ -77,6 +77,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import top.niunaijun.blackbox.BlackBoxCore
+import top.niunaijun.blackbox.core.env.BEnvironment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -197,6 +198,7 @@ fun ClonerAppScreen() {
     var crashReport by remember { mutableStateOf<String?>(null) }
     var logText by remember { mutableStateOf<String?>(null) }
     var traceText by remember { mutableStateOf<String?>(null) }
+    var reportText by remember { mutableStateOf<String?>(null) }
     var gmsState by remember { mutableStateOf("checking") } // checking/unsupported/installed/ready/installing/failed
     var batteryIgnored by remember { mutableStateOf(true) }
     val apps = remember { mutableStateListOf<AppInfo>() }
@@ -374,6 +376,131 @@ fun ClonerAppScreen() {
         }
     }
 
+    // স্মার্ট রিপোর্ট: অ্যাপ নিজে থেকেই সবকিছু যাচাই করে রায়সহ রিপোর্ট বানায় —
+    // ইনস্টল, লঞ্চ intent, কম্পোনেন্ট, নেটিভ লাইব্রেরি, স্টোরেজ, ট্রেস, ক্র্যাশ।
+    fun generateReport() {
+        val cloneList = clones.toList()
+        val gms = gmsState
+        scope.launch(Dispatchers.IO) {
+            val sb = StringBuilder()
+            val ver = runCatching {
+                ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName
+            }.getOrDefault("?")
+            sb.append("=== CloneMe স্মার্ট রিপোর্ট ===\n")
+            sb.append("সময়: ${java.util.Date()}\nভার্সন: $ver\n")
+            sb.append("ইঞ্জিন: ${if (Engine.current.isReady()) "চালু" else "বন্ধ"}\n")
+            sb.append("GMS: $gms\n")
+            // বাইরের স্টোরেজ যাচাই (আগে /dev/null পাওয়া গিয়েছিল)
+            val ext = runCatching { ctx.getExternalFilesDir(null) }.getOrNull()
+            sb.append("বাইরের স্টোরেজ: ${ext?.absolutePath ?: "null (পাওয়া যায়নি)"}\n")
+            if (ext != null && ext.absolutePath.startsWith("/dev/null")) {
+                sb.append("⚠️ সতর্কতা: বাইরের স্টোরেজ পাথ /dev/null — ভুল!\n")
+            }
+            val pm = BlackBoxCore.getBPackageManager()
+            val trace = runCatching {
+                java.io.File(ctx.cacheDir, "init_trace.txt")
+                    .takeIf { it.exists() }?.readText().orEmpty()
+            }.getOrDefault("")
+            val traceTail = trace.takeLast(1500)
+            val verdicts = mutableListOf<String>()
+            if (cloneList.isEmpty()) {
+                sb.append("\nকোনো ক্লোন নেই।\n")
+            }
+            for (clone in cloneList) {
+                val pkg = clone.pkg
+                sb.append("\n--- ক্লোন: $pkg (user ${clone.userId}) ---\n")
+                val installed = runCatching {
+                    BlackBoxCore.get().isInstalled(pkg, clone.userId)
+                }.getOrDefault(false)
+                sb.append("ইনস্টল: ${if (installed) "হ্যাঁ" else "না"}\n")
+                val intent = runCatching {
+                    pm.getLaunchIntentForPackage(pkg, clone.userId)
+                }.getOrNull()
+                sb.append("লঞ্চ intent: ${intent?.component?.className ?: "null (মেলে না)"}\n")
+                val pkgInfo = runCatching {
+                    pm.getPackageInfo(
+                        pkg,
+                        android.content.pm.PackageManager.GET_ACTIVITIES,
+                        clone.userId
+                    )
+                }.getOrNull()
+                val acts = pkgInfo?.activities?.filter { it.exported } ?: emptyList()
+                val target = acts.firstOrNull { it.name.endsWith(".Main") }
+                    ?: acts.firstOrNull()
+                var clsName: String? = null
+                var aiFound = false
+                if (target != null) {
+                    clsName = if (target.name.startsWith(".")) pkg + target.name else target.name
+                    sb.append("মূল অ্যাক্টিভিটি: $clsName\n")
+                    aiFound = runCatching {
+                        pm.getActivityInfo(
+                            android.content.ComponentName(pkg, clsName),
+                            0,
+                            clone.userId
+                        ) != null
+                    }.getOrDefault(false)
+                    sb.append("কম্পোনেন্ট রেজোলভারে: ${if (aiFound) "আছে" else "নেই"}\n")
+                } else {
+                    sb.append("মূল অ্যাক্টিভিটি: পাওয়া যায়নি\n")
+                }
+                val libDir = runCatching { BEnvironment.getAppLibDir(pkg) }.getOrNull()
+                val sos = libDir?.listFiles { f -> f.name.endsWith(".so") }
+                    ?.map { it.name } ?: emptyList()
+                sb.append("নেটিভ লাইব্রেরি: ${if (sos.isEmpty()) "নেই" else sos.size.toString() + "টি — " + sos.take(5).joinToString(", ")}\n")
+                if (pkg == "com.android.chrome") {
+                    sb.append("libchrome.so: ${if (sos.contains("libchrome.so")) "আছে" else "নেই"}\n")
+                }
+                val v = when {
+                    !installed -> "ইনস্টল হয়নি"
+                    intent == null && !aiFound -> "কম্পোনেন্ট রেজোলভারে নেই — ইনস্টল/রেজিস্ট্রেশন সমস্যা"
+                    intent == null && aiFound -> "লঞ্চ intent মেলে না, কিন্তু কম্পোনেন্ট আছে — ফলব্যাক লঞ্চ ব্যবহার হচ্ছে"
+                    else -> "লঞ্চ intent ঠিক আছে"
+                }
+                sb.append("রায়: $v\n")
+                verdicts.add("$pkg: $v")
+                // ট্রেস বিশ্লেষণ
+                if (traceTail.isNotEmpty()) {
+                    val hasBind = traceTail.contains("handleBindApplication done: $pkg")
+                    val hasCreateStart = clsName != null &&
+                        traceTail.contains("callActivityOnCreate start: $clsName")
+                    val hasCreateDone = clsName != null &&
+                        traceTail.contains("callActivityOnCreate done: $clsName")
+                    val hasResume = clsName != null &&
+                        traceTail.contains("callActivityOnResume: $clsName")
+                    val t = when {
+                        !hasBind -> "ট্রেস: bind হয়নি — bind-এর আগেই প্রসেস মারা গেছে"
+                        hasCreateStart && !hasCreateDone -> "ট্রেস: onCreate শুরু হয়েছে কিন্তু শেষ হয়নি — onCreate-এ আটকে/ক্র্যাশ"
+                        hasCreateDone && !hasResume -> "ট্রেস: onCreate শেষ হয়েছে কিন্তু onResume হয়নি — অ্যাক্টিভিটি বন্ধ হয়ে গেছে"
+                        hasResume -> "ট্রেস: onResume হয়েছে — অ্যাক্টিভিটি চালু হয়েছিল"
+                        else -> "ট্রেস: bind হয়েছে, কিন্তু অ্যাক্টিভিটি শুরু হয়নি"
+                    }
+                    sb.append("$t\n")
+                    verdicts.add("$pkg ট্রেস: $t")
+                }
+            }
+            val crashes = ctx.cacheDir.listFiles { f ->
+                f.name.startsWith("last_crash") && f.name.endsWith(".txt")
+            }?.sortedByDescending { it.lastModified() }?.take(3) ?: emptyList()
+            sb.append("\n--- ক্র্যাশ রিপোর্ট ---\n")
+            if (crashes.isEmpty()) {
+                sb.append("কোনো জাভা ক্র্যাশ রিপোর্ট নেই (নেটিভ ক্র্যাশ হলে রিপোর্ট থাকে না)\n")
+            } else {
+                for (f in crashes) {
+                    sb.append("${f.name}: ${f.readText().lineSequence().firstOrNull().orEmpty()}\n")
+                }
+            }
+            sb.append("\n=== সারাংশ ===\n")
+            if (verdicts.isEmpty()) {
+                sb.append("কোনো ক্লোন নেই — প্রথমে একটি অ্যাপ ক্লোন করো।\n")
+            } else {
+                sb.append(verdicts.joinToString("\n") + "\n")
+            }
+            sb.append("\n--- ট্রেস (শেষাংশ) ---\n")
+            sb.append(if (traceTail.isEmpty()) "ট্রেস নেই\n" else traceTail + "\n")
+            withContext(Dispatchers.Main) { reportText = sb.toString().take(5000) }
+        }
+    }
+
     // Google Play সার্ভিস ভার্চুয়াল পরিবেশে ইনস্টল (ইন্টারনেট অ্যাপের জন্য)
     fun doInstallGms() {
         if (gmsState == "installing") return
@@ -497,6 +624,7 @@ fun ClonerAppScreen() {
             ) {
                 TextButton(onClick = { captureLog() }) { Text("📋 লগ দেখুন") }
                 TextButton(onClick = { captureTrace() }) { Text("📜 ট্রেস দেখুন") }
+                TextButton(onClick = { generateReport() }) { Text("🔍 স্মার্ট রিপোর্ট") }
             }
             logText?.let { log ->
                 Card(
@@ -558,6 +686,38 @@ fun ClonerAppScreen() {
                                 toast("ট্রেস কপি হয়েছে")
                             }) { Text("কপি করুন") }
                             TextButton(onClick = { traceText = null }) { Text("বন্ধ করুন") }
+                        }
+                    }
+                }
+            }
+            reportText?.let { report ->
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF3E5F5)),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(
+                            "🔍 স্মার্ট রিপোর্ট (অ্যাপ নিজে যাচাই করেছে)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            report,
+                            fontSize = 11.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 280.dp)
+                                .verticalScroll(rememberScrollState())
+                        )
+                        Row {
+                            TextButton(onClick = {
+                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("report", report))
+                                toast("রিপোর্ট কপি হয়েছে")
+                            }) { Text("কপি করুন") }
+                            TextButton(onClick = { reportText = null }) { Text("বন্ধ করুন") }
                         }
                     }
                 }
