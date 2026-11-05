@@ -501,6 +501,136 @@ fun ClonerAppScreen() {
         }
     }
 
+    // সব অ্যাপ চেকআপ: প্রতিটি অ্যাপ ক্লোন করে (না থাকলে), চালিয়ে দেখে, রিপোর্ট বানায়।
+    var checkupRunning by remember { mutableStateOf(false) }
+    var checkupProgress by remember { mutableStateOf("") }
+    var checkupStop by remember { mutableStateOf(false) }
+    val checkupLines = remember { mutableStateListOf<String>() }
+
+    fun runFullCheckup() {
+        if (checkupRunning) return
+        val targets = apps.filter { !isGmsSystemPackage(it.pkg) }
+        if (targets.isEmpty()) {
+            toast("চেক করার মতো কোনো অ্যাপ নেই")
+            return
+        }
+        checkupRunning = true
+        checkupStop = false
+        checkupLines.clear()
+        checkupProgress = "শুরু হচ্ছে…"
+        scope.launch(Dispatchers.IO) {
+            val pm = BlackBoxCore.getBPackageManager()
+            var okCount = 0
+            var failCount = 0
+            var skipCount = 0
+            for ((idx, app) in targets.withIndex()) {
+                if (checkupStop) break
+                withContext(Dispatchers.Main) {
+                    checkupProgress = "${app.label} (${idx + 1}/${targets.size})"
+                }
+                val pkg = app.pkg
+                // ক্লোন না থাকলে ক্লোন করো
+                val already = clones.any { it.pkg == pkg }
+                var cloned = already
+                if (!already) {
+                    val uid = Engine.current.nextUserId(pkg)
+                    if (uid < 0) {
+                        withContext(Dispatchers.Main) {
+                            checkupLines.add("⏭️ ${app.label}: ক্লোন সংখ্যা পূর্ণ — বাদ")
+                        }
+                        skipCount++
+                        continue
+                    }
+                    val r = Engine.current.installClone(pkg, uid)
+                    cloned = r.isSuccess
+                    if (cloned) {
+                        val nc = CloneId(pkg, uid)
+                        withContext(Dispatchers.Main) {
+                            if (!clones.contains(nc)) { clones.add(nc); persist() }
+                        }
+                    }
+                }
+                if (!cloned) {
+                    withContext(Dispatchers.Main) {
+                        checkupLines.add("❌ ${app.label}: ক্লোন হয়নি")
+                    }
+                    failCount++
+                    continue
+                }
+                // মূল অ্যাক্টিভিটির নাম
+                val pkgInfo = runCatching {
+                    pm.getPackageInfo(
+                        pkg,
+                        android.content.pm.PackageManager.GET_ACTIVITIES,
+                        0
+                    )
+                }.getOrNull()
+                val acts = pkgInfo?.activities?.filter { it.exported } ?: emptyList()
+                val target = acts.firstOrNull { it.name.endsWith(".Main") }
+                    ?: acts.firstOrNull()
+                val clsName = target?.let {
+                    if (it.name.startsWith(".")) pkg + it.name else it.name
+                }
+                // ট্রেসের শুরুর অবস্থান
+                val traceFile = java.io.File(ctx.cacheDir, "init_trace.txt")
+                val traceBefore = runCatching { traceFile.readText().length }.getOrDefault(0)
+                // চালাও
+                val lr = Engine.current.launchClone(pkg, 0)
+                val verdict: String
+                if (lr.isFailure) {
+                    verdict = "❌ ${app.label}: লঞ্চ কল ব্যর্থ (${lr.exceptionOrNull()?.message ?: "?"})"
+                    failCount++
+                } else {
+                    kotlinx.coroutines.delay(4000)
+                    val newTrace = runCatching {
+                        val full = traceFile.readText()
+                        if (full.length > traceBefore) full.substring(traceBefore) else ""
+                    }.getOrDefault("")
+                    val am = ctx.getSystemService(Context.ACTIVITY_SERVICE)
+                        as android.app.ActivityManager
+                    val alive = am.runningAppProcesses
+                        ?.any { it.processName.startsWith("${ctx.packageName}:p") } == true
+                    val hasResume = clsName != null &&
+                        newTrace.contains("callActivityOnResume: $clsName")
+                    val hasDone = clsName != null &&
+                        newTrace.contains("callActivityOnCreate done: $clsName")
+                    val hasStart = clsName != null &&
+                        newTrace.contains("callActivityOnCreate start: $clsName")
+                    val hasBind = newTrace.contains("handleBindApplication done: $pkg")
+                    verdict = when {
+                        hasResume -> "✅ ${app.label}: চালু হয়েছে"
+                        hasDone -> "⚠️ ${app.label}: onCreate হয়েছে, onResume হয়নি"
+                        hasStart -> "❌ ${app.label}: onCreate-এ আটকেছে/ক্র্যাশ"
+                        hasBind -> "❌ ${app.label}: bind হয়েছে, অ্যাক্টিভিটি শুরু হয়নি"
+                        alive -> "⚠️ ${app.label}: প্রসেস চলছে কিন্তু অ্যাক্টিভিটি দেখা যায়নি"
+                        else -> "❌ ${app.label}: চালু হয়নি (প্রসেস মারা গেছে)"
+                    }
+                    if (verdict.startsWith("✅")) okCount++
+                    else if (!verdict.startsWith("⚠️")) failCount++
+                }
+                withContext(Dispatchers.Main) { checkupLines.add(verdict) }
+                // এই অ্যাপের প্রসেস থামাও, পরেরটার জন্য পরিষ্কার রাখো
+                runCatching { BlackBoxCore.get().stopPackage(pkg, 0) }
+            }
+            val stopped = checkupStop
+            val summary = buildString {
+                append("=== CloneMe সব অ্যাপ চেকআপ ===\n")
+                append("সময়: ${java.util.Date()}\n")
+                append("মোট: ${targets.size}টি অ্যাপ\n")
+                append("✅ চালু: $okCount | ❌ ব্যর্থ: $failCount | ⏭️ বাদ: $skipCount\n")
+                if (stopped) append("(মাঝপথে থামানো হয়েছে)\n")
+                append("\n")
+                append(checkupLines.joinToString("\n"))
+                append("\n")
+            }
+            withContext(Dispatchers.Main) {
+                checkupRunning = false
+                checkupProgress = if (stopped) "থামানো হয়েছে" else "শেষ — ✅ $okCount, ❌ $failCount"
+                reportText = summary.take(5000)
+            }
+        }
+    }
+
     // Google Play সার্ভিস ভার্চুয়াল পরিবেশে ইনস্টল (ইন্টারনেট অ্যাপের জন্য)
     fun doInstallGms() {
         if (gmsState == "installing") return
@@ -719,6 +849,50 @@ fun ClonerAppScreen() {
                             }) { Text("কপি করুন") }
                             TextButton(onClick = { reportText = null }) { Text("বন্ধ করুন") }
                         }
+                    }
+                }
+            }
+            // সব অ্যাপ চেকআপ: নিজেই সব অ্যাপ ক্লোন করে চালিয়ে দেখে, রিপোর্ট দেয়
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1)),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    Text(
+                        "🔍 সব অ্যাপ চেকআপ",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                    Text(
+                        "অ্যাপ নিজেই সব অ্যাপ ক্লোন করে একটা একটা চালিয়ে দেখবে, তারপর রিপোর্ট দেবে। চলাকালীন অ্যাপগুলো একটা একটা করে খুলবে — ফোনটা কিছুক্ষণ ব্যবহার করো না।",
+                        fontSize = 12.sp
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row {
+                        Button(
+                            onClick = { runFullCheckup() },
+                            enabled = !checkupRunning
+                        ) { Text("চেকআপ শুরু করো") }
+                        if (checkupRunning) {
+                            Spacer(Modifier.width(8.dp))
+                            TextButton(onClick = { checkupStop = true }) { Text("থামান") }
+                        }
+                    }
+                    if (checkupRunning || checkupProgress.isNotEmpty()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(checkupProgress, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                    if (checkupLines.isNotEmpty()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            checkupLines.joinToString("\n"),
+                            fontSize = 11.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 200.dp)
+                                .verticalScroll(rememberScrollState())
+                        )
                     }
                 }
             }
