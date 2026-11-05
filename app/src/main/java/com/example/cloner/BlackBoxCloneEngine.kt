@@ -122,8 +122,18 @@ class BlackBoxCloneEngine : CloneEngine {
         }
         val activities = pkgInfo?.activities
             ?.filter { it.exported } ?: emptyList()
-        val target = activities.firstOrNull { it.name.endsWith(".Main") }
-            ?: activities.firstOrNull()
+        // android.* সিস্টেম অ্যাক্টিভিটি (যেমন AppDetailsActivity) আসল লঞ্চার নয় —
+        // Brave-এর ক্ষেত্রে এটাই ভুল করে উঠে আসছিল। নিজের প্যাকেজের লঞ্চার-ধাঁচের
+        // অ্যাক্টিভিটি (.Main / Launcher / Splash / Tabbed / Home) আগে চেষ্টা করো।
+        val own = activities.filter { !it.name.startsWith("android.") }
+        val pool = own.ifEmpty { activities }
+        val target = pool.firstOrNull { it.name.endsWith(".Main") }
+            ?: pool.firstOrNull {
+                it.name.contains("Main") || it.name.contains("Launcher") ||
+                    it.name.contains("Splash") || it.name.contains("Tabbed") ||
+                    it.name.contains("Home")
+            }
+            ?: pool.firstOrNull()
             ?: throw IllegalStateException("কোনো অ্যাক্টিভিটিই পাওয়া যায়নি (intent null)")
         val clsName = if (target.name.startsWith(".")) packageName + target.name else target.name
         // চূড়ান্ত ডায়াগনস্টিক: এই কম্পোনেন্ট রেজোলভারে আছে কিনা

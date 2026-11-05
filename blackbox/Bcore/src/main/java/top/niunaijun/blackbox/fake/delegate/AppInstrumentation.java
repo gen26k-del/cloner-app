@@ -157,7 +157,23 @@ public final class AppInstrumentation extends BaseInstrumentationDelegate implem
     @Override
     public void callApplicationOnCreate(Application app) {
         checkHCallback();
-        super.callApplicationOnCreate(app);
+        try {
+            super.callApplicationOnCreate(app);
+        } catch (SecurityException e) {
+            // কিছু অ্যাপ (যেমন DramaWave/freereels) onCreate-এ
+            // LocaleManager.setApplicationLocales ডাকে, যা ভার্চুয়াল প্রসেসে
+            // CHANGE_CONFIGURATION পারমিশন না থাকায় SecurityException দেয়।
+            // লোকেল সেট না হলেও অ্যাপ চলতে পারে — তাই এই নির্দিষ্ট ব্যতিক্রমটি
+            // গিলে ফেলো, অ্যাপকে "Unable to makeApplication" দিয়ে মরতে দিও না।
+            String msg = e.getMessage();
+            if (msg != null && (msg.contains("setApplicationLocales")
+                    || msg.contains("CHANGE_CONFIGURATION"))) {
+                Log.w("BlackBox", "Ignored setApplicationLocales SecurityException in "
+                        + app.getClass().getName());
+            } else {
+                throw e;
+            }
+        }
     }
 
     public Activity newActivity(ClassLoader cl, String className, Intent intent) throws InstantiationException, IllegalAccessException, ClassNotFoundException {

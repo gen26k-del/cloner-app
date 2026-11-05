@@ -112,19 +112,34 @@ fun ClonerTheme(content: @Composable () -> Unit) {
 fun loadApps(ctx: Context): List<AppInfo> {
     val pm = ctx.packageManager
     val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-    @Suppress("DEPRECATION")
-    val resolved = pm.queryIntentActivities(intent, 0)
+    val resolved = try {
+        @Suppress("DEPRECATION")
+        pm.queryIntentActivities(intent, 0)
+    } catch (_: Exception) {
+        return emptyList()
+    }
     return resolved
         .filter { it.activityInfo.packageName != ctx.packageName }
         .distinctBy { it.activityInfo.packageName }
-        .map { ri ->
-            AppInfo(
-                label = ri.loadLabel(pm).toString(),
-                pkg = ri.activityInfo.packageName,
-                icon = ri.loadIcon(pm).toBitmap(96, 96).asImageBitmap()
-            )
+        // একটা অ্যাপের আইকন/লেবেল লোডে ব্যর্থ হলে পুরো তালিকা খালি হয়ে যেত —
+        // এখন সেই অ্যাপটা শুধু বাদ যাবে, বাকিগুলো দেখাবে।
+        .mapNotNull { ri ->
+            runCatching {
+                AppInfo(
+                    label = ri.loadLabel(pm).toString(),
+                    pkg = ri.activityInfo.packageName,
+                    icon = ri.loadIcon(pm).toBitmap(96, 96).asImageBitmap()
+                )
+            }.getOrNull()
         }
         .sortedBy { it.label.lowercase() }
+}
+
+// চেকআপের প্রতিটি রায় ফাইলে জমাও — অ্যাপ ক্র্যাশ হয়ে গেলেও আংশিক ফলাফল থাকবে।
+private fun appendCheckupLine(ctx: Context, line: String) {
+    runCatching {
+        java.io.File(ctx.cacheDir, "checkup_report.txt").appendText(line + "\n")
+    }
 }
 
 private fun readSavedClones(ctx: Context): MutableSet<String> =
@@ -209,7 +224,9 @@ fun ClonerAppScreen() {
     // ব্যাকগ্রাউন্ডে অ্যাপের তালিকা লোড — UI আটকাবে না
     LaunchedEffect(Unit) {
         val saved = withContext(Dispatchers.IO) { readSavedClones(ctx) }
-        val loaded = withContext(Dispatchers.IO) { loadApps(ctx) }
+        val loaded = withContext(Dispatchers.IO) {
+            runCatching { loadApps(ctx) }.getOrDefault(emptyList())
+        }
         // ইঞ্জিনের নিজস্ব লিস্টের সাথে সংরক্ষিত লিস্ট মিলিয়ে নাও
         val engineClones = withContext(Dispatchers.IO) {
             runCatching { Engine.current.listClones() }.getOrDefault(emptyList())
@@ -425,8 +442,17 @@ fun ClonerAppScreen() {
                     )
                 }.getOrNull()
                 val acts = pkgInfo?.activities?.filter { it.exported } ?: emptyList()
-                val target = acts.firstOrNull { it.name.endsWith(".Main") }
-                    ?: acts.firstOrNull()
+                // android.* সিস্টেম অ্যাক্টিভিটি (যেমন AppDetailsActivity) আসল লঞ্চার নয় —
+                // Brave-এর ক্ষেত্রে এটাই ভুল করে মূল অ্যাক্টিভিটি হিসেবে উঠে আসছিল।
+                val ownActs = acts.filter { !it.name.startsWith("android.") }
+                val pool = ownActs.ifEmpty { acts }
+                val target = pool.firstOrNull { it.name.endsWith(".Main") }
+                    ?: pool.firstOrNull {
+                        it.name.contains("Main") || it.name.contains("Launcher") ||
+                            it.name.contains("Splash") || it.name.contains("Tabbed") ||
+                            it.name.contains("Home")
+                    }
+                    ?: pool.firstOrNull()
                 var clsName: String? = null
                 var aiFound = false
                 if (target != null) {
@@ -458,15 +484,16 @@ fun ClonerAppScreen() {
                 }
                 sb.append("রায়: $v\n")
                 verdicts.add("$pkg: $v")
-                // ট্রেস বিশ্লেষণ
-                if (traceTail.isNotEmpty()) {
-                    val hasBind = traceTail.contains("handleBindApplication done: $pkg")
+                // ট্রেস বিশ্লেষণ — পুরো ট্রেস খুঁজো (শুধু শেষাংশ নয়),
+                // নইলে আগের অ্যাপগুলোকে ভুল করে "bind হয়নি" বলা হয়।
+                if (trace.isNotEmpty()) {
+                    val hasBind = trace.contains("handleBindApplication done: $pkg")
                     val hasCreateStart = clsName != null &&
-                        traceTail.contains("callActivityOnCreate start: $clsName")
+                        trace.contains("callActivityOnCreate start: $clsName")
                     val hasCreateDone = clsName != null &&
-                        traceTail.contains("callActivityOnCreate done: $clsName")
+                        trace.contains("callActivityOnCreate done: $clsName")
                     val hasResume = clsName != null &&
-                        traceTail.contains("callActivityOnResume: $clsName")
+                        trace.contains("callActivityOnResume: $clsName")
                     val t = when {
                         !hasBind -> "ট্রেস: bind হয়নি — bind-এর আগেই প্রসেস মারা গেছে"
                         hasCreateStart && !hasCreateDone -> "ট্রেস: onCreate শুরু হয়েছে কিন্তু শেষ হয়নি — onCreate-এ আটকে/ক্র্যাশ"
@@ -507,6 +534,23 @@ fun ClonerAppScreen() {
     var checkupStop by remember { mutableStateOf(false) }
     val checkupLines = remember { mutableStateListOf<String>() }
 
+    // আগের চেকআপের ফলাফল (অ্যাপ ক্র্যাশ/বন্ধ হয়ে গেলেও ফাইলে থাকে) দেখাও
+    LaunchedEffect(Unit) {
+        val saved = withContext(Dispatchers.IO) {
+            runCatching {
+                java.io.File(ctx.cacheDir, "checkup_report.txt")
+                    .takeIf { it.exists() }?.readText()
+                    ?.lines()?.filter { it.isNotBlank() }
+            }.getOrNull() ?: emptyList()
+        }
+        if (saved.isNotEmpty()) {
+            val done = saved.lastOrNull() == "=== চেকআপ শেষ ==="
+            checkupLines.addAll(if (done) saved.dropLast(1) else saved)
+            checkupProgress = if (done) "আগের চেকআপের ফলাফল (সম্পূর্ণ)"
+            else "আগের চেকআপের আংশিক ফলাফল — মাঝপথে বন্ধ হয়ে গিয়েছিল"
+        }
+    }
+
     fun runFullCheckup() {
         if (checkupRunning) return
         val targets = apps.filter { !isGmsSystemPackage(it.pkg) }
@@ -518,6 +562,8 @@ fun ClonerAppScreen() {
         checkupStop = false
         checkupLines.clear()
         checkupProgress = "শুরু হচ্ছে…"
+        // আগের চেকআপের ফাইল মুছে নতুন করে শুরু করো
+        runCatching { java.io.File(ctx.cacheDir, "checkup_report.txt").delete() }
         scope.launch(Dispatchers.IO) {
             val pm = BlackBoxCore.getBPackageManager()
             var okCount = 0
@@ -535,8 +581,10 @@ fun ClonerAppScreen() {
                 if (!already) {
                     val uid = Engine.current.nextUserId(pkg)
                     if (uid < 0) {
+                        val line = "⏭️ ${app.label}: ক্লোন সংখ্যা পূর্ণ — বাদ"
+                        appendCheckupLine(ctx, line)
                         withContext(Dispatchers.Main) {
-                            checkupLines.add("⏭️ ${app.label}: ক্লোন সংখ্যা পূর্ণ — বাদ")
+                            checkupLines.add(line)
                         }
                         skipCount++
                         continue
@@ -551,8 +599,10 @@ fun ClonerAppScreen() {
                     }
                 }
                 if (!cloned) {
+                    val line = "❌ ${app.label}: ক্লোন হয়নি"
+                    appendCheckupLine(ctx, line)
                     withContext(Dispatchers.Main) {
-                        checkupLines.add("❌ ${app.label}: ক্লোন হয়নি")
+                        checkupLines.add(line)
                     }
                     failCount++
                     continue
@@ -566,8 +616,15 @@ fun ClonerAppScreen() {
                     )
                 }.getOrNull()
                 val acts = pkgInfo?.activities?.filter { it.exported } ?: emptyList()
-                val target = acts.firstOrNull { it.name.endsWith(".Main") }
-                    ?: acts.firstOrNull()
+                val ownActs = acts.filter { !it.name.startsWith("android.") }
+                val pool = ownActs.ifEmpty { acts }
+                val target = pool.firstOrNull { it.name.endsWith(".Main") }
+                    ?: pool.firstOrNull {
+                        it.name.contains("Main") || it.name.contains("Launcher") ||
+                            it.name.contains("Splash") || it.name.contains("Tabbed") ||
+                            it.name.contains("Home")
+                    }
+                    ?: pool.firstOrNull()
                 val clsName = target?.let {
                     if (it.name.startsWith(".")) pkg + it.name else it.name
                 }
@@ -608,11 +665,13 @@ fun ClonerAppScreen() {
                     if (verdict.startsWith("✅")) okCount++
                     else if (!verdict.startsWith("⚠️")) failCount++
                 }
+                appendCheckupLine(ctx, verdict)
                 withContext(Dispatchers.Main) { checkupLines.add(verdict) }
                 // এই অ্যাপের প্রসেস থামাও, পরেরটার জন্য পরিষ্কার রাখো
                 runCatching { BlackBoxCore.get().stopPackage(pkg, 0) }
             }
             val stopped = checkupStop
+            if (!stopped) appendCheckupLine(ctx, "=== চেকআপ শেষ ===")
             val summary = buildString {
                 append("=== CloneMe সব অ্যাপ চেকআপ ===\n")
                 append("সময়: ${java.util.Date()}\n")
