@@ -168,10 +168,20 @@ public class HCallbackProxy implements IInjectHook, Handler.Callback {
                         activityInfo.processName);
                 // bind শেষ, এখন fall through করে activity launch করো
                 // (আগে return true করে launch মেসেজ গিলে ফেলা হতো)
+                try {
+                    top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                        top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                        "HCallbackProxy bind done, launching: " + activityInfo.packageName);
+                } catch (Throwable ignored) { }
             }
 
             int taskId = BRIActivityManager.get(BRActivityManagerNative.get().getDefault()).getTaskForActivity(token, false);
             BlackBoxCore.getBActivityManager().onActivityCreated(taskId, token, stubRecord.mActivityRecord);
+            try {
+                top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                    top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                    "HCallbackProxy launching real activity: " + stubRecord.mTarget.getComponent());
+            } catch (Throwable ignored) { }
 
             if(BuildCompat.isTiramisu()){
                 LaunchActivityItemContext launchActivityItemContext = BRLaunchActivityItem.get(r);
