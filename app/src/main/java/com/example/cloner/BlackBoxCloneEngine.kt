@@ -76,20 +76,42 @@ class BlackBoxCloneEngine : CloneEngine {
         if (!isCloneInstalled(packageName, userId)) {
             throw IllegalStateException("ক্লোন ইনস্টল করা নেই — আগে ক্লোন করুন")
         }
-        // ডায়াগনস্টিক: লঞ্চ intent রেজোলভ হয় কিনা আগেই দেখো
-        // (Chrome-এর মতো অ্যাপে launchApk false হলে কারণটা জানতে)
+        val pm = BlackBoxCore.getBPackageManager()
         val intent = try {
-            BlackBoxCore.getBPackageManager().getLaunchIntentForPackage(packageName, userId)
+            pm.getLaunchIntentForPackage(packageName, userId)
         } catch (_: Exception) {
             null
         }
-        if (intent == null) {
-            throw IllegalStateException("লঞ্চার অ্যাক্টিভিটি পাওয়া যায়নি (intent null)")
+        if (intent != null) {
+            val ok = core().launchApk(packageName, userId)
+            if (!ok) throw IllegalStateException(
+                "intent আছে (${intent.component?.className}) কিন্তু launchApk false"
+            )
+            return@runCatching Unit
         }
-        val ok = core().launchApk(packageName, userId)
-        if (!ok) throw IllegalStateException(
-            "intent আছে (${intent.component?.className}) কিন্তু launchApk false"
-        )
+        // ফলব্যাক: লঞ্চ intent না মিললে (Chrome-এর ক্ষেত্রে) প্যাকেজের
+        // অ্যাক্টিভিটি তালিকা থেকে সরাসরি মূল অ্যাক্টিভিটি চালু করো
+        val pkgInfo = try {
+            pm.getPackageInfo(
+                packageName,
+                android.content.pm.PackageManager.GET_ACTIVITIES,
+                userId
+            )
+        } catch (_: Exception) {
+            null
+        }
+        val activities = pkgInfo?.activities
+            ?.filter { it.enabled && it.exported } ?: emptyList()
+        val target = activities.firstOrNull { it.name.endsWith(".Main") }
+            ?: activities.firstOrNull()
+            ?: throw IllegalStateException("কোনো অ্যাক্টিভিটিই পাওয়া যায়নি (intent null)")
+        val clsName = if (target.name.startsWith(".")) packageName + target.name else target.name
+        val explicit = android.content.Intent(android.content.Intent.ACTION_MAIN).apply {
+            addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+            setClassName(packageName, clsName)
+            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        core().startActivity(explicit, userId)
         Unit
     }
 
