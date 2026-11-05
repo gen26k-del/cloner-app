@@ -371,6 +371,13 @@ public class BActivityThread extends IBActivityThread.Stub {
         }
 
         PackageInfo packageInfo = BlackBoxCore.getBPackageManager().getPackageInfo(packageName, PackageManager.GET_PROVIDERS, BActivityThread.getUserId());
+        if (packageInfo == null) {
+            // প্যাকেজ ভার্চুয়াল PM-এ নেই (আনইনস্টল / সিস্টেম প্যাকেজ / সার্ভিসের
+            // প্যাকেজ খুঁজে পাওয়া যায়নি) — NPE দিয়ে পুরো stub প্রসেস না মেরে
+            // চুপচাপ ফিরে যাও। সার্ভিসটা চালু হবে না, কিন্তু প্রসেস বাঁচবে।
+            android.util.Log.w("BlackBox", "handleBindApplication: packageInfo null for " + packageName);
+            return;
+        }
         try {
             top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
                 top.niunaijun.blackbox.BlackBoxCore.getContext(),
