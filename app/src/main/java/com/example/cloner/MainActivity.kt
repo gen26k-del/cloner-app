@@ -304,10 +304,10 @@ fun ClonerAppScreen() {
                     // ৫ সেকেন্ড পর: স্টাব প্রসেস (:p0/:p1...) বেঁচে আছে কিনা
                     scope.launch(Dispatchers.IO) {
                         kotlinx.coroutines.delay(5000)
-                        val am = getSystemService(android.content.Context.ACTIVITY_SERVICE)
+                        val am = ctx.getSystemService(android.content.Context.ACTIVITY_SERVICE)
                             as android.app.ActivityManager
                         val alive = am.runningAppProcesses
-                            ?.any { it.processName.startsWith("$packageName:p") } == true
+                            ?.any { it.processName.startsWith("${ctx.packageName}:p") } == true
                         withContext(Dispatchers.Main) {
                             if (!alive) {
                                 toast("${clone.pkg}-এর প্রসেস চালু হয়নি / বন্ধ হয়ে গেছে — লাল ক্র্যাশ রিপোর্ট কার্ডটা দেখো")
