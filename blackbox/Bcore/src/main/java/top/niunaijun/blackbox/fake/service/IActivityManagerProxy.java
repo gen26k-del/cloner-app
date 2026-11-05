@@ -589,7 +589,25 @@ public class IActivityManagerProxy extends ClassInvocationStub {
                     args[i] = null;
                 }
             }
-            return method.invoke(who, args);
+            // শেষ আর্গুমেন্ট userId — USER_ALL (-1) বা USER_CURRENT (-2) হলে আসল AM
+            // পারমিশন দিয়ে বাতিল করে (CloneMe-র INTERACT_ACROSS_USERS নেই) আর অ্যাপ
+            // মরে (GMS ক্র্যাশ)। বর্তমান ভার্চুয়াল ইউজারে বদলে দাও।
+            if (args.length > 0 && args[args.length - 1] instanceof Integer) {
+                int uid = (Integer) args[args.length - 1];
+                if (uid == -1 || uid == -2) {
+                    args[args.length - 1] = BActivityThread.getUserId();
+                }
+            }
+            try {
+                return method.invoke(who, args);
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                // আসল AM ব্রডকাস্ট বাতিল করলেও অ্যাপ না মেরে চুপচাপ সফল ধরো —
+                // ভার্চুয়াল AM-এ ব্রডকাস্ট আগেই গেছে।
+                if (e.getCause() instanceof SecurityException) {
+                    return 0;
+                }
+                throw e;
+            }
         }
 
         int getIntentIndex(Object[] args) {
