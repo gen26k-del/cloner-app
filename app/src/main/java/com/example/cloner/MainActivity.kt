@@ -160,9 +160,13 @@ fun pickLauncherActivity(
     fun pickLike(list: List<android.content.pm.ActivityInfo>) =
         list.firstOrNull { it.name.endsWith(".Main") }
             ?: list.firstOrNull {
-                it.name.contains("Main") || it.name.contains("Launcher") ||
+                // Shortcut অ্যাক্টিভিটি (LauncherShortcutActivity) বাদ — ওটা মূল
+                // অ্যাক্টিভিটি নয়, শর্টকাট ধরার হ্যান্ডলার।
+                !it.name.contains("Shortcut") && (
+                    it.name.contains("Main") || it.name.contains("Launcher") ||
                     it.name.contains("Splash") || it.name.contains("Tabbed") ||
                     it.name.contains("Home")
+                )
             }
     return pickLike(ownExp) ?: pickLike(ownAll) ?: pickLike(exported) ?: pickLike(all)
         ?: ownExp.firstOrNull() ?: ownAll.firstOrNull()

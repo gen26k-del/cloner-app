@@ -66,6 +66,16 @@ public class PackageManagerCompat {
         pi.sharedUserLabel = p.mSharedUserLabel;
         pi.applicationInfo = generateApplicationInfo(p, flags, state, userId);
 
+        // PackageInfo-লেভেল split ফিল্ডও null থাকে (new PackageInfo-তে ডিফল্ট null) —
+        // Lite অ্যাপ getPackageInfo().splitNames/splitSourceDirs পড়তে গিয়ে NPE দেয়।
+        // ApplicationInfo-র ফিক্স (v1.0.38) যথেষ্ট ছিল না। খালি অ্যারে দিলে ক্র্যাশ এড়ানো যায়।
+        if (pi.splitNames == null) {
+            pi.splitNames = new String[0];
+        }
+        if (pi.splitSourceDirs == null) {
+            pi.splitSourceDirs = new String[0];
+        }
+
         pi.firstInstallTime = firstInstallTime;
         pi.lastUpdateTime = lastUpdateTime;
         if (!p.requestedPermissions.isEmpty()) {
