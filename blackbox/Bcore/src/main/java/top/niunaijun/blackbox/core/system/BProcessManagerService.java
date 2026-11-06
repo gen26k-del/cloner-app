@@ -151,8 +151,18 @@ public class BProcessManagerService implements ISystemService {
         AppConfig appConfig = record.getClientConfig();
         Bundle bundle = new Bundle();
         bundle.putParcelable(AppConfig.KEY, appConfig);
-        Bundle init = ProviderCall.callSafely(record.getProviderAuthority(), "_Black_|_init_process_", null, bundle);
-        IBinder appThread = BundleCompat.getBinder(init, "_Black_|_client_");
+        // Cold stub প্রসেস (বিশেষ করে Chrome-এর renderer/GPU child) চালু হতে
+        // ২ সেকেন্ডের বেশি লাগতে পারে — provider call একবারে ব্যর্থ হলে সাথে
+        // সাথে false না দিয়ে ৩ বার retry করো, নইলে bindService আসল intent-এ
+        // ফলব্যাক করে আর renderer মরে ব্ল্যাক স্ক্রিন থাকে।
+        IBinder appThread = null;
+        for (int attempt = 0; attempt < 3 && (appThread == null || !appThread.isBinderAlive()); attempt++) {
+            if (attempt > 0) android.os.SystemClock.sleep(500);
+            Bundle init = ProviderCall.callSafely(record.getProviderAuthority(), "_Black_|_init_process_", null, bundle);
+            if (init != null) {
+                appThread = BundleCompat.getBinder(init, "_Black_|_client_");
+            }
+        }
         if (appThread == null || !appThread.isBinderAlive()) {
             return false;
         }
