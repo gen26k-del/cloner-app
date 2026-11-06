@@ -32,8 +32,12 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.webkit.WebView;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.security.Security;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -403,6 +407,22 @@ public class BActivityThread extends IBActivityThread.Stub {
                 if (!libDir.exists()) libDir.mkdirs();
             }
         } catch (Throwable ignored) { }
+        // Chromium (Chrome/Brave) first-run/onboarding বাইপাস: WelcomeOnboardingActivity
+        // animation-end-এ ক্র্যাশ করে (v1.0.44)। Chrome `first_run_flow` pref true
+        // দেখলে FirstRunActivity/WelcomeOnboardingActivity চালুই করে না, সরাসরি
+        // ট্যাবে যায়। pref ফাইল: <pkg>_preferences.xml (Chrome.xml নয়)।
+        // bind-এর সময় লেখা হয়, Chrome pref পড়ে তার পরে — timing ঠিক আছে।
+        try {
+            if (applicationInfo.dataDir != null) {
+                if ("com.android.chrome".equals(packageName)) {
+                    seedChromiumFirstRunSkipped(new File(applicationInfo.dataDir),
+                            "com.android.chrome_preferences.xml");
+                } else if ("com.brave.browser".equals(packageName)) {
+                    seedChromiumFirstRunSkipped(new File(applicationInfo.dataDir),
+                            "com.brave.browser_preferences.xml");
+                }
+            }
+        } catch (Throwable ignored) { }
         mProviders.addAll(Arrays.asList(packageInfo.providers));
 
         Object boundApplication = BRActivityThread.get(BlackBoxCore.mainThread()).mBoundApplication();
@@ -526,8 +546,58 @@ public class BActivityThread extends IBActivityThread.Stub {
             throw new RuntimeException("Unable to makeApplication", e);
         }
     }
-    
-    
+
+    // Chromium first-run বাইপাস: <pkg>_preferences.xml-এ first_run_flow /
+    // lightweight_first_run_flow / skip_welcome_page = true লিখে দাও।
+    // ফাইল আগে থেকে থাকলে overwrite নয়, merge — key না থাকলে </map>-এর
+    // আগে ঢোকাও। idempotent: key থাকলে আর লেখে না।
+    private static void seedChromiumFirstRunSkipped(File dataDir, String prefFileName) {
+        try {
+            File prefsDir = new File(dataDir, "shared_prefs");
+            if (!prefsDir.exists()) prefsDir.mkdirs();
+            File prefFile = new File(prefsDir, prefFileName);
+            String[] keys = {"first_run_flow", "lightweight_first_run_flow", "skip_welcome_page"};
+            if (!prefFile.exists()) {
+                StringBuilder sb = new StringBuilder();
+                sb.append("<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n<map>\n");
+                for (String k : keys) {
+                    sb.append("    <boolean name=\"").append(k).append("\" value=\"true\" />\n");
+                }
+                sb.append("</map>\n");
+                FileOutputStream out = new FileOutputStream(prefFile);
+                try {
+                    out.write(sb.toString().getBytes(StandardCharsets.UTF_8));
+                } finally {
+                    out.close();
+                }
+                return;
+            }
+            FileInputStream in = new FileInputStream(prefFile);
+            ByteArrayOutputStream buf = new ByteArrayOutputStream();
+            byte[] tmp = new byte[4096];
+            int n;
+            while ((n = in.read(tmp)) != -1) buf.write(tmp, 0, n);
+            in.close();
+            String xml = new String(buf.toByteArray(), StandardCharsets.UTF_8);
+            int mapEnd = xml.indexOf("</map>");
+            if (mapEnd < 0) return;
+            StringBuilder add = new StringBuilder();
+            for (String k : keys) {
+                if (xml.indexOf("name=\"" + k + "\"") < 0) {
+                    add.append("    <boolean name=\"").append(k).append("\" value=\"true\" />\n");
+                }
+            }
+            if (add.length() == 0) return;
+            String merged = xml.substring(0, mapEnd) + add.toString() + xml.substring(mapEnd);
+            FileOutputStream out = new FileOutputStream(prefFile);
+            try {
+                out.write(merged.getBytes(StandardCharsets.UTF_8));
+            } finally {
+                out.close();
+            }
+        } catch (Throwable ignored) { }
+    }
+
     private void initializeJarEnvironment() {
         try {
             Slog.d(TAG, "Initializing JAR environment for DEX loading");
