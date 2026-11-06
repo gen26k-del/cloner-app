@@ -387,6 +387,22 @@ public class BActivityThread extends IBActivityThread.Stub {
         if (packageInfo.providers == null) {
             packageInfo.providers = new ProviderInfo[]{};
         }
+        // Lite অ্যাপ (Instagram/Facebook Lite) স্টার্টআপে lib ডিরেক্টরি list()
+        // করে — ডিরেক্টরি না থাকলে list() null দেয় আর .length পড়তে গিয়ে NPE
+        // হয় ("Attempt to get length of null array", X.0Kb.A00:75)।
+        // অ্যাপের onCreate-এর আগেই ডিরেক্টরিগুলো তৈরি করে দাও।
+        try {
+            if (applicationInfo.dataDir != null) {
+                File dataDir = new File(applicationInfo.dataDir);
+                if (!dataDir.exists()) dataDir.mkdirs();
+                File libCompressed = new File(dataDir, "lib-compressed");
+                if (!libCompressed.exists()) libCompressed.mkdirs();
+            }
+            if (applicationInfo.nativeLibraryDir != null) {
+                File libDir = new File(applicationInfo.nativeLibraryDir);
+                if (!libDir.exists()) libDir.mkdirs();
+            }
+        } catch (Throwable ignored) { }
         mProviders.addAll(Arrays.asList(packageInfo.providers));
 
         Object boundApplication = BRActivityThread.get(BlackBoxCore.mainThread()).mBoundApplication();

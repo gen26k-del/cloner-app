@@ -177,6 +177,19 @@ public class HCallbackProxy implements IInjectHook, Handler.Callback {
 
             int taskId = BRIActivityManager.get(BRActivityManagerNative.get().getDefault()).getTaskForActivity(token, false);
             BlackBoxCore.getBActivityManager().onActivityCreated(taskId, token, stubRecord.mActivityRecord);
+            // activity-alias হলে intent-এর কম্পোনেন্ট alias নামেই থাকে
+            // (যেমন Chrome/Brave-এর com.google.android.apps.chrome.Main) —
+            // ActivityThread performLaunchActivity intent-এর কম্পোনেন্ট দিয়ে
+            // ক্লাস লোড করে, alias ক্লাস নয় বলে ClassNotFoundException হয় আর
+            // অ্যাক্টিভিটি শুরু হয় না (bind হয়, onCreate আসে না)। resolved
+            // ActivityInfo-র আসল অ্যাক্টিভিটিতে কম্পোনেন্ট বদলে দাও — আসল
+            // সিস্টেমও alias resolve করে টার্গেটই চালায়।
+            if (stubRecord.mTarget != null && stubRecord.mTarget.getComponent() != null) {
+                ComponentName resolved = new ComponentName(activityInfo.packageName, activityInfo.name);
+                if (!stubRecord.mTarget.getComponent().equals(resolved)) {
+                    stubRecord.mTarget.setComponent(resolved);
+                }
+            }
             try {
                 top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
                     top.niunaijun.blackbox.BlackBoxCore.getContext(),

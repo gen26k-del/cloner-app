@@ -256,6 +256,14 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
             if (a != null) {
                 BPackageSettings ps = mSettings.mPackages.get(component.getPackageName());
                 if (ps == null) return null;
+                // activity-alias হলে টার্গেট অ্যাক্টিভিটিতে resolve করো — alias
+                // নামে কোনো ক্লাস নেই, stub সেটা লোড করতে পারবে না।
+                if (a.info != null && a.info.targetActivity != null) {
+                    ComponentName target = new ComponentName(
+                            component.getPackageName(), a.info.targetActivity);
+                    BPackage.Activity targetAct = mComponentResolver.getActivity(target);
+                    if (targetAct != null) a = targetAct;
+                }
                 return PackageManagerCompat.generateActivityInfo(a, flags, ps.readUserState(userId), userId);
             }
             // ভার্চুয়াল PM-এ কম্পোনেন্ট নেই — হোস্ট PM থেকে আসল ActivityInfo নাও।
