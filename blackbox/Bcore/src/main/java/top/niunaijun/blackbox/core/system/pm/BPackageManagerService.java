@@ -327,6 +327,7 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
     @Override
     public ServiceInfo getServiceInfo(ComponentName component, int flags, int userId) {
         if (!sUserManager.exists(userId)) return null;
+        flags = updateFlags(flags, userId);
         synchronized (mPackages) {
             BPackage.Service s = mComponentResolver.getService(component);
             if (s != null) {
@@ -334,6 +335,25 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
                 if (ps == null) return null;
                 return PackageManagerCompat.generateServiceInfo(
                         s, flags, ps.readUserState(userId), userId);
+            }
+            // ভার্চুয়াল PM-এ সার্ভিস নেই — হোস্ট PM থেকে আসল ServiceInfo নাও।
+            // Chromium-এর child প্রসেস (renderer/GPU: SandboxedProcessService /
+            // PrivilegedProcessService) ভার্চুয়াল পার্সে ওঠে না; ফলব্যাক না
+            // থাকলে bindService চুপচাপ ব্যর্থ হয় আর Chrome ব্ল্যাক স্ক্রিন থাকে
+            // (v1.0.43-এ getActivity-তে একই ফলব্যাক যোগ করা হয়েছিল)।
+            BPackageSettings ps = mPackages.get(component.getPackageName());
+            if (ps == null) return null;
+            try {
+                ServiceInfo hostSi = BlackBoxCore.getPackageManager()
+                        .getServiceInfo(component, flags);
+                if (hostSi == null) return null;
+                ServiceInfo si = new ServiceInfo(hostSi);
+                si.applicationInfo = PackageManagerCompat.generateApplicationInfo(
+                        ps.pkg, flags, ps.readUserState(userId), userId);
+                si.processName = fixProcessName(si.packageName, hostSi.processName);
+                return si;
+            } catch (Exception e) {
+                return null;
             }
         }
         return null;
