@@ -401,6 +401,14 @@ public class BActivityThread extends IBActivityThread.Stub {
                 if (!dataDir.exists()) dataDir.mkdirs();
                 File libCompressed = new File(dataDir, "lib-compressed");
                 if (!libCompressed.exists()) libCompressed.mkdirs();
+                // স্ট্যান্ডার্ড সাবডিরেক্টরিও তৈরি করো — কোনো File.list() তৈরি-না-হওয়া
+                // সাবডিরেক্টরিতে পড়লে null দিয়ে NPE দিতে পারে (Lite-এর মতো অ্যাপ)।
+                String[] subDirs = {"files", "cache", "code_cache", "databases",
+                        "shared_prefs", "no_backup"};
+                for (String sub : subDirs) {
+                    File d = new File(dataDir, sub);
+                    if (!d.exists()) d.mkdirs();
+                }
             }
             if (applicationInfo.nativeLibraryDir != null) {
                 File libDir = new File(applicationInfo.nativeLibraryDir);

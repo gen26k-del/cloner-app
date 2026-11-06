@@ -340,16 +340,24 @@ public class PackageManagerCompat {
         ai.uid = p.mExtras.appId;
 
         // Split APK তথ্য না থাকলে Lite অ্যাপ (Instagram Lite / Facebook Lite) স্টার্টআপে
-        // splitSourceDirs.length পড়তে গিয়ে NPE দেয় — বেস APK পার্স করলে split
-        // ফিল্ডগুলো null থাকে। খালি অ্যারে দিলে ক্র্যাশ এড়ানো যায় ("কোনো split নেই" অবস্থা)।
-        if (ai.splitSourceDirs == null) {
-            ai.splitSourceDirs = new String[0];
+        // split-কনটেন্ট গণনা (AssetManager.list) করতে গিয়ে null অ্যারেতে NPE দেয়।
+        // বেস APK পার্স করলে split ফিল্ডগুলো null থাকে। হোস্ট PM থেকে আসল split
+        // তথ্য নাও (আসল split APK ফাইল ফোনে আছে, পড়া যায়) — না পেলে খালি অ্যারে।
+        ApplicationInfo realAi = null;
+        try {
+            realAi = BlackBoxCore.getPackageManager().getApplicationInfo(p.packageName, 0);
+        } catch (Throwable ignored) { }
+        if (ai.splitSourceDirs == null || ai.splitSourceDirs.length == 0) {
+            ai.splitSourceDirs = (realAi != null && realAi.splitSourceDirs != null)
+                    ? realAi.splitSourceDirs : new String[0];
         }
-        if (ai.splitPublicSourceDirs == null) {
-            ai.splitPublicSourceDirs = new String[0];
+        if (ai.splitPublicSourceDirs == null || ai.splitPublicSourceDirs.length == 0) {
+            ai.splitPublicSourceDirs = (realAi != null && realAi.splitPublicSourceDirs != null)
+                    ? realAi.splitPublicSourceDirs : new String[0];
         }
-        if (ai.splitNames == null) {
-            ai.splitNames = new String[0];
+        if (ai.splitNames == null || ai.splitNames.length == 0) {
+            ai.splitNames = (realAi != null && realAi.splitNames != null)
+                    ? realAi.splitNames : new String[0];
         }
         if (ai.sharedLibraryFiles == null) {
             ai.sharedLibraryFiles = new String[0];
