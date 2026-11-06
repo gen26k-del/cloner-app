@@ -426,6 +426,13 @@ public class IActivityManagerProxy extends ClassInvocationStub {
     public static class bindServiceInstance extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            // Chromium bindIsolatedService দিয়ে child প্রসেস (renderer/GPU) চালায়,
+            // যা AM-এ bindServiceInstance হয়। BindServiceCommon proxy সার্ভিসে
+            // (ProxyService$PN, non-isolated) বদলে দেয়, কিন্তু instanceName
+            // ('0') থাকলে আসল AM বাতিল করে: "Can't use instance name with
+            // non-isolated non-sdk sandbox service"। instanceName null করলে
+            // সাধারণ bind হয় — proxy সার্ভিসে bind সফল হয়।
+            args[6] = null;
             return BindServiceCommon(who,method,args,7);
         }
 
