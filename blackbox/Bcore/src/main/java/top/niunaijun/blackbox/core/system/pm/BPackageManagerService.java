@@ -356,7 +356,6 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
                 return null;
             }
         }
-        return null;
     }
 
     @Override
