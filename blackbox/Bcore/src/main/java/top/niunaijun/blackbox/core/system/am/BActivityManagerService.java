@@ -197,7 +197,11 @@ public class BActivityManagerService extends IBActivityManagerService.Stub imple
         mBroadcastManager.sendBroadcast(pendingResultData);
         for (ResolveInfo resolve : resolves) {
             ProcessRecord processRecord = BProcessManagerService.get().findProcessRecord(resolve.activityInfo.packageName, resolve.activityInfo.processName, userId);
-            if (processRecord != null) {
+            // bActivityThread null হতে পারে — প্রসেস চালু হয়েছে কিন্তু
+            // ActivityThread binder এখনো বসেনি (যেমন Lite-এ দেখা গেছে:
+            // scheduleReceiver on a null object reference)। null হলে
+            // broadcast এড়িয়ে যাও, NPE দিয়ে :black প্রসেস নষ্ট করো না।
+            if (processRecord != null && processRecord.bActivityThread != null) {
                 ReceiverData data = new ReceiverData();
                 data.intent = intent;
                 data.activityInfo = resolve.activityInfo;
