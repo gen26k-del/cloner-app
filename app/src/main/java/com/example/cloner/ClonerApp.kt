@@ -62,6 +62,19 @@ class ClonerApp : Application() {
                         Thread.sleep(3000)
                         val blockedFor = SystemClock.uptimeMillis() - state[0]
                         if (blockedFor > 8000) {
+                            // ভুয়া ANR ফিল্টার: main thread idle-তে nativePollOnce-এ বসে
+                            // থাকলে সে আটকে নেই — ticker শুধু চলেনি (প্রসেস ব্যাকগ্রাউন্ডে/
+                            // ডোজিং)। তখন রিপোর্ট লিখো না, শুধু ticker রিসেট করো।
+                            val rmIdle = try {
+                                val rm = findRealMain()
+                                val st = rm?.stackTrace
+                                rm?.state == Thread.State.RUNNABLE &&
+                                    (st?.firstOrNull()?.className == "android.os.MessageQueue" &&
+                                        st.firstOrNull()?.methodName == "nativePollOnce")
+                            } catch (_: Exception) { false }
+                            if (rmIdle) {
+                                state[0] = SystemClock.uptimeMillis()
+                            } else {
                             val sb = StringBuilder("ANR ধরা পড়েছে: ${Date()} [$procName]\n")
                             // init trace ফাইল থাকলে যোগ করো — ঠিক কোথায় আটকেছে দেখাবে
                             // শেষের অংশ নাও (সাম্প্রতিক প্রসেসের এন্ট্রি)
@@ -88,6 +101,7 @@ class ClonerApp : Application() {
                             }
                             reportFile.writeText(sb.toString().take(12000))
                             state[0] = SystemClock.uptimeMillis()
+                            }
                         }
                     } catch (_: Exception) { }
                 }

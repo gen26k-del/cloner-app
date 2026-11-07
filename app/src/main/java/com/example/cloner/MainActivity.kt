@@ -251,7 +251,7 @@ fun ClonerAppScreen() {
     var query by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
     var busyClone by remember { mutableStateOf<CloneId?>(null) }
-    var crashReport by remember { mutableStateOf<String?>(null) }
+    var crashReports by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var logText by remember { mutableStateOf<String?>(null) }
     var traceText by remember { mutableStateOf<String?>(null) }
     var reportText by remember { mutableStateOf<String?>(null) }
@@ -272,14 +272,16 @@ fun ClonerAppScreen() {
         val engineClones = withContext(Dispatchers.IO) {
             runCatching { Engine.current.listClones() }.getOrDefault(emptyList())
         }
-        // শেষ crash/ANR-এর রিপোর্ট থাকলে পড়ে নাও (সব প্রসেসের ফাইল থেকে সবচেয়ে নতুনটা)
-        crashReport = withContext(Dispatchers.IO) {
+        // সব crash/ANR রিপোর্ট পড়ে নাও — সবচেয়ে নতুনটা শুধু দেখালে Chrome-এর
+        // ক্র্যাশের পর ANR এলে Chrome-এর রিপোর্ট আর দেখা যায় না
+        crashReports = withContext(Dispatchers.IO) {
             runCatching {
                 ctx.cacheDir.listFiles { f ->
                     f.name.startsWith("last_crash") && f.name.endsWith(".txt")
-                }?.maxByOrNull { it.lastModified() }
-                    ?.let { it.readText().take(6000) }
-            }.getOrNull()
+                }?.sortedByDescending { it.lastModified() }
+                    ?.map { it.name to it.readText().take(6000) }
+                    .orEmpty()
+            }.getOrDefault(emptyList())
         }
         // Google Play সার্ভিসের অবস্থা দেখো
         gmsState = withContext(Dispatchers.IO) {
@@ -815,8 +817,8 @@ fun ClonerAppScreen() {
             // ব্র্যান্ড হেডার
             HeaderCard(cloneCount = clones.size)
 
-            // Crash রিপোর্ট থাকলে দেখাও
-            crashReport?.let { report ->
+            // Crash রিপোর্ট থাকলে দেখাও — সবগুলো, প্রসেসের নামসহ
+            crashReports.forEach { (fileName, report) ->
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -824,7 +826,7 @@ fun ClonerAppScreen() {
                 ) {
                     Column(Modifier.padding(12.dp)) {
                         Text(
-                            "⚠️ শেষবার সমস্যা হয়েছিল (crash/hang)",
+                            "⚠️ সমস্যা হয়েছিল: $fileName",
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp
                         )
@@ -840,15 +842,15 @@ fun ClonerAppScreen() {
                         Row {
                             TextButton(onClick = {
                                 val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                cm.setPrimaryClip(ClipData.newPlainText("crash", report))
+                                cm.setPrimaryClip(ClipData.newPlainText("crash", "$fileName\n$report"))
                                 toast("রিপোর্ট কপি হয়েছে")
                             }) { Text("কপি করুন") }
                             TextButton(onClick = {
                                 ctx.cacheDir.listFiles { f ->
                                     f.name.startsWith("last_crash") && f.name.endsWith(".txt")
                                 }?.forEach { it.delete() }
-                                crashReport = null
-                            }) { Text("মুছে ফেলুন") }
+                                crashReports = emptyList()
+                            }) { Text("সব মুছে ফেলুন") }
                         }
                     }
                 }
