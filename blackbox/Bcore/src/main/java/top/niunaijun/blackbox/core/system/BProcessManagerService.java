@@ -65,7 +65,20 @@ public class BProcessManagerService implements ISystemService {
                         app.initLock.block();
                     }
                     if (app.bActivityThread != null) {
-                        return app;
+                        // প্রসেস মরে গেলেও onProcessDie সময়মতো না চললে পুরনো
+                        // রেকর্ড থেকে যেতে পারে — মরা binder ফেরত দিলে bind
+                        // আটকে Chrome ক্র্যাশ করে। binder বেঁচে আছে কিনা
+                        // যাচাই করো; মরা হলে রেকর্ড সরিয়ে নতুন প্রসেস বানাও।
+                        boolean alive = false;
+                        try {
+                            alive = app.bActivityThread.asBinder().isBinderAlive();
+                        } catch (Exception ignored) {
+                        }
+                        if (alive) {
+                            return app;
+                        }
+                        bProcess.remove(processName);
+                        mPidsSelfLocked.remove(app);
                     }
                 }
                 bpid = getUsingBPidL();
