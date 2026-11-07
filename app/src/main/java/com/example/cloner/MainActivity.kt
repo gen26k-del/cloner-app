@@ -173,6 +173,29 @@ fun pickLauncherActivity(
         ?: exported.firstOrNull() ?: all.firstOrNull()
 }
 
+// ট্রেস-যাচাইয়ের জন্য আসল অ্যাক্টিভিটির নাম বের করো।
+// লঞ্চ intent-এর কম্পোনেন্টই সবচেয়ে নির্ভরযোগ্য: Chrome-এর Main একটি
+// activity-alias — ট্রেসে আসে আসল নাম (ChromeTabbedActivity), alias নয়।
+// ভার্চুয়াল activities তালিকায় alias থাকে না বলে pickLauncherActivity
+// ভুল অ্যাক্টিভিটি (যেমন PlayCoreDialogWrapperActivity) তুলে নেয়, আর
+// তখন ট্রেসে ভুল নাম খুঁজে "অ্যাক্টিভিটি শুরু হয়নি" বলে — যদিও আসল
+// অ্যাক্টিভিটি চলেছিল। হোস্ট PM alias-এর targetActivity জানে।
+private fun resolveTraceActivityClass(
+    ctx: Context,
+    intentClass: String?,
+    pkg: String,
+    fallback: android.content.pm.ActivityInfo?
+): String? {
+    if (intentClass != null) {
+        return runCatching {
+            ctx.packageManager.getActivityInfo(
+                android.content.ComponentName(pkg, intentClass), 0
+            ).targetActivity ?: intentClass
+        }.getOrElse { intentClass }
+    }
+    return fallback?.let { if (it.name.startsWith(".")) pkg + it.name else it.name }
+}
+
 private fun readSavedClones(ctx: Context): MutableSet<String> =
     ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         .getStringSet(KEY_CLONES, emptySet())?.toMutableSet() ?: mutableSetOf()
@@ -485,10 +508,14 @@ fun ClonerAppScreen() {
                     )
                 }.getOrNull()
                 val target = pickLauncherActivity(pkgInfo?.activities)
-                var clsName: String? = null
+                // আসল অ্যাক্টিভিটি: intent-এর কম্পোনেন্ট (alias হলে তার
+                // target) — pickLauncherActivity শুধু ফলব্যাক, কারণ
+                // ভার্চুয়াল activities তালিকায় alias থাকে না।
+                var clsName: String? = resolveTraceActivityClass(
+                    ctx, intent?.component?.className, pkg, target
+                )
                 var aiFound = false
-                if (target != null) {
-                    clsName = if (target.name.startsWith(".")) pkg + target.name else target.name
+                if (clsName != null) {
                     sb.append("মূল অ্যাক্টিভিটি: $clsName\n")
                     aiFound = runCatching {
                         pm.getActivityInfo(
@@ -667,9 +694,14 @@ fun ClonerAppScreen() {
                     )
                 }.getOrNull()
                 val target = pickLauncherActivity(pkgInfo?.activities)
-                val clsName = target?.let {
-                    if (it.name.startsWith(".")) pkg + it.name else it.name
-                }
+                // স্মার্ট রিপোর্টের মতোই: intent-এর কম্পোনেন্ট (alias হলে
+                // তার target) — নইলে Chrome-কে ভুল করে "শুরু হয়নি" বলে।
+                val launchIntentCls = runCatching {
+                    pm.getLaunchIntentForPackage(pkg, 0)?.component?.className
+                }.getOrNull()
+                val clsName = resolveTraceActivityClass(
+                    ctx, launchIntentCls, pkg, target
+                )
                 // ট্রেসের শুরুর অবস্থান
                 val traceFile = java.io.File(ctx.cacheDir, "init_trace.txt")
                 val traceBefore = runCatching { traceFile.readText().length }.getOrDefault(0)
