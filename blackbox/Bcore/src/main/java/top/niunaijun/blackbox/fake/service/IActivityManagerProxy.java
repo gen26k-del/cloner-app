@@ -432,6 +432,16 @@ public class IActivityManagerProxy extends ClassInvocationStub {
             // ('0') থাকলে আসল AM বাতিল করে: "Can't use instance name with
             // non-isolated non-sdk sandbox service"। instanceName null করলে
             // সাধারণ bind হয় — proxy সার্ভিসে bind সফল হয়।
+            // কিন্তু instanceName-ই প্রতিটি renderer-এর আলাদা পরিচয় ('0','1',...)।
+            // শুধু null করলে সব instance একই processName-এ মিশে যায় আর
+            // startProcessLocked আগের renderer-ই ফেরত দেয় — নেভিগেশনের নতুন
+            // renderer কখনো শুরু হয় না, পেজ ফ্রিজ থাকে। তাই আসল AM-কে null
+            // দেওয়ার আগে instanceName intent-এ extra হিসেবে রেখে দাও, যাতে
+            // ActiveServices.bindService প্রতিটি instance-কে আলাদা প্রসেসে চালায়।
+            Object instanceName = args[6];
+            if (instanceName instanceof String && args[2] instanceof Intent) {
+                ((Intent) args[2]).putExtra("_B_instanceName", (String) instanceName);
+            }
             args[6] = null;
             return BindServiceCommon(who,method,args,7);
         }
@@ -447,7 +457,12 @@ public class IActivityManagerProxy extends ClassInvocationStub {
     public static class BindIsolatedService extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            
+            // bindServiceInstance-এর মতো: আসল AM-কে null দাও, কিন্তু instanceName
+            // intent-এ রেখে দাও যাতে প্রতিটি isolated instance আলাদা প্রসেস পায়।
+            Object instanceName = args[6];
+            if (instanceName instanceof String && args[2] instanceof Intent) {
+                ((Intent) args[2]).putExtra("_B_instanceName", (String) instanceName);
+            }
             args[6] = null;
             return BindServiceCommon(who,method,args,7);
         }

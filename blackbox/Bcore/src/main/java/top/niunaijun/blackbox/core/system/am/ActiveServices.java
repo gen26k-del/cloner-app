@@ -97,9 +97,23 @@ public class ActiveServices {
         if (resolveInfo == null)
             return intent;
         ServiceInfo serviceInfo = resolveInfo.serviceInfo;
+        // Isolated service-এর প্রতিটি instance (Chromium renderer/GPU) আলাদা
+        // প্রসেস চায়। instanceName null করায় (v1.0.49) সব instance একই
+        // processName-এ মিশে যেত আর startProcessLocked আগের renderer-ই ফেরত
+        // দিত — নেভিগেশনের নতুন renderer কখনো শুরু হয় না, পেজ ফ্রিজ থাকে।
+        // instanceName '1','2',... থাকলে processName-এ suffix যোগ করে আলাদা
+        // প্রসেস বানাও। '0' (প্রথম renderer) আগের নামেই থাকে, যাতে নতুন ট্যাব
+        // রেন্ডারের প্রমাণিত আচরণ না বদলায়।
+        String processName = serviceInfo.processName;
+        String instanceName = intent.getStringExtra("_B_instanceName");
+        if (instanceName != null && !instanceName.isEmpty() && !"0".equals(instanceName)
+                && processName != null) {
+            processName = processName + "_i" + instanceName;
+            Log.d(TAG, "bindService isolated instance=" + instanceName + " process=" + processName);
+        }
         ProcessRecord processRecord = BProcessManagerService.get().startProcessLocked(
                 serviceInfo.packageName,
-                serviceInfo.processName,
+                processName,
                 userId,
                 -1, Binder.getCallingPid());
 
