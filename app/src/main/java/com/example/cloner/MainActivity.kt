@@ -540,12 +540,16 @@ fun ClonerAppScreen() {
             val crashes = ctx.cacheDir.listFiles { f ->
                 f.name.startsWith("last_crash") && f.name.endsWith(".txt")
             }?.sortedByDescending { it.lastModified() }?.take(3) ?: emptyList()
-            sb.append("\n--- ক্র্যাশ রিপোর্ট ---\n")
+            sb.append("\n--- ক্র্যাশ রিপোর্ট (সবগুলোর পুরো লেখা) ---\n")
             if (crashes.isEmpty()) {
                 sb.append("কোনো জাভা ক্র্যাশ রিপোর্ট নেই (নেটিভ ক্র্যাশ হলে রিপোর্ট থাকে না)\n")
             } else {
                 for (f in crashes) {
-                    sb.append("${f.name}: ${f.readText().lineSequence().firstOrNull().orEmpty()}\n")
+                    // শুধু প্রথম লাইন নয় — পুরো ক্র্যাশের লেখা দাও, যাতে এক রিপোর্টেই
+                    // সব সমস্যার কারণ দেখা যায় (প্রতি ফাইলে প্রথম 2500 অক্ষর)
+                    sb.append("\n[${f.name}]\n")
+                    sb.append(f.readText().take(2500))
+                    sb.append("\n")
                 }
             }
             sb.append("\n=== সারাংশ ===\n")
@@ -556,7 +560,7 @@ fun ClonerAppScreen() {
             }
             sb.append("\n--- ট্রেস (শেষাংশ) ---\n")
             sb.append(if (traceTail.isEmpty()) "ট্রেস নেই\n" else traceTail + "\n")
-            withContext(Dispatchers.Main) { reportText = sb.toString().take(5000) }
+            withContext(Dispatchers.Main) { reportText = sb.toString().take(12000) }
         }
     }
 

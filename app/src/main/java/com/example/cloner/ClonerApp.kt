@@ -62,17 +62,20 @@ class ClonerApp : Application() {
                         Thread.sleep(3000)
                         val blockedFor = SystemClock.uptimeMillis() - state[0]
                         if (blockedFor > 8000) {
-                            // ভুয়া ANR ফিল্টার: main thread idle-তে nativePollOnce-এ বসে
-                            // থাকলে সে আটকে নেই — ticker শুধু চলেনি (প্রসেস ব্যাকগ্রাউন্ডে/
-                            // ডোজিং)। তখন রিপোর্ট লিখো না, শুধু ticker রিসেট করো।
-                            val rmIdle = try {
+                            // ANR লিখো শুধু যখন নিশ্চিত যে main thread আসলেই আটকে আছে:
+                            // main thread পাওয়া গেছে, stack খালি নয়, আর উপরের ফ্রেম
+                            // nativePollOnce (idle) নয়। main thread পাওয়া না গেলে বা
+                            // stack খালি থাকলে নিশ্চিত হওয়া যায় না — তখন রিপোর্ট লিখো না।
+                            // (আগের ফিল্টার শুধু idle চিনত; পাওয়া না গেলে লিখে ফেলত — তাই
+                            // একই ভুয়া ANR বারবার আসত।)
+                            val rmStuck = try {
                                 val rm = findRealMain()
                                 val st = rm?.stackTrace
-                                rm?.state == Thread.State.RUNNABLE &&
-                                    (st?.firstOrNull()?.className == "android.os.MessageQueue" &&
-                                        st.firstOrNull()?.methodName == "nativePollOnce")
+                                rm != null && !st.isNullOrEmpty() &&
+                                    !(st.first().className == "android.os.MessageQueue" &&
+                                        st.first().methodName == "nativePollOnce")
                             } catch (_: Exception) { false }
-                            if (rmIdle) {
+                            if (!rmStuck) {
                                 state[0] = SystemClock.uptimeMillis()
                             } else {
                             val sb = StringBuilder("ANR ধরা পড়েছে: ${Date()} [$procName]\n")
