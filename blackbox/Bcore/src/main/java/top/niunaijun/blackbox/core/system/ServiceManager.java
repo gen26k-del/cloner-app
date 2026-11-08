@@ -63,14 +63,11 @@ public class ServiceManager {
     }
 
     public static void initBlackManager() {
-        BlackBoxCore.get().getService(ACTIVITY_MANAGER);
-        BlackBoxCore.get().getService(JOB_MANAGER);
-        BlackBoxCore.get().getService(PACKAGE_MANAGER);
-        BlackBoxCore.get().getService(STORAGE_MANAGER);
-        BlackBoxCore.get().getService(USER_MANAGER);
-
-        BlackBoxCore.get().getService(ACCOUNT_MANAGER);
-        BlackBoxCore.get().getService(LOCATION_MANAGER);
-        BlackBoxCore.get().getService(NOTIFICATION_MANAGER);
+        // v1.0.83: ৮টা getService() একটার পর একটা ডাকলে :black ধীর হলে
+        // প্রতিটা ৫-৭ সেকেন্ড আটকে main thread ANR হয় (21:27 :p8) আর Chrome
+        // renderer-কে ফেলে দেয়। areServicesAvailable() একাই ৮টা সার্ভিস
+        // parallel-এ আনে (৬ সেকেন্ড cap) — সেটাই যথেষ্ট; না-পাওয়া সার্ভিস
+        // পরে দরকার হলে lazy-load হবে।
+        BlackBoxCore.get().areServicesAvailable();
     }
 }

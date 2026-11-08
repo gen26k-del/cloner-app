@@ -117,6 +117,13 @@ public class AppServiceDispatcher {
         @Override
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
                 throws RemoteException {
+            // v1.0.83 যাচাই: wrapper-এ আদৌ কোনো transact আসছে কিনা — code 1
+            // (bindToCaller) এলে browser renderer-এর সাথে কথা বলছে; code 3/7
+            // না এলে child setup-এর আগেই মরছে বা browser bind ছেড়ে দিচ্ছে।
+            try {
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "v1.0.83 transact code=" + code + " flags=" + flags);
+            } catch (Throwable ignored) { }
             if (code == TRANSACTION_consumeRelroLibInfo) {
                 // RELRO ফেলে দাও — M156-এ কোনো wait নেই, আটকাবে না।
                 BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
