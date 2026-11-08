@@ -245,6 +245,67 @@ public class BActivityThread extends IBActivityThread.Stub {
         return sb.length() == 0 ? " (none)" : sb.toString();
     }
 
+    // v1.0.80: Chrome-এর split dex classloader-এ ইনস্টল করো, তারপর খোঁজো।
+    // v1.0.79-এ দেখা গেছে LibraryLoader/NativeLibraries/Linker কোনোটাই
+    // classloader-এ নেই (সব false, loaders=1) — chrome split dex লোডই হয়নি।
+    // SplitCompat.install() দিয়ে split ইনস্টল করার চেষ্টা করো; না হলে
+    // DexPathList.addDexPath() দিয়ে split APK সরাসরি যোগ করো।
+    private void tryInstallSplits(java.util.Set<ClassLoader> loaders, ServiceInfo si, Service service) {
+        // split APK-র পাথ: ServiceInfo.applicationInfo থেকে (ভার্চুয়াল)।
+        String[] splits = null;
+        try {
+            if (si != null && si.applicationInfo != null) splits = si.applicationInfo.splitSourceDirs;
+        } catch (Throwable ignored) { }
+        if ((splits == null || splits.length == 0) && mInitialApplication != null) {
+            try { splits = mInitialApplication.getApplicationInfo().splitSourceDirs; } catch (Throwable ignored) { }
+        }
+        int splitCount = splits == null ? 0 : splits.length;
+        trace("v1.0.80 splits: count=" + splitCount);
+        // ১) SplitCompat.install() — অফিসিয়াল পথ।
+        try {
+            Class<?> scClass = null;
+            for (ClassLoader cl : loaders) {
+                try { scClass = Class.forName("com.google.android.play.core.splitcompat.SplitCompat", true, cl); break; } catch (Throwable ignored) { }
+            }
+            if (scClass != null) {
+                android.content.Context ctx = service != null ? service : (mInitialApplication != null ? mInitialApplication : BlackBoxCore.getContext());
+                scClass.getMethod("install", android.content.Context.class).invoke(null, ctx);
+                trace("SplitCompat.install called");
+            } else {
+                trace("SplitCompat class not found");
+            }
+        } catch (Throwable t) {
+            trace("SplitCompat.install failed: " + t);
+        }
+        // ২) DexPathList.addDexPath() — split APK সরাসরি যোগ করো।
+        if (splits != null) {
+            for (String splitPath : splits) {
+                if (splitPath == null) continue;
+                for (ClassLoader cl : loaders) {
+                    try {
+                        // pathList BaseDexClassLoader-এ থাকে; PathClassLoader ওইটার
+                        // সাবক্লাস — সুপারক্লাসে উঠে খুঁজতে হবে।
+                        java.lang.reflect.Field plField = null;
+                        Class<?> c = cl.getClass();
+                        while (c != null && plField == null) {
+                            try { plField = c.getDeclaredField("pathList"); } catch (NoSuchFieldException e) { c = c.getSuperclass(); }
+                        }
+                        if (plField == null) continue;
+                        plField.setAccessible(true);
+                        Object pathList = plField.get(cl);
+                        if (pathList == null) continue;
+                        java.io.File optDir = BlackBoxCore.getContext().getCodeCacheDir();
+                        java.lang.reflect.Method addDex = pathList.getClass().getDeclaredMethod("addDexPath", String.class, java.io.File.class);
+                        addDex.setAccessible(true);
+                        addDex.invoke(pathList, splitPath, optDir);
+                        trace("addDexPath ok: " + splitPath);
+                        break;
+                    } catch (Throwable ignored) { }
+                }
+            }
+        }
+    }
+
     private void forceChromiumSystemLinker(ClassLoader serviceLoader, Service service, ServiceInfo si) {
         try {
             if (si == null || si.name == null || si.packageName == null) return;
@@ -261,6 +322,10 @@ public class BActivityThread extends IBActivityThread.Stub {
             }
             ClassLoader ctxCl = Thread.currentThread().getContextClassLoader();
             if (ctxCl != null) loaders.add(ctxCl);
+
+            // v1.0.80: আগে split dex ইনস্টল করো — না হলে LibraryLoader খুঁজে
+            // পাওয়া যাবে না (v1.0.79-এ সব false এসেছে)।
+            tryInstallSplits(loaders, si, service);
 
             Class<?> llClass = null;
             Class<?> nlClass = null;
@@ -282,7 +347,28 @@ public class BActivityThread extends IBActivityThread.Stub {
                     } catch (Throwable ignored) { }
                 }
             }
-            trace("v1.0.79 linker lookup for " + si.name + ": LibraryLoader="
+            // প্রথম খোঁজে না পেলে আরেকবার split ইনস্টল করে আবার খোঁজো।
+            if (llClass == null && nlClass == null && linkerClass == null) {
+                tryInstallSplits(loaders, si, service);
+                for (ClassLoader cl : loaders) {
+                    if (llClass == null) {
+                        try {
+                            llClass = Class.forName("org.chromium.base.library_loader.LibraryLoader", true, cl);
+                        } catch (Throwable ignored) { }
+                    }
+                    if (nlClass == null) {
+                        try {
+                            nlClass = Class.forName("org.chromium.build.NativeLibraries", true, cl);
+                        } catch (Throwable ignored) { }
+                    }
+                    if (linkerClass == null) {
+                        try {
+                            linkerClass = Class.forName("org.chromium.base.library_loader.Linker", true, cl);
+                        } catch (Throwable ignored) { }
+                    }
+                }
+            }
+            trace("v1.0.80 linker lookup for " + si.name + ": LibraryLoader="
                     + (llClass != null) + " NativeLibraries=" + (nlClass != null)
                     + " Linker=" + (linkerClass != null) + " loaders=" + loaders.size());
 
