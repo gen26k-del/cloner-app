@@ -441,13 +441,13 @@ public class BActivityThread extends IBActivityThread.Stub {
         // main প্রসেসে নয় (সেখানে ব্রাউজার নিজেই লোড করে)।
         // ফলাফল ট্রেসে লেখা হয় — v1.0.66-তে শুধু Log.d ছিল, ট্রেসে
         // দেখা যেত না প্রিলোড চলেছে কিনা।
-        // v1.0.67-র ট্রেসে ধরা পড়েছে: "Preload skipped, no libchrome.so" —
-        // applicationInfo.nativeLibraryDir-এ ফাইল নেই। কারণ Chrome system
-        // অ্যাপ (FLAG_SYSTEM) হলে generateApplicationInfo nativeLibraryDir
-        // বদলায় না — আসল Chrome-এর lib dir থাকে, সেখানে standalone
-        // libchrome.so নেই (লাইব্রেরি APK-র ভেতরে থাকে)। ভার্চুয়াল lib dir
-        // (BEnvironment.getAppLibDir — স্মার্ট রিপোর্টও সেখানেই libchrome.so
-        // পায়) ব্যবহার করো; না পেলে nativeLibraryDir ফলব্যাক।
+        // v1.0.68-র ট্রেসে দেখা গেছে: `:p10`/`:p9` bind-এ preload-এর কোনো
+        // লাইনই নেই (START/সফল/ব্যর্থ/skip — কিছুই না), আর "done"-ও নেই —
+        // System.load() main thread-এ আটকে গেছে (libchrome.so-র static
+        // initializer deadlock / খুব ধীর), তাই handleBindApplication শেষই
+        // হয়নি। ফিক্স: System.load() ব্যাকগ্রাউন্ড thread-এ চালিয়ে ৫ সেকেন্ড
+        // অপেক্ষা করো — সময়মতো না হলে এগিয়ে যাও, Chromium নিজের মতো load
+        // করবে। START লাইন আগেই লেখা হয়, যাতে আটকে গেলেও ট্রেসে দেখা যায়।
         try {
             if (("com.android.chrome".equals(packageName)
                     || "com.brave.browser".equals(packageName))
@@ -465,15 +465,41 @@ public class BActivityThread extends IBActivityThread.Stub {
                     if (f.exists()) chromeLib = f;
                 }
                 if (chromeLib != null) {
+                    final File libFile = chromeLib;
+                    final String proc = processName;
+                    top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                        top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                        "Preload START libchrome.so for " + proc);
+                    final java.util.concurrent.atomic.AtomicReference<Throwable> loadError =
+                            new java.util.concurrent.atomic.AtomicReference<Throwable>(null);
+                    Thread loader = new Thread(new Runnable() {
+                        @Override public void run() {
+                            try {
+                                System.load(libFile.getAbsolutePath());
+                            } catch (Throwable t) {
+                                loadError.set(t);
+                            }
+                        }
+                    }, "ChromeLibPreload");
+                    loader.setDaemon(true);
+                    loader.start();
                     try {
-                        System.load(chromeLib.getAbsolutePath());
+                        loader.join(5000);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    }
+                    if (loader.isAlive()) {
                         top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
                             top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                            "Preloaded libchrome.so for " + processName + " from " + chromeLib.getAbsolutePath());
-                    } catch (Throwable t) {
+                            "Preload TIMEOUT (5s) libchrome.so for " + proc);
+                    } else if (loadError.get() != null) {
                         top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
                             top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                            "Preload libchrome.so FAILED for " + processName + ": " + t);
+                            "Preload libchrome.so FAILED for " + proc + ": " + loadError.get());
+                    } else {
+                        top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                            top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                            "Preloaded libchrome.so for " + proc + " from " + libFile.getAbsolutePath());
                     }
                 } else {
                     top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
