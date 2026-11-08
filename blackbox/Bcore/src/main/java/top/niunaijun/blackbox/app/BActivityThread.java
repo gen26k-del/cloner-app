@@ -447,6 +447,54 @@ public class BActivityThread extends IBActivityThread.Stub {
         
         BRLoadedApk.get(loadedApk)._set_mApplicationInfo(applicationInfo);
 
+        // v1.0.76 সিস্টেম-লিংকার: Chromium child (renderer) প্রসেসে libchrome.so
+        // Chromium linker দিয়ে লোড হলে fixed-address + shared RELRO remap-এ
+        // deterministic SIGSEGV হয় (15:44/15:45, একই PC দুবার)। Chromium
+        // linker বাদ দিয়ে সিস্টেম linker (System.loadLibrary) দিয়ে লোড করলে
+        // random address-এ লোড হয়, RELRO শেয়ার হয় না — ব্রাউজার প্রসেস
+        // যেভাবে লোড করে (আর সেটা কাজ করে)। LibraryLoader-এর
+        // setLinkerImplementation(false) / mUseChromiumLinker=false — loadNow()
+        // চলার আগেই (bind-এর সময়, service onCreate-এর আগে) সেট করতে হবে।
+        // ভার্চুয়াল অ্যাপের classloader দিয়ে LibraryLoader লোড করতে হবে
+        // (BlackBox-এর classloader-এ Chrome-এর ক্লাস নেই)।
+        try {
+            boolean isChromiumChild = processName != null && processName.contains(":")
+                    && packageName != null
+                    && (packageName.contains("chrome") || packageName.contains("brave"));
+            if (isChromiumChild) {
+                ClassLoader cl = packageContext.getClassLoader();
+                Class<?> llClass = Class.forName("org.chromium.base.library_loader.LibraryLoader", true, cl);
+                Object loader = llClass.getMethod("getInstance").invoke(null);
+                boolean done = false;
+                try {
+                    llClass.getMethod("setLinkerImplementation", boolean.class).invoke(loader, false);
+                    done = true;
+                } catch (Throwable ignored) {
+                    try {
+                        java.lang.reflect.Field f = llClass.getDeclaredField("mUseChromiumLinker");
+                        f.setAccessible(true);
+                        f.setBoolean(loader, false);
+                        done = true;
+                    } catch (Throwable ignored2) { }
+                }
+                if (done) {
+                    top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                            top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                            "System linker forced for " + processName);
+                } else {
+                    top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                            top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                            "System linker FAILED for " + processName);
+                }
+            }
+        } catch (Throwable t) {
+            try {
+                top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                        top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                        "System linker error for " + processName + ": " + t);
+            } catch (Throwable ignored) { }
+        }
+
         int targetSdkVersion = applicationInfo.targetSdkVersion;
         if (targetSdkVersion < Build.VERSION_CODES.GINGERBREAD) {
             StrictMode.ThreadPolicy newPolicy = new StrictMode.ThreadPolicy.Builder(StrictMode.getThreadPolicy()).permitNetwork().build();

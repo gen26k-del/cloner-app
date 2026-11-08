@@ -331,7 +331,14 @@ public class PackageManagerCompat {
             ai.metaData = p.mAppMetaData;
         }
         ai.dataDir = BEnvironment.getDataDir(ai.packageName, userId).getAbsolutePath();
-        if (!p.installOption.isFlag(InstallOption.FLAG_SYSTEM)) {
+        // Chrome/Brave সিস্টেম অ্যাপ হলেও nativeLibraryDir ভার্চুয়াল lib dir-এ
+        // পয়েন্ট করো — আসল Chrome lib dir-এ standalone libchrome.so নেই
+        // (লাইব্রেরি APK-র ভেতরে), আর v1.0.76-এ সিস্টেম linker
+        // System.loadLibrary("chrome") দিয়ে লোড করলে এখান থেকেই খুঁজবে।
+        // অন্য সিস্টেম অ্যাপের জন্য আগের আচরণই থাকবে।
+        boolean isChromiumPkg = ai.packageName != null
+                && (ai.packageName.contains("chrome") || ai.packageName.contains("brave"));
+        if (!p.installOption.isFlag(InstallOption.FLAG_SYSTEM) || isChromiumPkg) {
             ai.nativeLibraryDir = BEnvironment.getAppLibDir(ai.packageName).getAbsolutePath();
         }
         ai.processName = BPackageManagerService.fixProcessName(p.packageName, ai.packageName);
