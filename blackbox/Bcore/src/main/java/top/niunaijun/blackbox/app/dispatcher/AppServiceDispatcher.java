@@ -179,7 +179,16 @@ public class AppServiceDispatcher {
             }
             Parcelable.Creator<?> creator = (Parcelable.Creator<?>)
                     argsClass.getField("CREATOR").get(null);
-            Object args = creator.createFromParcel(data);
+            // v1.0.87: AIDL proxy args লেখে writeTypedObject দিয়ে — আগে
+            // 4-byte marker (1 = non-null) থাকে, তারপর size-prefix সহ
+            // parcelable। v1.0.86 সরাসরি createFromParcel ডেকেছিল — marker-এর
+            // 1-কে size ভেবে "Parcelable too small" হতো (v1.0.86 রিপোর্টে
+            // প্রতিবার)। আসল Stub-ও readTypedObject দিয়েই পড়ে — সেই
+            // পথেই পড়ো। args null হলে rewrite করার কিছু নেই।
+            Object args = data.readTypedObject(creator);
+            if (args == null) {
+                throw new IllegalStateException("IChildProcessArgs is null");
+            }
             IBinder parentBinder = data.readStrongBinder();
             java.util.ArrayList<IBinder> clientInterfaces = data.createBinderArrayList();
             // relroInfo = null করো।
@@ -223,7 +232,9 @@ public class AppServiceDispatcher {
             Parcel newData = Parcel.obtain();
             try {
                 newData.writeInterfaceToken(CHILD_SERVICE_DESCRIPTOR);
-                newData.writeParcelable((Parcelable) args, 0);
+                // v1.0.87: পড়ার মতোই writeTypedObject দিয়ে লেখো — marker (1)
+                // + parcelable, নইলে আসল Stub পড়তে পারবে না।
+                newData.writeTypedObject((Parcelable) args, 0);
                 newData.writeStrongBinder(parentBinder);
                 newData.writeBinderList(clientInterfaces);
                 BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
