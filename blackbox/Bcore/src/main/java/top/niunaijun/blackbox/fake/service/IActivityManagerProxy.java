@@ -428,10 +428,6 @@ public class IActivityManagerProxy extends ClassInvocationStub {
             return false;
         }
     }
-            Slog.e(TAG, "BindServiceCommon: Unexpected error", e);
-            return method.invoke(who, args);
-        }
-    }
 
     private static int getFlagsIndex(Object[] args) {
         
