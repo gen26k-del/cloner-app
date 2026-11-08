@@ -207,6 +207,147 @@ public class BActivityThread extends IBActivityThread.Stub {
         return mBoundApplication != null;
     }
 
+    // v1.0.79: Chromium child service-এর নিজের classloader দিয়ে linker ফিক্স।
+    // v1.0.78-এর ফিক্সও চলেনি (আবার ClassNotFoundException) — কারণ ফিক্সটা
+    // packageContext.getClassLoader() দিয়ে খুঁজত, কিন্তু সার্ভিস
+    // (SandboxedProcessService0) লোড হয়
+    // BRLoadedApk.get(mBoundApplication.info).getClassLoader() দিয়ে
+    // (createService)। এই দুটো আলাদা loader, তাই Chromium-এর ক্লাস প্রথমটায়
+    // পাওয়া যায় না। সার্ভিসের নিজের loader-এ (আর কয়েকটা fallback-এ) খুঁজলে
+    // LibraryLoader/Linker পাওয়া যাবে — সার্ভিস ক্লাস ওই loader-এই লোড হয়েছে।
+    // createService-এ service.onCreate()-এর ঠিক আগে ডাকা হয় (loadNow-এর আগে)।
+    private void trace(String msg) {
+        try {
+            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(), msg);
+        } catch (Throwable ignored) { }
+    }
+
+    private static String describeApi(Class<?> c) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            for (java.lang.reflect.Method m : c.getDeclaredMethods()) {
+                String n = m.getName().toLowerCase(java.util.Locale.ROOT);
+                if (n.contains("linker") || n.contains("relro")) {
+                    sb.append(" m:").append(m.getName()).append("(")
+                            .append(m.getParameterTypes().length).append(")");
+                }
+            }
+            for (java.lang.reflect.Field f : c.getDeclaredFields()) {
+                String n = f.getName().toLowerCase(java.util.Locale.ROOT);
+                if (n.contains("linker") || n.contains("relro")) {
+                    sb.append(" f:").append(f.getName());
+                    if (java.lang.reflect.Modifier.isFinal(f.getModifiers())) sb.append("(final)");
+                }
+            }
+        } catch (Throwable t) {
+            sb.append(" describeErr:").append(t);
+        }
+        return sb.length() == 0 ? " (none)" : sb.toString();
+    }
+
+    private void forceChromiumSystemLinker(ClassLoader serviceLoader, Service service, ServiceInfo si) {
+        try {
+            if (si == null || si.name == null || si.packageName == null) return;
+            if (!si.name.contains("ProcessService")) return;
+            if (!(si.packageName.contains("chrome") || si.packageName.contains("brave"))) return;
+
+            java.util.LinkedHashSet<ClassLoader> loaders = new java.util.LinkedHashSet<>();
+            if (service != null && service.getClass().getClassLoader() != null) {
+                loaders.add(service.getClass().getClassLoader());
+            }
+            if (serviceLoader != null) loaders.add(serviceLoader);
+            if (mInitialApplication != null && mInitialApplication.getClass().getClassLoader() != null) {
+                loaders.add(mInitialApplication.getClass().getClassLoader());
+            }
+            ClassLoader ctxCl = Thread.currentThread().getContextClassLoader();
+            if (ctxCl != null) loaders.add(ctxCl);
+
+            Class<?> llClass = null;
+            Class<?> nlClass = null;
+            Class<?> linkerClass = null;
+            for (ClassLoader cl : loaders) {
+                if (llClass == null) {
+                    try {
+                        llClass = Class.forName("org.chromium.base.library_loader.LibraryLoader", true, cl);
+                    } catch (Throwable ignored) { }
+                }
+                if (nlClass == null) {
+                    try {
+                        nlClass = Class.forName("org.chromium.build.NativeLibraries", true, cl);
+                    } catch (Throwable ignored) { }
+                }
+                if (linkerClass == null) {
+                    try {
+                        linkerClass = Class.forName("org.chromium.base.library_loader.Linker", true, cl);
+                    } catch (Throwable ignored) { }
+                }
+            }
+            trace("v1.0.79 linker lookup for " + si.name + ": LibraryLoader="
+                    + (llClass != null) + " NativeLibraries=" + (nlClass != null)
+                    + " Linker=" + (linkerClass != null) + " loaders=" + loaders.size());
+
+            if (nlClass != null) {
+                try {
+                    java.lang.reflect.Field f = nlClass.getDeclaredField("sUseLinker");
+                    f.setAccessible(true);
+                    boolean wasFinal = java.lang.reflect.Modifier.isFinal(f.getModifiers());
+                    boolean before = f.getBoolean(null);
+                    if (!wasFinal) {
+                        f.setBoolean(null, false);
+                        trace("NativeLibraries.sUseLinker " + before + " -> false");
+                    } else {
+                        trace("NativeLibraries.sUseLinker is final (value=" + before + "), not changed");
+                    }
+                } catch (Throwable t) {
+                    trace("NativeLibraries.sUseLinker failed: " + t);
+                }
+            }
+
+            if (llClass != null) {
+                trace("LibraryLoader API:" + describeApi(llClass));
+                try {
+                    Object loader = llClass.getMethod("getInstance").invoke(null);
+                    boolean done = false;
+                    try {
+                        llClass.getMethod("setLinkerImplementation", boolean.class).invoke(loader, false);
+                        done = true;
+                    } catch (Throwable ignored) { }
+                    if (!done) {
+                        try {
+                            llClass.getMethod("setLinkerImplementation", boolean.class, boolean.class)
+                                    .invoke(loader, false, false);
+                            done = true;
+                        } catch (Throwable ignored) { }
+                    }
+                    if (!done) {
+                        try {
+                            java.lang.reflect.Field f = llClass.getDeclaredField("mUseChromiumLinker");
+                            f.setAccessible(true);
+                            f.setBoolean(loader, false);
+                            done = true;
+                        } catch (Throwable ignored) { }
+                    }
+                    trace("System linker " + (done ? "forced" : "NOT forced") + " for " + si.name);
+                } catch (Throwable t) {
+                    trace("LibraryLoader.getInstance failed: " + t);
+                }
+            }
+
+            if (linkerClass != null) {
+                trace("Linker API:" + describeApi(linkerClass));
+                try {
+                    Object linker = linkerClass.getMethod("getInstance").invoke(null);
+                    linkerClass.getMethod("disableSharedRelros").invoke(linker);
+                    trace("Shared RELRO disabled for " + si.name);
+                } catch (Throwable t) {
+                    trace("Shared RELRO disable failed: " + t);
+                }
+            }
+        } catch (Throwable t) {
+            trace("forceChromiumSystemLinker error: " + t);
+        }
+    }
+
     public Service createService(ServiceInfo serviceInfo, IBinder token) {
         if (!BActivityThread.currentActivityThread().isInit()) {
             BActivityThread.currentActivityThread().bindApplication(serviceInfo.packageName, serviceInfo.processName);
@@ -248,6 +389,7 @@ public class BActivityThread extends IBActivityThread.Stub {
                     BRActivityManagerNative.get().getDefault()
             );
             ContextCompat.fix(context);
+            forceChromiumSystemLinker(classLoader, service, serviceInfo);
             service.onCreate();
             return service;
         } catch (Exception e) {
@@ -558,69 +700,10 @@ public class BActivityThread extends IBActivityThread.Stub {
             AppInstrumentation.get().callApplicationOnCreate(application);
             onAfterApplicationOnCreate(packageName, processName, application);
 
-            // v1.0.78 সিস্টেম-লিংকার (এখানে — Application.onCreate-এর পরে):
-            // Chromium child (renderer) প্রসেসে libchrome.so Chromium linker দিয়ে
-            // লোড হলে fixed-address + shared RELRO remap-এ deterministic SIGSEGV
-            // হয় (15:44/15:45/17:09/17:10, একই PC 0x97889d4/0x97899f8)।
-            // সিস্টেম linker (System.loadLibrary) দিয়ে লোড করলে random address-এ
-            // লোড হয়, RELRO শেয়ার হয় না — ব্রাউজার প্রসেস যেভাবে লোড করে।
-            // LibraryLoader.setLinkerImplementation(false) / mUseChromiumLinker=false
-            // + Linker.disableSharedRelros() — loadNow() চলার আগেই (service
-            // onCreate-এর আগে) সেট করতে হবে। Application.onCreate-এ SplitCompat
-            // split dex ইনস্টল করে, তাই এখন ভার্চুয়াল classloader-এ
-            // LibraryLoader/Linker পাওয়া যাবে (bind-এর শুরুতে পাওয়া যেত না —
-            // v1.0.77-এ ৪ বার ClassNotFoundException হয়েছে)।
-            try {
-                boolean isChromiumChild = processName != null && processName.contains(":")
-                        && packageName != null
-                        && (packageName.contains("chrome") || packageName.contains("brave"));
-                if (isChromiumChild) {
-                    ClassLoader cl = packageContext.getClassLoader();
-                    Class<?> llClass = Class.forName("org.chromium.base.library_loader.LibraryLoader", true, cl);
-                    Object loader = llClass.getMethod("getInstance").invoke(null);
-                    boolean done = false;
-                    try {
-                        llClass.getMethod("setLinkerImplementation", boolean.class).invoke(loader, false);
-                        done = true;
-                    } catch (Throwable ignored) {
-                        try {
-                            java.lang.reflect.Field f = llClass.getDeclaredField("mUseChromiumLinker");
-                            f.setAccessible(true);
-                            f.setBoolean(loader, false);
-                            done = true;
-                        } catch (Throwable ignored2) { }
-                    }
-                    if (done) {
-                        top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
-                                top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                                "System linker forced for " + processName);
-                    } else {
-                        top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
-                                top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                                "System linker FAILED for " + processName);
-                    }
-                    try {
-                        Class<?> linkerClass = Class.forName("org.chromium.base.library_loader.Linker", true, cl);
-                        Object linker = linkerClass.getMethod("getInstance").invoke(null);
-                        linkerClass.getMethod("disableSharedRelros").invoke(linker);
-                        top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
-                                top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                                "Shared RELRO disabled for " + processName);
-                    } catch (Throwable relroErr) {
-                        try {
-                            top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
-                                    top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                                    "Shared RELRO disable FAILED for " + processName + ": " + relroErr);
-                        } catch (Throwable ignored) { }
-                    }
-                }
-            } catch (Throwable t) {
-                try {
-                    top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
-                            top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                            "System linker error for " + processName + ": " + t);
-                } catch (Throwable ignored) { }
-            }
+            // v1.0.79: পুরনো সিস্টেম-লিংকার ব্লক সরানো হয়েছে — এটা কখনো কাজ করে
+            // না (packageContext.getClassLoader()-এ LibraryLoader পাওয়া যায় না),
+            // শুধু ট্রেসে ভুয়া error লেখে। ফিক্স এখন createService-এ,
+            // forceChromiumSystemLinker() দিয়ে (সার্ভিসের নিজের loader)।
 
             HookManager.get().checkEnv(HCallbackProxy.class);
             try {
