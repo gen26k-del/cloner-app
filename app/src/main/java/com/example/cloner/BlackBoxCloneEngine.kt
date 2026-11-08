@@ -95,14 +95,16 @@ class BlackBoxCloneEngine : CloneEngine {
         if (!isCloneInstalled(packageName, userId)) {
             throw IllegalStateException("ক্লোন ইনস্টল করা নেই — আগে ক্লোন করুন")
         }
-        // আগের সেশনের আটকে-থাকা প্রসেস থাকলে নতুন লঞ্চ ক্র্যাশ করে
-        // (Chrome: একবার চলে, আবার ঢুকলে ক্র্যাশ)। লঞ্চের আগে প্যাকেজের
-        // চলমান প্রসেস থামিয়ে পরিষ্কার অবস্থা থেকে শুরু করো — মরা
-        // binder-এর রেকর্ড সরে যাওয়ার জন্য একটু অপেক্ষা করো।
-        try {
-            core().stopPackage(packageName, userId)
-            Thread.sleep(300)
-        } catch (_: Exception) { }
+        // v1.0.58-এ লঞ্চের আগে stopPackage (SIGKILL) যোগ করা হয়েছিল
+        // আটকে-থাকা প্রসেস reuse ঠেকাতে। কিন্তু relaunch ক্র্যাশ v1.0.58/
+        // 59/60 তিনটাতেই রয়ে গেছে — stopPackage সেটা ঠিক করেনি। উল্টো
+        // প্রতিবার লঞ্চে Chrome-কে মাঝ-লেখায় SIGKILL করলে প্রোফাইল
+        // (Preferences/Singleton) নষ্ট হওয়ার ঝুঁকি থাকে — "একবার চলে,
+        // আবার ঢুকলে ক্র্যাশ, তারপর আর চালুই হয় না" এই প্যাটার্নের সাথে
+        // মেলে। তাছাড়া killPackageAsUser এমনিতেই mProcessMap থেকে
+        // রেকর্ড সরিয়ে দেয়, আর মরা binder reuse v1.0.57-র isBinderAlive
+        // যাচাই ঠেকায়। তাই আর SIGKILL নয় — আগের সেশন বেঁচে থাকলে
+        // সেটাই resume হবে, মরে গেলে নতুন প্রসেস শুরু হবে।
         val pm = BlackBoxCore.getBPackageManager()
         val intent = try {
             pm.getLaunchIntentForPackage(packageName, userId)
