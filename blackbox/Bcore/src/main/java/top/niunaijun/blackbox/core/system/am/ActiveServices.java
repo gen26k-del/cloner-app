@@ -122,14 +122,33 @@ public class ActiveServices {
         // মেরে ফেলা যাবে না (v1.0.62-র ভুল): Chrome চালু হওয়ার সময়ই একই
         // renderer দুবার bind করে, আর দ্বিতীয় bind-এ প্রথম renderer-টা
         // তখনো সক্রিয় থাকে — সেটা মারলে Chrome-ই মরে (10:35: দুবার bind,
-        // ১৪ সেকেন্ড পর Chrome বন্ধ)। তাই রেকর্ড থাকলে processName-এ unique
-        // suffix দিয়ে নতুন প্রসেস বানাও, পুরনোটা বেঁচে থাকুক।
+        // ১৪ সেকেন্ড পর Chrome বন্ধ)। আবার কিছু না মেরে শুধু suffix দিলেও
+        // (v1.0.63) ব্যবহার-না-হওয়া renderer stub জমতে থাকে (10:45-এ ৩৪+
+        // stub চালু, :black ভারী হয়ে :p4-র init ১৮ সেকেন্ড আটকে যায়,
+        // YouTube-এ "Aw, Snap!")। তাই: পুরনো stub মরা হলে, বা কেউ আর bind
+        // করে না থাকলে (bindCount 0), সেটা মেরে নামটা ফেরত নাও; সক্রিয়
+        // থাকলে unique suffix দিয়ে নতুন প্রসেস বানাও।
         if (instanceName != null && !instanceName.isEmpty() && processName != null) {
             ProcessRecord existing = BProcessManagerService.get().findProcessRecord(
                     serviceInfo.packageName, processName, userId);
             if (existing != null) {
-                processName = processName + "_r" + sIsolatedBindCounter.incrementAndGet();
-                Log.d(TAG, "bindService isolated rebind, fresh process=" + processName);
+                boolean reclaim = false;
+                if (existing.bActivityThread != null
+                        && !existing.bActivityThread.asBinder().isBinderAlive()) {
+                    reclaim = true;
+                } else if (existing.bActivityThread != null) {
+                    RunningServiceRecord rsr = findRunningServiceRecord(intent);
+                    if (rsr == null || rsr.mBindCount.get() == 0) {
+                        reclaim = true;
+                    }
+                }
+                if (reclaim) {
+                    Log.d(TAG, "bindService isolated: reclaiming unused " + processName);
+                    BProcessManagerService.get().onProcessDie(existing);
+                } else {
+                    processName = processName + "_r" + sIsolatedBindCounter.incrementAndGet();
+                    Log.d(TAG, "bindService isolated rebind, fresh process=" + processName);
+                }
             }
         }
         ProcessRecord processRecord = BProcessManagerService.get().startProcessLocked(
