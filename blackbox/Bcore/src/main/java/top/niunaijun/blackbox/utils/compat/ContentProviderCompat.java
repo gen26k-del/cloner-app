@@ -9,7 +9,22 @@ import android.os.Bundle;
 import android.os.RemoteException;
 import android.os.SystemClock;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
 public class ContentProviderCompat {
+
+    // Provider call (:black-এর service lookup) মাঝে মাঝে ~১৯ সেকেন্ড আটকে
+    // যায় — main thread ANR হয় ("CloneMe isn't responding") আর Chrome-এর
+    // renderer timeout হয়ে "Aw, Snap!" দেখায়। client.call() ব্লকিং Binder
+    // কল, কোনো timeout নেই। ৫ সেকেন্ডে উত্তর না এলে ব্যর্থ ধরে নাও, যাতে
+    // caller (initAppProcessL-এর retry, getServiceInternal-এর fallback)
+    // দ্রুত সিদ্ধান্ত নিতে পারে।
+    private static final ExecutorService sCallExecutor = Executors.newCachedThreadPool();
+    private static final long CALL_TIMEOUT_MS = 5000;
 
     public static Bundle call(Context context, Uri uri, String method, String arg, Bundle extras, int retryCount) throws IllegalAccessException {
         if (VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1) {
@@ -20,9 +35,23 @@ public class ContentProviderCompat {
             if (client == null) {
                 throw new IllegalAccessException();
             }
-            return client.call(method, arg, extras);
-        } catch (RemoteException e) {
-            throw new IllegalAccessException(e.getMessage());
+            final ContentProviderClient c = client;
+            Future<Bundle> future = sCallExecutor.submit(() -> c.call(method, arg, extras));
+            try {
+                return future.get(CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException e) {
+                future.cancel(true);
+                throw new IllegalAccessException("provider call timeout: " + method);
+            } catch (java.util.concurrent.ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof RemoteException) {
+                    throw new IllegalAccessException(cause.getMessage());
+                }
+                throw new IllegalAccessException(String.valueOf(cause));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalAccessException("interrupted");
+            }
         } finally {
             releaseQuietly(client);
         }
