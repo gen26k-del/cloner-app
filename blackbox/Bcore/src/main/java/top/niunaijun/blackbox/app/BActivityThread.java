@@ -486,6 +486,26 @@ public class BActivityThread extends IBActivityThread.Stub {
                             top.niunaijun.blackbox.BlackBoxCore.getContext(),
                             "System linker FAILED for " + processName);
                 }
+                // v1.0.77: shared RELRO-ও বন্ধ করো — সিস্টেম linker দিয়ে random
+                // address-এ লোড হলেও ব্রাউজার consumeRelroLibInfo দিয়ে RELRO
+                // পাঠায়, আর Linker সেটা async-এ remap করলে ভুল address-এর
+                // pointer বসে পরে crash হয় (v1.0.76-এ YouTube কিছুক্ষণ চলে
+                // তারপর "Aw, Snap!")। disableSharedRelros() load-এর আগেই
+                // ডাকতে হবে — এই প্রসেস RELRO তৈরি/ব্যবহার কিছুই করবে না।
+                try {
+                    Class<?> linkerClass = Class.forName("org.chromium.base.library_loader.Linker", true, cl);
+                    Object linker = linkerClass.getMethod("getInstance").invoke(null);
+                    linkerClass.getMethod("disableSharedRelros").invoke(linker);
+                    top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                            top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                            "Shared RELRO disabled for " + processName);
+                } catch (Throwable relroErr) {
+                    try {
+                        top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                                top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                                "Shared RELRO disable FAILED for " + processName + ": " + relroErr);
+                    } catch (Throwable ignored) { }
+                }
             }
         } catch (Throwable t) {
             try {

@@ -585,6 +585,14 @@ fun ClonerAppScreen() {
             } else {
                 sb.append(verdicts.joinToString("\n") + "\n")
             }
+            // ডায়াগনসিস মার্কার — Chromium renderer-এর মৃত্যু/ফিক্সের লাইন
+            // (System linker, child process died, kept alive, RELRO) — ট্রেসের
+            // শেষাংশে না থাকলেও এগুলো দেখা যাবে, যাতে রিপোর্ট পাঠালেই বোঝা যায়
+            // ফিক্স চলেছিল কিনা আর renderer কখন মরল।
+            val diagKeywords = listOf("System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO")
+            val diagLines = trace.lines().filter { line -> diagKeywords.any { k -> line.contains(k) } }.takeLast(20)
+            sb.append("\n--- ডায়াগনসিস লাইন (renderer) ---\n")
+            sb.append(if (diagLines.isEmpty()) "কোনো ডায়াগনসিস লাইন নেই\n" else diagLines.joinToString("\n") + "\n")
             sb.append("\n--- ট্রেস (শেষাংশ) ---\n")
             sb.append(if (traceTail.isEmpty()) "ট্রেস নেই\n" else traceTail + "\n")
             withContext(Dispatchers.Main) { reportText = sb.toString().take(12000) }
