@@ -431,6 +431,26 @@ public class BActivityThread extends IBActivityThread.Stub {
                 }
             }
         } catch (Throwable ignored) { }
+        // Chromium child (renderer/GPU) প্রসেসে libchrome.so আগেই লোড করে নাও।
+        // Stub প্রসেসে Chromium-এর android_dlopen_ext (RELRO শেয়ারিং) ব্যর্থ হয় —
+        // নির্দিষ্ট ঠিকানায় ২০৬MB জায়গা চায়, stub-এ মাত্র ৫MB পায়
+        // ("reserved address space 5238784 smaller than 206565376 bytes"),
+        // আর renderer "Aw, Snap!" দেখায়। আগেই System.load() করে রাখলে
+        // Chromium-এর dlopen আগের হ্যান্ডেলটাই ফেরত দেয় (SONAME মিলে যায়),
+        // RELRO reservation আর লাগে না। শুধু child প্রসেসে (':' আছে),
+        // main প্রসেসে নয় (সেখানে ব্রাউজার নিজেই লোড করে)।
+        try {
+            if (("com.android.chrome".equals(packageName)
+                    || "com.brave.browser".equals(packageName))
+                    && processName != null && processName.contains(":")
+                    && applicationInfo.nativeLibraryDir != null) {
+                File chromeLib = new File(applicationInfo.nativeLibraryDir, "libchrome.so");
+                if (chromeLib.exists()) {
+                    System.load(chromeLib.getAbsolutePath());
+                    android.util.Log.d("BlackBox", "Preloaded libchrome.so for " + processName);
+                }
+            }
+        } catch (Throwable ignored) { }
         mProviders.addAll(Arrays.asList(packageInfo.providers));
 
         Object boundApplication = BRActivityThread.get(BlackBoxCore.mainThread()).mBoundApplication();
