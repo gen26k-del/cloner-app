@@ -339,21 +339,27 @@ public class IActivityManagerProxy extends ClassInvocationStub {
     }
 
     public static Object BindServiceCommon(Object who, Method method, Object[] args,int callingPackageIndex) throws Throwable {
+        Intent intent = (Intent) args[2];
+        String resolvedType = (String) args[3];
+        IServiceConnection connection = (IServiceConnection) args[4];
+
+        if (intent == null) {
+            Slog.w(TAG, "BindServiceCommon: Intent is null, proceeding with original call");
+            return method.invoke(who, args);
+        }
+
+        int userId = intent.getIntExtra("_B_|_UserId", -1);
+        userId = userId == -1 ? BActivityThread.getUserId() : userId;
+        // ভার্চুয়াল (ক্লোন করা) প্যাকেজের সার্ভিস কিনা। এমন intent আসল AM-এ
+        // গেলে UID না মেলায় AM ঋণাত্মক কোড ফেরত দেয় আর LoadedApk
+        // SecurityException ("Not allowed to bind to service") ছোড়ে — Chrome
+        // FATAL ক্র্যাশ করে (v1.0.59-এ SandboxedProcessService0-তেই হয়েছে)।
+        // redirect ব্যর্থ হলে আসল কলে ফলব্যাক নয় — bind ব্যর্থ (0) ফেরত দাও।
+        // bindService/bindServiceInstance/bindIsolatedService int ফেরত দেয়,
+        // 0 মানে "bind হয়নি" (LoadedApk false দেয়, exception নয়) — Chrome
+        // সেটা সামলে child প্রসেস আবার চালানোর চেষ্টা করতে পারে।
+        boolean isVirtual = isVirtualServiceIntent(intent, userId);
         try {
-            Intent intent = (Intent) args[2];
-            String resolvedType = (String) args[3];
-            IServiceConnection connection = (IServiceConnection) args[4];
-
-            
-            if (intent == null) {
-                Slog.w(TAG, "BindServiceCommon: Intent is null, proceeding with original call");
-                return method.invoke(who, args);
-            }
-
-            
-
-            int userId = intent.getIntExtra("_B_|_UserId", -1);
-            userId = userId == -1 ? BActivityThread.getUserId() : userId;
             ResolveInfo resolveInfo = BlackBoxCore.getBPackageManager().resolveService(intent, 0, resolvedType, userId);
             if (resolveInfo != null || AppSystemEnv.isOpenPackage(intent.getComponent())) {
                 Intent proxyIntent = BlackBoxCore.getBActivityManager().bindService(intent,
@@ -373,8 +379,7 @@ public class IActivityManagerProxy extends ClassInvocationStub {
                     }
                 }
 
-                
-                if (proxyIntent != null && proxyIntent.getComponent() != null && 
+                if (proxyIntent != null && proxyIntent.getComponent() != null &&
                     proxyIntent.getComponent().getPackageName().equals(BlackBoxCore.getHostPkg())){
                     int flagsIndex = getFlagsIndex(args);
                     if (flagsIndex >= 0) {
@@ -385,13 +390,44 @@ public class IActivityManagerProxy extends ClassInvocationStub {
                 }
                 args[callingPackageIndex] = BlackBoxCore.getHostPkg();
 
-                if (proxyIntent != null) {
+                if (proxyIntent != null && proxyIntent != intent) {
                     args[2] = proxyIntent;
-                    return method.invoke(who, args);
+                    try {
+                        return method.invoke(who, args);
+                    } catch (Exception e) {
+                        Slog.e(TAG, "BindServiceCommon: proxy bind failed", e);
+                        return 0;
+                    }
                 }
+                // redirect হয়নি (proxyIntent null বা original intent ফেরত
+                // এসেছে — যেমন stub প্রসেস চালু হতে দেরি হলে startProcessLocked
+                // null দেয়)। ভার্চুয়াল intent আসল AM-এ পাঠিও না।
+                Slog.w(TAG, "BindServiceCommon: redirect failed for " + intent.getComponent());
+                return 0;
+            }
+            if (isVirtual) {
+                Slog.w(TAG, "BindServiceCommon: unresolved virtual service " + intent.getComponent());
+                return 0;
             }
             return method.invoke(who, args);
         } catch (Exception e) {
+            Slog.e(TAG, "BindServiceCommon: Unexpected error", e);
+            if (isVirtual) {
+                return 0;
+            }
+            return method.invoke(who, args);
+        }
+    }
+
+    private static boolean isVirtualServiceIntent(Intent intent, int userId) {
+        try {
+            ComponentName comp = intent.getComponent();
+            if (comp == null) return false;
+            return BlackBoxCore.getBPackageManager().isInstalled(comp.getPackageName(), userId);
+        } catch (Exception e) {
+            return false;
+        }
+    }
             Slog.e(TAG, "BindServiceCommon: Unexpected error", e);
             return method.invoke(who, args);
         }

@@ -118,7 +118,13 @@ public class ActiveServices {
                 -1, Binder.getCallingPid());
 
         if (processRecord == null) {
-            throw new RuntimeException("Unable to create " + serviceInfo.name);
+            // stub প্রসেস চালু হয়নি (যেমন cold start-এ provider call দেরি)।
+            // RuntimeException ছুড়লে BindServiceCommon আসল intent-এ ফলব্যাক
+            // করে আর আসল AM SecurityException দেয় — Chrome FATAL ক্র্যাশ করে।
+            // null ফেরত দাও, যাতে BindServiceCommon bind ব্যর্থ (0) দেয় আর
+            // Chrome retry করতে পারে।
+            Log.w(TAG, "bindService: unable to create " + serviceInfo.name);
+            return null;
         }
 
         RunningServiceRecord runningServiceRecord;
