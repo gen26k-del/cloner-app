@@ -588,14 +588,43 @@ fun ClonerAppScreen() {
             // ডায়াগনসিস মার্কার — Chromium renderer-এর মৃত্যু/ফিক্সের লাইন
             // (System linker, child process died, kept alive, RELRO) — ট্রেসের
             // শেষাংশে না থাকলেও এগুলো দেখা যাবে, যাতে রিপোর্ট পাঠালেই বোঝা যায়
-            // ফিক্স চলেছিল কিনা আর renderer কখন মরল।
+            // ফিক্স চলেছিল কিনা আর renderer কখন মরল। বিরল লাইনগুলো (setup/
+            // transact) পুরো ট্রেস থেকে নাও — শেষ ২০-এ চাপা পড়ে যায় বলে
+            // v1.0.82-84-তে "relroInfo nulled"/"transact code=" কখনো দেখা যায়নি।
             val diagKeywords = listOf("System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed", "transact code=", "no-sandbox")
-            val diagLines = trace.lines().filter { line -> diagKeywords.any { k -> line.contains(k) } }.takeLast(20)
+            val rareKeywords = listOf("transact code=", "relroInfo nulled", "RELRO blocked", "no-sandbox", "binder wrapped", "setupConnection rewrite failed")
+            val rareLines = trace.lines().filter { line -> rareKeywords.any { k -> line.contains(k) } }.takeLast(30)
+            val diagLines = (rareLines + trace.lines().filter { line -> diagKeywords.any { k -> line.contains(k) } }.takeLast(20)).distinct()
             sb.append("\n--- ডায়াগনসিস লাইন (renderer) ---\n")
             sb.append(if (diagLines.isEmpty()) "কোনো ডায়াগনসিস লাইন নেই\n" else diagLines.joinToString("\n") + "\n")
+            // টম্বস্টোন ফ্রেম: renderer SIGSEGV-র কল স্ট্যাক — কোন ফাংশনে
+            // মরলো বোঝার একমাত্র সূত্র। লগ ভিউ ফ্রেমগুলো কেটে ফেলে, তাই
+            // রিপোর্টেই ধরো (সংক্ষিপ্ত আকারে: ফ্রেম নম্বর, pc, লাইব্রেরি)।
+            val tombstone = runCatching {
+                val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "3000"))
+                val logOut = proc.inputStream.bufferedReader().readText()
+                proc.waitFor()
+                val frameRe = Regex("#(\\d+) pc ([0-9a-f]+)")
+                val offRe = Regex("\\(offset 0x[0-9a-f]+\\)")
+                val frames = logOut.lines().mapNotNull { line ->
+                    val m = frameRe.find(line) ?: return@mapNotNull null
+                    val lib = runCatching {
+                        val afterBang = line.substringAfterLast('!', "")
+                        if (afterBang.isNotEmpty()) afterBang.substringBefore(' ').substringBefore('(')
+                        else line.substringAfterLast('/').substringBefore(' ').substringBefore('(')
+                    }.getOrDefault("?")
+                    val off = offRe.find(line)?.value ?: ""
+                    "#${m.groupValues[1]} pc ${m.groupValues[2]} $lib $off".trim()
+                }.takeLast(100)
+                val buildId = logOut.lines().lastOrNull { it.contains("BuildId:") }
+                    ?.substringAfter("BuildId:")?.trim()?.take(40).orEmpty()
+                if (frames.isEmpty()) "" else (if (buildId.isEmpty()) "" else "BuildId: $buildId\n") + frames.joinToString("\n")
+            }.getOrDefault("")
+            sb.append("\n--- টম্বস্টোন ফ্রেম (renderer SIGSEGV) ---\n")
+            sb.append(if (tombstone.isEmpty()) "কোনো টম্বস্টোন ফ্রেম পাওয়া যায়নি\n" else tombstone + "\n")
             sb.append("\n--- ট্রেস (শেষাংশ) ---\n")
             sb.append(if (traceTail.isEmpty()) "ট্রেস নেই\n" else traceTail + "\n")
-            withContext(Dispatchers.Main) { reportText = sb.toString().take(12000) }
+            withContext(Dispatchers.Main) { reportText = sb.toString().take(20000) }
         }
     }
 
