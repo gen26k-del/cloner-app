@@ -441,18 +441,35 @@ public class BActivityThread extends IBActivityThread.Stub {
         // main প্রসেসে নয় (সেখানে ব্রাউজার নিজেই লোড করে)।
         // ফলাফল ট্রেসে লেখা হয় — v1.0.66-তে শুধু Log.d ছিল, ট্রেসে
         // দেখা যেত না প্রিলোড চলেছে কিনা।
+        // v1.0.67-র ট্রেসে ধরা পড়েছে: "Preload skipped, no libchrome.so" —
+        // applicationInfo.nativeLibraryDir-এ ফাইল নেই। কারণ Chrome system
+        // অ্যাপ (FLAG_SYSTEM) হলে generateApplicationInfo nativeLibraryDir
+        // বদলায় না — আসল Chrome-এর lib dir থাকে, সেখানে standalone
+        // libchrome.so নেই (লাইব্রেরি APK-র ভেতরে থাকে)। ভার্চুয়াল lib dir
+        // (BEnvironment.getAppLibDir — স্মার্ট রিপোর্টও সেখানেই libchrome.so
+        // পায়) ব্যবহার করো; না পেলে nativeLibraryDir ফলব্যাক।
         try {
             if (("com.android.chrome".equals(packageName)
                     || "com.brave.browser".equals(packageName))
-                    && processName != null && processName.contains(":")
-                    && applicationInfo.nativeLibraryDir != null) {
-                File chromeLib = new File(applicationInfo.nativeLibraryDir, "libchrome.so");
-                if (chromeLib.exists()) {
+                    && processName != null && processName.contains(":")) {
+                File chromeLib = null;
+                try {
+                    File vLibDir = top.niunaijun.blackbox.core.env.BEnvironment.getAppLibDir(packageName);
+                    if (vLibDir != null) {
+                        File f = new File(vLibDir, "libchrome.so");
+                        if (f.exists()) chromeLib = f;
+                    }
+                } catch (Throwable ignored) { }
+                if (chromeLib == null && applicationInfo.nativeLibraryDir != null) {
+                    File f = new File(applicationInfo.nativeLibraryDir, "libchrome.so");
+                    if (f.exists()) chromeLib = f;
+                }
+                if (chromeLib != null) {
                     try {
                         System.load(chromeLib.getAbsolutePath());
                         top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
                             top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                            "Preloaded libchrome.so for " + processName);
+                            "Preloaded libchrome.so for " + processName + " from " + chromeLib.getAbsolutePath());
                     } catch (Throwable t) {
                         top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
                             top.niunaijun.blackbox.BlackBoxCore.getContext(),
