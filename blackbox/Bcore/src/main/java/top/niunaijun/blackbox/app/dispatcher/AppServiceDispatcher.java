@@ -93,15 +93,29 @@ public class AppServiceDispatcher {
 
     public void onDestroy() {
         if (mService.size() > 0) {
-            for (ServiceRecord record : mService.values()) {
+            java.util.Iterator<java.util.Map.Entry<Intent.FilterComparison, ServiceRecord>> it =
+                    mService.entrySet().iterator();
+            while (it.hasNext()) {
+                java.util.Map.Entry<Intent.FilterComparison, ServiceRecord> entry = it.next();
+                Service svc = entry.getValue().getService();
+                String svcName = svc != null ? svc.getClass().getName() : null;
+                boolean isChromiumChild = svcName != null
+                        && svcName.contains("ProcessService") && svcName.contains("chromium");
+                // Chromium child service — onDestroy() ডেকো না (System.exit(0)
+                // করে renderer মেরে দেয়)। cache-এ রেখে দাও, re-bind-এ reuse হবে।
+                if (isChromiumChild) {
+                    BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                            "onDestroy chromium child kept alive: " + svcName);
+                    continue;
+                }
                 try {
-                    record.getService().onDestroy();
+                    entry.getValue().getService().onDestroy();
                 } catch (Throwable e) {
                     e.printStackTrace();
                 }
+                it.remove();
             }
         }
-        mService.clear();
 
     }
 
@@ -165,6 +179,23 @@ public class AppServiceDispatcher {
             ServiceRecord record = findRecord(intent);
 
             boolean destroy = unbindRecord.getStartId() == 0;
+            // Chromium child service (renderer/GPU/privileged) — unbind-এ
+            // destroy কোরো না: ChildProcessService.onDestroy() System.exit(0)
+            // ডাকে, আর Chrome নেভিগেশন/রিলোডে transient unbind করে।
+            // destroy করলে renderer মরে "Aw, Snap!" আসে — 15:04:06-এর
+            // clean exit (result code 0) ঠিক এই পথেই হয়েছে। Service-টা
+            // cache-এ রেখে দাও, re-bind-এ onRebind() দিয়ে একই binder
+            // ফেরত যাবে।
+            ServiceInfo chromiumInfo = stubRecord.mServiceInfo;
+            boolean isChromiumChild = chromiumInfo != null && chromiumInfo.name != null
+                    && chromiumInfo.name.contains("ProcessService")
+                    && chromiumInfo.packageName != null
+                    && (chromiumInfo.packageName.contains("chrome") || chromiumInfo.packageName.contains("brave"));
+            if (isChromiumChild) {
+                destroy = false;
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "onUnbind chromium child kept alive: " + chromiumInfo.name);
+            }
             if (destroy || record.decreaseConnectionCount(intent)) {
                 boolean b = service.onUnbind(intent);
                 if (destroy) {
