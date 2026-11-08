@@ -8,6 +8,7 @@ import android.content.Intent;
 import android.content.pm.ResolveInfo;
 import android.content.pm.ServiceInfo;
 import android.os.Binder;
+import android.os.Bundle;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.util.Log;
@@ -100,6 +101,36 @@ public class ActiveServices {
         if (resolveInfo == null)
             return intent;
         ServiceInfo serviceInfo = resolveInfo.serviceInfo;
+        // Chromium child service (renderer/GPU/privileged) — shared RELRO বন্ধ:
+        // Browser যে random base load address দেয়, renderer stub-এর ওই ঠিকানা
+        // আগেই দখল থাকে (CloneMe/BlackBox/ART mapping) বলে libchrome.so-র
+        // ২০৬MB RELRO সংরক্ষণ ব্যর্থ হয় ("reserved address space 5238784
+        // smaller than 206565376 bytes needed") আর renderer মরে "Aw, Snap!"
+        // আসে (v1.0.72 স্ক্রিনশট 14:32)। Shared RELRO-র তথ্য
+        // (ChromiumLinkerParams + EXTRA_LINKER_SHARED_RELROS Bundle) intent
+        // থেকে সরিয়ে দিলে child disableSharedRelros() করে libchrome.so
+        // সাধারণভাবে (random address-এ) লোড করে — fixed address সংরক্ষণ
+        // লাগে না। শুধু RAM বাঁচানোর optimization হারায়, কাজের কিছু না।
+        if (serviceInfo.name != null && serviceInfo.name.contains("ProcessService")
+                && serviceInfo.packageName != null
+                && (serviceInfo.packageName.contains("chrome") || serviceInfo.packageName.contains("brave"))) {
+            intent.removeExtra("org.chromium.base.android.linker.shared_relros");
+            Bundle extras = intent.getExtras();
+            if (extras != null) {
+                java.util.ArrayList<String> linkerKeys = new java.util.ArrayList<>();
+                for (String key : extras.keySet()) {
+                    if (key != null && key.toLowerCase(java.util.Locale.ROOT).contains("linker")) {
+                        linkerKeys.add(key);
+                    }
+                }
+                for (String key : linkerKeys) {
+                    intent.removeExtra(key);
+                }
+                if (!linkerKeys.isEmpty()) {
+                    Log.d(TAG, "bindService chromium child: disabled shared RELRO for " + serviceInfo.name);
+                }
+            }
+        }
         // Isolated service-এর প্রতিটি instance (Chromium renderer/GPU) আলাদা
         // প্রসেস চায়। instanceName null করায় (v1.0.49) সব instance একই
         // processName-এ মিশে যেত আর startProcessLocked আগের renderer-ই ফেরত
