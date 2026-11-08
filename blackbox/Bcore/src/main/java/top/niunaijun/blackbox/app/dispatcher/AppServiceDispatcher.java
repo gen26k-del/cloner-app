@@ -163,6 +163,38 @@ public class AppServiceDispatcher {
             relroField.setAccessible(true);
             Object oldRelro = relroField.get(args);
             relroField.set(args, null);
+            // v1.0.84: --no-sandbox যোগ করো — M156-এ Android renderer-এর
+            // seccomp sandbox বন্ধ করার একমাত্র কার্যকর switch এটাই
+            // (--disable-seccomp-filter-sandbox Android-এ ignore হয়)।
+            // seccomp filter সব thread-এ বসে (TSYNC) — BlackBox stub-এর
+            // Binder/ioctl/prctl syscall-এ SIGSYS হয়ে renderer মরে
+            // (21:47:53 cr_seccomp)। commandLine browser-ই বানায়, child
+            // RendererMain-এ HasSwitch(kNoSandbox) দেখে sandbox বাদ দেয়।
+            try {
+                java.lang.reflect.Field cmdField = argsClass.getField("commandLine");
+                cmdField.setAccessible(true);
+                String[] cmd = (String[]) cmdField.get(args);
+                if (cmd != null) {
+                    boolean hasIt = false;
+                    for (String s : cmd) {
+                        if ("--no-sandbox".equals(s)) { hasIt = true; break; }
+                    }
+                    if (!hasIt) {
+                        String[] newCmd = java.util.Arrays.copyOf(cmd, cmd.length + 1);
+                        newCmd[cmd.length] = "--no-sandbox";
+                        cmdField.set(args, newCmd);
+                        BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                                "v1.0.84 --no-sandbox appended to child commandLine (was "
+                                + cmd.length + " args)");
+                    }
+                } else {
+                    BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                            "v1.0.84 child commandLine is null");
+                }
+            } catch (Throwable t) {
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "v1.0.84 --no-sandbox append failed: " + t);
+            }
             // নতুন parcel বানিয়ে আসল binder-এ পাঠাও।
             Parcel newData = Parcel.obtain();
             try {
