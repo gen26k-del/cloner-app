@@ -111,6 +111,21 @@ public class ActiveServices {
             processName = processName + "_i" + instanceName;
             Log.d(TAG, "bindService isolated instance=" + instanceName + " process=" + processName);
         }
+        // Isolated service bind (Chromium child process) — প্রতিটি bind-এ
+        // নতুন প্রসেস চাই। startProcessLocked আগের ProcessRecord reuse
+        // করলে একই OS প্রসেসে SandboxedProcessService আবার বানাতে গিয়ে
+        // Chromium "Illegal child process reuse" বলে অস্বীকার করে — renderer
+        // মরে, Chrome নেটিভ ক্র্যাশ করে / স্লো হয় (relaunch-এই হয়, কারণ
+        // আগের সেশনের renderer stub তখনো বেঁচে থাকে)। তাই পুরনো রেকর্ড
+        // থাকলে সেটা মেরে সরিয়ে দাও, যাতে নতুন প্রসেস বানায়।
+        if (instanceName != null && !instanceName.isEmpty() && processName != null) {
+            ProcessRecord existing = BProcessManagerService.get().findProcessRecord(
+                    serviceInfo.packageName, processName, userId);
+            if (existing != null) {
+                Log.d(TAG, "bindService isolated: dropping stale " + processName);
+                BProcessManagerService.get().onProcessDie(existing);
+            }
+        }
         ProcessRecord processRecord = BProcessManagerService.get().startProcessLocked(
                 serviceInfo.packageName,
                 processName,
