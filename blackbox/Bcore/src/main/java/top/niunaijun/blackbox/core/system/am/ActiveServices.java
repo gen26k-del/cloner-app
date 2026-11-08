@@ -151,28 +151,13 @@ public class ActiveServices {
                 }
             }
         }
-        // Non-isolated child bind (যেমন Chromium-এর GPU/privileged প্রসেস):
-        // instanceName নেই, কিন্তু processName-এ ':' আছে। আগের সেশনের
-        // idle stub (binder বেঁচে আছে, কিন্তু কেউ bind করে নেই — mBindCount 0)
-        // reuse করলে Chromium "Illegal child process reuse" বলে অস্বীকার করে —
-        // একটা OS প্রসেসে একবারই child বানানো যায়। GPU মরলে YouTube-এ
-        // "Aw, Snap!" আসে। তাই idle child stub থাকলে সেটা মেরে নতুন প্রসেস
-        // বানাও; সক্রিয়ভাবে bound থাকলে (mBindCount > 0) নাম বদলিও না —
-        // GPU singleton, startProcessLocked reuse করবে।
-        if ((instanceName == null || instanceName.isEmpty())
-                && processName != null && processName.contains(":")
-                && serviceInfo.packageName != null) {
-            ProcessRecord existing = BProcessManagerService.get().findProcessRecord(
-                    serviceInfo.packageName, processName, userId);
-            if (existing != null && existing.bActivityThread != null
-                    && existing.bActivityThread.asBinder().isBinderAlive()) {
-                RunningServiceRecord rsr = findRunningServiceRecord(intent);
-                if (rsr == null || rsr.mBindCount.get() == 0) {
-                    Log.d(TAG, "bindService child: reclaiming idle " + processName);
-                    BProcessManagerService.get().onProcessDie(existing);
-                }
-            }
-        }
+        // v1.0.67-র non-isolated child reclaim সরানো হয়েছে (v1.0.71):
+        // idle stub (mBindCount 0) মারলে সব সাইটে "Can't open this page"
+        // আসে — mBindCount 0 মানেই stub অলস নয়, GPU/privileged প্রসেস
+        // bind ছাড়াও ব্রাউজারের কাজ (compositing / নেটওয়ার্ক) করে; সেটা
+        // মারলে নেভিগেশনই ব্যর্থ হয়। "Can't open this page" v1.0.67
+        // (reclaim যোগের) পর থেকেই শুরু, তার আগে "Aw, Snap!" ছিল।
+        // মরা binder-এর reclaim v1.0.57-র isBinderAlive চেকেই হয়।
         ProcessRecord processRecord = BProcessManagerService.get().startProcessLocked(
                 serviceInfo.packageName,
                 processName,
