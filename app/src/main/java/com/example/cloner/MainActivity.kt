@@ -606,7 +606,12 @@ fun ClonerAppScreen() {
                 proc.waitFor()
                 val frameRe = Regex("#(\\d+) pc ([0-9a-f]+)")
                 val offRe = Regex("\\(offset 0x[0-9a-f]+\\)")
-                val frames = logOut.lines().mapNotNull { line ->
+                val allFrames = logOut.lines().filter { frameRe.containsMatchIn(it) }
+                // সবচেয়ে সাম্প্রতিক টম্বস্টোনটাই নাও — আগের টম্বস্টোনের লেজ
+                // (#96/#97) মিশে যাওয়া ঠেকাতে শেষ "#00 pc" লাইন থেকে শুরু করো।
+                val lastZero = allFrames.indexOfLast { it.contains("#00 pc ") }
+                val recent = if (lastZero >= 0) allFrames.subList(lastZero, allFrames.size) else allFrames
+                val frames = recent.mapNotNull { line ->
                     val m = frameRe.find(line) ?: return@mapNotNull null
                     val lib = runCatching {
                         val afterBang = line.substringAfterLast('!', "")
@@ -616,8 +621,10 @@ fun ClonerAppScreen() {
                     val off = offRe.find(line)?.value ?: ""
                     "#${m.groupValues[1]} pc ${m.groupValues[2]} $lib $off".trim()
                 }.takeLast(100)
-                val buildId = logOut.lines().lastOrNull { it.contains("BuildId:") }
-                    ?.substringAfter("BuildId:")?.trim()?.take(40).orEmpty()
+                // BuildId: #00 ফ্রেমের লাইন থেকেই নাও (libchrome.so-র) — পুরো
+                // logcat-এর শেষ BuildId লাইন অন্য লাইব্রেরির (যেমন libc.so-র) হয়।
+                val buildId = recent.firstOrNull()
+                    ?.substringAfter("BuildId:", "")?.trim()?.substringBefore(")")?.take(40).orEmpty()
                 if (frames.isEmpty()) "" else (if (buildId.isEmpty()) "" else "BuildId: $buildId\n") + frames.joinToString("\n")
             }.getOrDefault("")
             sb.append("\n--- টম্বস্টোন ফ্রেম (renderer SIGSEGV) ---\n")

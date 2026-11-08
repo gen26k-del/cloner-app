@@ -149,10 +149,34 @@ public class AppServiceDispatcher {
         private boolean forwardSetupConnectionNulled(Parcel data, Parcel reply, int flags)
                 throws Exception {
             data.enforceInterface(CHILD_SERVICE_DESCRIPTOR);
-            // IChildProcessArgs পড়ো (CREATOR দিয়ে — ক্লাসটা child প্রসেসের
-            // loader-এ আছে, কারণ Stub নিজেই এটা দিয়ে parcel পড়ে)।
-            Class<?> argsClass = Class.forName(
-                    "org.chromium.base.process_launcher.IChildProcessArgs");
+            // v1.0.86: IChildProcessArgs-কে wrapper-এর loader দিয়ে খোঁজা
+            // যায় না — wrapper BlackBox/host loader-এ চলে, Chromium ক্লাস
+            // ওখানে নেই (v1.0.85-তে প্রতিবার ClassNotFoundException হয়ে
+            // original parcel forward হয়েছে — relro nulling আর --no-sandbox
+            // কখনো চলেনি)। আসল binder (mReal) হলো service-এর Stub, virtual
+            // app-এর loader-এ লোড হয়েছে — সেই loader দিয়ে খোঁজো; না পেলে
+            // context loader, তারপর wrapper-এর নিজের loader।
+            Class<?> argsClass = null;
+            Throwable lastErr = null;
+            ClassLoader[] loaders = new ClassLoader[] {
+                    mReal.getClass().getClassLoader(),
+                    Thread.currentThread().getContextClassLoader(),
+                    ChromiumRelroBlocker.class.getClassLoader()
+            };
+            for (ClassLoader cl : loaders) {
+                if (cl == null) continue;
+                try {
+                    argsClass = Class.forName(
+                            "org.chromium.base.process_launcher.IChildProcessArgs",
+                            false, cl);
+                    break;
+                } catch (Throwable t) { lastErr = t; }
+            }
+            if (argsClass == null) {
+                throw new ClassNotFoundException(
+                        "org.chromium.base.process_launcher.IChildProcessArgs",
+                        lastErr);
+            }
             Parcelable.Creator<?> creator = (Parcelable.Creator<?>)
                     argsClass.getField("CREATOR").get(null);
             Object args = creator.createFromParcel(data);
