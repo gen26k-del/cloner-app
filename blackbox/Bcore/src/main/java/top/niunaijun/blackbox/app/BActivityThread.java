@@ -250,6 +250,46 @@ public class BActivityThread extends IBActivityThread.Stub {
     // classloader-এ নেই (সব false, loaders=1) — chrome split dex লোডই হয়নি।
     // SplitCompat.install() দিয়ে split ইনস্টল করার চেষ্টা করো; না হলে
     // DexPathList.addDexPath() দিয়ে split APK সরাসরি যোগ করো।
+    // v1.0.81 যাচাই: DexPathList-এ কয়টা dex element আছে?
+    private int dexElementsCount(ClassLoader cl) {
+        try {
+            java.lang.reflect.Field plField = null;
+            Class<?> c = cl.getClass();
+            while (c != null && plField == null) {
+                try { plField = c.getDeclaredField("pathList"); } catch (NoSuchFieldException e) { c = c.getSuperclass(); }
+            }
+            if (plField == null) return -1;
+            plField.setAccessible(true);
+            Object pathList = plField.get(cl);
+            if (pathList == null) return -1;
+            java.lang.reflect.Field deField = pathList.getClass().getDeclaredField("dexElements");
+            deField.setAccessible(true);
+            Object dexElements = deField.get(pathList);
+            if (dexElements == null) return -1;
+            return java.lang.reflect.Array.getLength(dexElements);
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    // v1.0.81 যাচাই: loader-এর parent chain-টা কেমন?
+    private void dumpLoaderHierarchy(ClassLoader cl) {
+        try {
+            StringBuilder sb = new StringBuilder("v1.0.81 loader hierarchy:");
+            ClassLoader cur = cl;
+            int depth = 0;
+            while (cur != null && depth < 8) {
+                sb.append(" [").append(depth).append("]=").append(cur.getClass().getName());
+                sb.append(" dex=").append(dexElementsCount(cur));
+                cur = cur.getParent();
+                depth++;
+            }
+            trace(sb.toString());
+        } catch (Throwable t) {
+            trace("v1.0.81 loader hierarchy failed: " + t);
+        }
+    }
+
     private void tryInstallSplits(java.util.Set<ClassLoader> loaders, ServiceInfo si, Service service) {
         // split APK-র পাথ: ServiceInfo.applicationInfo থেকে (ভার্চুয়াল)।
         String[] splits = null;
@@ -295,10 +335,12 @@ public class BActivityThread extends IBActivityThread.Stub {
                         Object pathList = plField.get(cl);
                         if (pathList == null) continue;
                         java.io.File optDir = BlackBoxCore.getContext().getCodeCacheDir();
+                        int before = dexElementsCount(cl);
                         java.lang.reflect.Method addDex = pathList.getClass().getDeclaredMethod("addDexPath", String.class, java.io.File.class);
                         addDex.setAccessible(true);
                         addDex.invoke(pathList, splitPath, optDir);
-                        trace("addDexPath ok: " + splitPath);
+                        int after = dexElementsCount(cl);
+                        trace("addDexPath ok: " + splitPath + " dexElements " + before + " -> " + after);
                         break;
                     } catch (Throwable ignored) { }
                 }
@@ -326,6 +368,32 @@ public class BActivityThread extends IBActivityThread.Stub {
             // v1.0.80: আগে split dex ইনস্টল করো — না হলে LibraryLoader খুঁজে
             // পাওয়া যাবে না (v1.0.79-এ সব false এসেছে)।
             tryInstallSplits(loaders, si, service);
+
+            // v1.0.81 যাচাই: split ক্লাস আসলে কোথায় আছে? initialize=false
+            // দিয়ে খোঁজো (static init ফেইল করলেও ক্লাসের উপস্থিতি ধরা পড়বে)।
+            // ContextUtils/ChromeTabbedActivity split-এর পরিচিত ক্লাস — এগুলো
+            // পাওয়া গেলে dex যোগ হয়েছে, না পেলে addDexPath নীরবে ব্যর্থ।
+            for (ClassLoader cl : loaders) {
+                dumpLoaderHierarchy(cl);
+            }
+            String[] probeClasses = {
+                "org.chromium.base.library_loader.LibraryLoader",
+                "org.chromium.build.NativeLibraries",
+                "org.chromium.base.library_loader.Linker",
+                "org.chromium.base.ContextUtils",
+                "org.chromium.chrome.browser.ChromeTabbedActivity"
+            };
+            for (String pc : probeClasses) {
+                boolean found = false;
+                for (ClassLoader cl : loaders) {
+                    try {
+                        Class.forName(pc, false, cl);
+                        found = true;
+                        break;
+                    } catch (Throwable ignored) { }
+                }
+                trace("v1.0.81 probe: " + pc + " found=" + found);
+            }
 
             Class<?> llClass = null;
             Class<?> nlClass = null;
