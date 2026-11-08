@@ -439,6 +439,8 @@ public class BActivityThread extends IBActivityThread.Stub {
         // Chromium-এর dlopen আগের হ্যান্ডেলটাই ফেরত দেয় (SONAME মিলে যায়),
         // RELRO reservation আর লাগে না। শুধু child প্রসেসে (':' আছে),
         // main প্রসেসে নয় (সেখানে ব্রাউজার নিজেই লোড করে)।
+        // ফলাফল ট্রেসে লেখা হয় — v1.0.66-তে শুধু Log.d ছিল, ট্রেসে
+        // দেখা যেত না প্রিলোড চলেছে কিনা।
         try {
             if (("com.android.chrome".equals(packageName)
                     || "com.brave.browser".equals(packageName))
@@ -446,8 +448,20 @@ public class BActivityThread extends IBActivityThread.Stub {
                     && applicationInfo.nativeLibraryDir != null) {
                 File chromeLib = new File(applicationInfo.nativeLibraryDir, "libchrome.so");
                 if (chromeLib.exists()) {
-                    System.load(chromeLib.getAbsolutePath());
-                    android.util.Log.d("BlackBox", "Preloaded libchrome.so for " + processName);
+                    try {
+                        System.load(chromeLib.getAbsolutePath());
+                        top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                            top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                            "Preloaded libchrome.so for " + processName);
+                    } catch (Throwable t) {
+                        top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                            top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                            "Preload libchrome.so FAILED for " + processName + ": " + t);
+                    }
+                } else {
+                    top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                        top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                        "Preload skipped, no libchrome.so for " + processName);
                 }
             }
         } catch (Throwable ignored) { }
