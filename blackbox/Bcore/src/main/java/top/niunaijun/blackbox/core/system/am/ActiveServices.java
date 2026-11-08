@@ -33,6 +33,9 @@ import top.niunaijun.blackbox.proxy.record.ProxyServiceRecord;
 public class ActiveServices {
     public static final String TAG = "ActiveServices";
 
+    // Isolated-service rebind-এ unique processName দেওয়ার কাউন্টার।
+    private static final AtomicInteger sIsolatedBindCounter = new AtomicInteger(0);
+
     private final Map<Intent.FilterComparison, RunningServiceRecord> mRunningServiceRecords = new HashMap<>();
     private final Map<IBinder, RunningServiceRecord> mRunningTokens = new HashMap<>();
     private final Map<IBinder, ConnectedServiceRecord> mConnectedServices = new HashMap<>();
@@ -115,15 +118,18 @@ public class ActiveServices {
         // নতুন প্রসেস চাই। startProcessLocked আগের ProcessRecord reuse
         // করলে একই OS প্রসেসে SandboxedProcessService আবার বানাতে গিয়ে
         // Chromium "Illegal child process reuse" বলে অস্বীকার করে — renderer
-        // মরে, Chrome নেটিভ ক্র্যাশ করে / স্লো হয় (relaunch-এই হয়, কারণ
-        // আগের সেশনের renderer stub তখনো বেঁচে থাকে)। তাই পুরনো রেকর্ড
-        // থাকলে সেটা মেরে সরিয়ে দাও, যাতে নতুন প্রসেস বানায়।
+        // মরে, Chrome নেটিভ ক্র্যাশ করে / স্লো হয়। কিন্তু পুরনো রেকর্ড
+        // মেরে ফেলা যাবে না (v1.0.62-র ভুল): Chrome চালু হওয়ার সময়ই একই
+        // renderer দুবার bind করে, আর দ্বিতীয় bind-এ প্রথম renderer-টা
+        // তখনো সক্রিয় থাকে — সেটা মারলে Chrome-ই মরে (10:35: দুবার bind,
+        // ১৪ সেকেন্ড পর Chrome বন্ধ)। তাই রেকর্ড থাকলে processName-এ unique
+        // suffix দিয়ে নতুন প্রসেস বানাও, পুরনোটা বেঁচে থাকুক।
         if (instanceName != null && !instanceName.isEmpty() && processName != null) {
             ProcessRecord existing = BProcessManagerService.get().findProcessRecord(
                     serviceInfo.packageName, processName, userId);
             if (existing != null) {
-                Log.d(TAG, "bindService isolated: dropping stale " + processName);
-                BProcessManagerService.get().onProcessDie(existing);
+                processName = processName + "_r" + sIsolatedBindCounter.incrementAndGet();
+                Log.d(TAG, "bindService isolated rebind, fresh process=" + processName);
             }
         }
         ProcessRecord processRecord = BProcessManagerService.get().startProcessLocked(
