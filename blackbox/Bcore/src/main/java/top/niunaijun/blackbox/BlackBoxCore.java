@@ -25,9 +25,13 @@ import java.io.File;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 
 import black.android.app.BRActivityThread;
@@ -108,7 +112,7 @@ public class BlackBoxCore extends ClientConfiguration {
         }
     }
     private ProcessType mProcessType;
-    private final Map<String, IBinder> mServices = new HashMap<>();
+    private final Map<String, IBinder> mServices = new ConcurrentHashMap<>();
     private Thread.UncaughtExceptionHandler mExceptionHandler;
     private ClientConfiguration mClientConfiguration;
     private final List<AppLifecycleCallback> mAppLifecycleCallbacks = new ArrayList<>();
@@ -271,17 +275,35 @@ public class BlackBoxCore extends ClientConfiguration {
                 ServiceManager.NOTIFICATION_MANAGER
             };
             
+            // ৮টি সার্ভিস একটার পর একটা আনলে provider ধীর হলে ৮×৫=৪০
+            // সেকেন্ড লাগে — main thread ANR হয়, Chrome-এর child init আটকে
+            // নেভিগেশন ব্যর্থ হয় ("Can't open this page")। সবগুলো একসাথে
+            // (parallel) আনো: মোট সময় তখন সবচেয়ে ধীর একটার সমান, যোগফল নয়।
+            ExecutorService pool = Executors.newFixedThreadPool(serviceNames.length);
+            CountDownLatch latch = new CountDownLatch(serviceNames.length);
             for (String serviceName : serviceNames) {
-                try {
-                    getServiceInternal(serviceName);
-                } catch (Exception e) {
-                    Slog.w(TAG, "Failed to initialize service: " + serviceName + ", trying fallback", e);
-                    
-                    IBinder fallbackService = createFallbackService(serviceName);
-                    if (fallbackService != null) {
-                        mServices.put(serviceName, fallbackService);
+                final String svcName = serviceName;
+                pool.execute(() -> {
+                    try {
+                        getServiceInternal(svcName);
+                    } catch (Exception e) {
+                        Slog.w(TAG, "Failed to initialize service: " + svcName + ", trying fallback", e);
+                        IBinder fallbackService = createFallbackService(svcName);
+                        if (fallbackService != null) {
+                            mServices.put(svcName, fallbackService);
+                        }
+                    } finally {
+                        latch.countDown();
                     }
-                }
+                });
+            }
+            pool.shutdown();
+            try {
+                // মোট ৬ সেকেন্ডের বেশি আটকে থাকলে ANR-ই হবে — যা পাওয়া
+                // গেছে তাই নিয়ে এগোও, বাকিগুলো পরে lazy-load হবে।
+                latch.await(6, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
             
             Slog.d(TAG, "Services initialized successfully");
