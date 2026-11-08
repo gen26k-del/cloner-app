@@ -20,6 +20,18 @@ import java.util.Date
 class ClonerApp : Application() {
 
     /**
+     * নতুন রিপোর্ট আসলে আগের সব রিপোর্ট মুছে ফেলো — শুধু নতুনটাই থাকবে।
+     * (ব্যবহারকারী: আগের রিপোর্ট যাতে না দেয়, নতুন রিপোর্ট আসলে আগেরটা মুছে যাবে।)
+     */
+    private fun clearOldCrashReports() {
+        try {
+            cacheDir.listFiles { f ->
+                f.name.startsWith("last_crash") && f.name.endsWith(".txt")
+            }?.forEach { runCatching { it.delete() } }
+        } catch (_: Exception) { }
+    }
+
+    /**
      * ANR watchdog: main thread 8 সেকেন্ডের বেশি সাড়া না দিলে
      * সব thread-এর stack trace ফাইলে লিখে রাখে।
      */
@@ -102,6 +114,8 @@ class ClonerApp : Application() {
                             } catch (e: Exception) {
                                 sb.append("\nrealMain dump ব্যর্থ: $e\n")
                             }
+                            // নতুন রিপোর্ট লেখার আগে আগের সব রিপোর্ট মুছে ফেলো
+                            clearOldCrashReports()
                             reportFile.writeText(sb.toString().take(12000))
                             state[0] = SystemClock.uptimeMillis()
                             }
@@ -145,6 +159,8 @@ class ClonerApp : Application() {
                         .replace("\u0000", " ").trim()
                         .replace(Regex("[^A-Za-z0-9._-]"), "_").ifEmpty { "?" }
                 }.getOrDefault("?")
+                // নতুন রিপোর্ট লেখার আগে আগের সব রিপোর্ট মুছে ফেলো
+                clearOldCrashReports()
                 File(cacheDir, "last_crash_$proc.txt").writeText(
                     "${Date()} [$proc]\nThread: ${thread.name}\n${sw}"
                 )

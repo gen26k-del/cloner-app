@@ -597,22 +597,8 @@ fun ClonerAppScreen() {
     var checkupStop by remember { mutableStateOf(false) }
     val checkupLines = remember { mutableStateListOf<String>() }
 
-    // আগের চেকআপের ফলাফল (অ্যাপ ক্র্যাশ/বন্ধ হয়ে গেলেও ফাইলে থাকে) দেখাও
-    LaunchedEffect(Unit) {
-        val saved = withContext(Dispatchers.IO) {
-            runCatching {
-                java.io.File(ctx.cacheDir, "checkup_report.txt")
-                    .takeIf { it.exists() }?.readText()
-                    ?.lines()?.filter { it.isNotBlank() }
-            }.getOrNull() ?: emptyList()
-        }
-        if (saved.isNotEmpty()) {
-            val done = saved.lastOrNull() == "=== চেকআপ শেষ ==="
-            checkupLines.addAll(if (done) saved.dropLast(1) else saved)
-            checkupProgress = if (done) "আগের চেকআপের ফলাফল (সম্পূর্ণ)"
-            else "আগের চেকআপের আংশিক ফলাফল — মাঝপথে বন্ধ হয়ে গিয়েছিল"
-        }
-    }
+    // আগের চেকআপের রিপোর্ট আর দেখানো হয় না — নতুন চেকআপ চালালে নতুন
+    // রিপোর্ট আসে, পুরনোটা মুছে যায়। (ব্যবহারকারী: আগের রিপোর্ট যাতে না দেয়।)
 
     // পাস করা অ্যাপ আর চেক করা হয় না — শুধু সমস্যার অ্যাপ আর নতুন অ্যাপ চেক হয়।
     // recheckAll=true হলে পাস করা অ্যাপগুলোও আবার চেক হয়।

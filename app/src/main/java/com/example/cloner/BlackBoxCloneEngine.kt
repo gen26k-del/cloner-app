@@ -95,6 +95,14 @@ class BlackBoxCloneEngine : CloneEngine {
         if (!isCloneInstalled(packageName, userId)) {
             throw IllegalStateException("ক্লোন ইনস্টল করা নেই — আগে ক্লোন করুন")
         }
+        // আগের সেশনের আটকে-থাকা প্রসেস থাকলে নতুন লঞ্চ ক্র্যাশ করে
+        // (Chrome: একবার চলে, আবার ঢুকলে ক্র্যাশ)। লঞ্চের আগে প্যাকেজের
+        // চলমান প্রসেস থামিয়ে পরিষ্কার অবস্থা থেকে শুরু করো — মরা
+        // binder-এর রেকর্ড সরে যাওয়ার জন্য একটু অপেক্ষা করো।
+        try {
+            core().stopPackage(packageName, userId)
+            Thread.sleep(300)
+        } catch (_: Exception) { }
         val pm = BlackBoxCore.getBPackageManager()
         val intent = try {
             pm.getLaunchIntentForPackage(packageName, userId)
