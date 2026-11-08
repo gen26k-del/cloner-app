@@ -114,6 +114,7 @@ public class ActiveServices {
         if (serviceInfo.name != null && serviceInfo.name.contains("ProcessService")
                 && serviceInfo.packageName != null
                 && (serviceInfo.packageName.contains("chrome") || serviceInfo.packageName.contains("brave"))) {
+            boolean hadRelro = intent.hasExtra("org.chromium.base.android.linker.shared_relros");
             intent.removeExtra("org.chromium.base.android.linker.shared_relros");
             Bundle extras = intent.getExtras();
             if (extras != null) {
@@ -126,8 +127,10 @@ public class ActiveServices {
                 for (String key : linkerKeys) {
                     intent.removeExtra(key);
                 }
-                if (!linkerKeys.isEmpty()) {
+                if (hadRelro || !linkerKeys.isEmpty()) {
                     Log.d(TAG, "bindService chromium child: disabled shared RELRO for " + serviceInfo.name);
+                    BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                            "bindService chromium child RELRO disabled for " + serviceInfo.name);
                 }
             }
         }
@@ -156,29 +159,36 @@ public class ActiveServices {
         // ১৪ সেকেন্ড পর Chrome বন্ধ)। আবার কিছু না মেরে শুধু suffix দিলেও
         // (v1.0.63) ব্যবহার-না-হওয়া renderer stub জমতে থাকে (10:45-এ ৩৪+
         // stub চালু, :black ভারী হয়ে :p4-র init ১৮ সেকেন্ড আটকে যায়,
-        // YouTube-এ "Aw, Snap!")। তাই: পুরনো stub মরা হলে, বা কেউ আর bind
-        // করে না থাকলে (bindCount 0), সেটা মেরে নামটা ফেরত নাও; সক্রিয়
-        // থাকলে unique suffix দিয়ে নতুন প্রসেস বানাও।
+        // YouTube-এ "Aw, Snap!")। v1.0.64-এ তাই bindCount 0 দেখে মারার
+        // নিয়ম যোগ হয়েছিল — কিন্তু v1.0.74-এ সেটা তোলা হলো: mBindCount
+        // ভুল হতে পারে, আর ভিডিওতে (14:49) YouTube পুরো রেন্ডার হয়ে ~১s
+        // পর মরছে — চালু renderer-কে মারা যাবে না। শুধু মরা binder-এর
+        // রেকর্ড পরিষ্কার হয়; জীবিত থাকলে suffix দিয়ে নতুন প্রসেস বানাও।
         if (instanceName != null && !instanceName.isEmpty() && processName != null) {
             ProcessRecord existing = BProcessManagerService.get().findProcessRecord(
                     serviceInfo.packageName, processName, userId);
             if (existing != null) {
-                boolean reclaim = false;
-                if (existing.bActivityThread != null
-                        && !existing.bActivityThread.asBinder().isBinderAlive()) {
-                    reclaim = true;
-                } else if (existing.bActivityThread != null) {
-                    RunningServiceRecord rsr = findRunningServiceRecord(intent);
-                    if (rsr == null || rsr.mBindCount.get() == 0) {
-                        reclaim = true;
-                    }
-                }
-                if (reclaim) {
-                    Log.d(TAG, "bindService isolated: reclaiming unused " + processName);
+                // v1.0.74: mBindCount 0 দেখে আর মারি না — v1.0.71-এ প্রমাণিত
+                // mBindCount 0 মানেই stub অলস নয় (renderer-ও bind ছাড়া
+                // কাজ করে); আর RunningServiceRecord সব instance-এর bind
+                // একসাথে গোনে বলে mBindCount ভুলও হতে পারে। ভিডিওতে (14:49)
+                // দেখা গেছে: YouTube পুরো রেন্ডার হয়, তার ~১s পর renderer
+                // মরে — সন্দেহ এই reclaim-ই ভুল করে চালু renderer-কে
+                // মারছিল। তাই: মরা binder (আগেই মরে গেছে) হলে শুধু রেকর্ড
+                // পরিষ্কার করো; জীবিত binder থাকলে কখনো মেরো না, suffix
+                // দিয়ে নতুন প্রসেস বানাও।
+                boolean binderDead = existing.bActivityThread != null
+                        && !existing.bActivityThread.asBinder().isBinderAlive();
+                if (binderDead) {
+                    Log.d(TAG, "bindService isolated: reclaiming dead " + processName);
+                    BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                            "bindService reclaim dead stub " + processName);
                     BProcessManagerService.get().onProcessDie(existing);
                 } else {
                     processName = processName + "_r" + sIsolatedBindCounter.incrementAndGet();
                     Log.d(TAG, "bindService isolated rebind, fresh process=" + processName);
+                    BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                            "bindService isolated rebind, fresh process=" + processName);
                 }
             }
         }

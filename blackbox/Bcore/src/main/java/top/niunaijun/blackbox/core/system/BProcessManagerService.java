@@ -213,6 +213,16 @@ public class BProcessManagerService implements ISystemService {
     }
 
     public void onProcessDie(ProcessRecord record) {
+        // Chromium child প্রসেস মরলে ট্রেসে লেখো — "Aw, Snap!"-এর সময়
+        // renderer কখন মরল, সেটা স্মার্ট রিপোর্টের ট্রেসেই দেখা যাবে
+        // (logcat ছাড়া)। মৃত্যুর কারণ (নেটিভ ক্র্যাশ নাকি clean exit)
+        // এতে ধরা পড়বে না, শুধু সময়টা ধরা পড়বে।
+        String diePkg = record.getPackageName();
+        if (diePkg != null && (diePkg.contains("chrome") || diePkg.contains("brave"))
+                && record.processName != null && record.processName.contains(":")) {
+            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                    "child process died: " + record.processName);
+        }
         synchronized (mProcessLock) {
             record.kill();
             Map<String, ProcessRecord> process = mProcessMap.get(record.buid);
