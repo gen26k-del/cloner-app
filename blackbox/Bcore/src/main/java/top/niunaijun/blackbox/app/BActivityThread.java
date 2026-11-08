@@ -431,83 +431,12 @@ public class BActivityThread extends IBActivityThread.Stub {
                 }
             }
         } catch (Throwable ignored) { }
-        // Chromium child (renderer/GPU) প্রসেসে libchrome.so আগেই লোড করে নাও।
-        // Stub প্রসেসে Chromium-এর android_dlopen_ext (RELRO শেয়ারিং) ব্যর্থ হয় —
-        // নির্দিষ্ট ঠিকানায় ২০৬MB জায়গা চায়, stub-এ মাত্র ৫MB পায়
-        // ("reserved address space 5238784 smaller than 206565376 bytes"),
-        // আর renderer "Aw, Snap!" দেখায়। আগেই System.load() করে রাখলে
-        // Chromium-এর dlopen আগের হ্যান্ডেলটাই ফেরত দেয় (SONAME মিলে যায়),
-        // RELRO reservation আর লাগে না। শুধু child প্রসেসে (':' আছে),
-        // main প্রসেসে নয় (সেখানে ব্রাউজার নিজেই লোড করে)।
-        // ফলাফল ট্রেসে লেখা হয় — v1.0.66-তে শুধু Log.d ছিল, ট্রেসে
-        // দেখা যেত না প্রিলোড চলেছে কিনা।
-        // v1.0.68-র ট্রেসে দেখা গেছে: `:p10`/`:p9` bind-এ preload-এর কোনো
-        // লাইনই নেই (START/সফল/ব্যর্থ/skip — কিছুই না), আর "done"-ও নেই —
-        // System.load() main thread-এ আটকে গেছে (libchrome.so-র static
-        // initializer deadlock / খুব ধীর), তাই handleBindApplication শেষই
-        // হয়নি। ফিক্স: System.load() ব্যাকগ্রাউন্ড thread-এ চালিয়ে ৫ সেকেন্ড
-        // অপেক্ষা করো — সময়মতো না হলে এগিয়ে যাও, Chromium নিজের মতো load
-        // করবে। START লাইন আগেই লেখা হয়, যাতে আটকে গেলেও ট্রেসে দেখা যায়।
-        try {
-            if (("com.android.chrome".equals(packageName)
-                    || "com.brave.browser".equals(packageName))
-                    && processName != null && processName.contains(":")) {
-                File chromeLib = null;
-                try {
-                    File vLibDir = top.niunaijun.blackbox.core.env.BEnvironment.getAppLibDir(packageName);
-                    if (vLibDir != null) {
-                        File f = new File(vLibDir, "libchrome.so");
-                        if (f.exists()) chromeLib = f;
-                    }
-                } catch (Throwable ignored) { }
-                if (chromeLib == null && applicationInfo.nativeLibraryDir != null) {
-                    File f = new File(applicationInfo.nativeLibraryDir, "libchrome.so");
-                    if (f.exists()) chromeLib = f;
-                }
-                if (chromeLib != null) {
-                    final File libFile = chromeLib;
-                    final String proc = processName;
-                    top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
-                        top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                        "Preload START libchrome.so for " + proc);
-                    final java.util.concurrent.atomic.AtomicReference<Throwable> loadError =
-                            new java.util.concurrent.atomic.AtomicReference<Throwable>(null);
-                    Thread loader = new Thread(new Runnable() {
-                        @Override public void run() {
-                            try {
-                                System.load(libFile.getAbsolutePath());
-                            } catch (Throwable t) {
-                                loadError.set(t);
-                            }
-                        }
-                    }, "ChromeLibPreload");
-                    loader.setDaemon(true);
-                    loader.start();
-                    try {
-                        loader.join(5000);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                    }
-                    if (loader.isAlive()) {
-                        top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
-                            top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                            "Preload TIMEOUT (5s) libchrome.so for " + proc);
-                    } else if (loadError.get() != null) {
-                        top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
-                            top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                            "Preload libchrome.so FAILED for " + proc + ": " + loadError.get());
-                    } else {
-                        top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
-                            top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                            "Preloaded libchrome.so for " + proc + " from " + libFile.getAbsolutePath());
-                    }
-                } else {
-                    top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
-                        top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                        "Preload skipped, no libchrome.so for " + processName);
-                }
-            }
-        } catch (Throwable ignored) { }
+        // libchrome.so প্রিলোড সরানো হয়েছে (v1.0.66–69): System.load() দিয়ে
+        // আগেই লোড করার চেষ্টা কাজ করেনি — v1.0.68-তে main thread-এ আটকে
+        // গিয়ে bind শেষ হয়নি, v1.0.69-তে ব্যাকগ্রাউন্ড thread-এ চালালেও
+        // "Preload START"-এর পর কোনো ফলাফল লাইন আসেনি আর `:p0` stub মরে
+        // গিয়ে নতুন `:p0` শুরু হয়েছে — লোডটা নেটিভভাবে stub প্রসেসকে
+        // মেরে দিচ্ছে। Chromium নিজের relroMode=0 fallback-এই লোড করুক।
         mProviders.addAll(Arrays.asList(packageInfo.providers));
 
         Object boundApplication = BRActivityThread.get(BlackBoxCore.mainThread()).mBoundApplication();
