@@ -447,73 +447,14 @@ public class BActivityThread extends IBActivityThread.Stub {
         
         BRLoadedApk.get(loadedApk)._set_mApplicationInfo(applicationInfo);
 
-        // v1.0.76 সিস্টেম-লিংকার: Chromium child (renderer) প্রসেসে libchrome.so
-        // Chromium linker দিয়ে লোড হলে fixed-address + shared RELRO remap-এ
-        // deterministic SIGSEGV হয় (15:44/15:45, একই PC দুবার)। Chromium
-        // linker বাদ দিয়ে সিস্টেম linker (System.loadLibrary) দিয়ে লোড করলে
-        // random address-এ লোড হয়, RELRO শেয়ার হয় না — ব্রাউজার প্রসেস
-        // যেভাবে লোড করে (আর সেটা কাজ করে)। LibraryLoader-এর
-        // setLinkerImplementation(false) / mUseChromiumLinker=false — loadNow()
-        // চলার আগেই (bind-এর সময়, service onCreate-এর আগে) সেট করতে হবে।
-        // ভার্চুয়াল অ্যাপের classloader দিয়ে LibraryLoader লোড করতে হবে
-        // (BlackBox-এর classloader-এ Chrome-এর ক্লাস নেই)।
-        try {
-            boolean isChromiumChild = processName != null && processName.contains(":")
-                    && packageName != null
-                    && (packageName.contains("chrome") || packageName.contains("brave"));
-            if (isChromiumChild) {
-                ClassLoader cl = packageContext.getClassLoader();
-                Class<?> llClass = Class.forName("org.chromium.base.library_loader.LibraryLoader", true, cl);
-                Object loader = llClass.getMethod("getInstance").invoke(null);
-                boolean done = false;
-                try {
-                    llClass.getMethod("setLinkerImplementation", boolean.class).invoke(loader, false);
-                    done = true;
-                } catch (Throwable ignored) {
-                    try {
-                        java.lang.reflect.Field f = llClass.getDeclaredField("mUseChromiumLinker");
-                        f.setAccessible(true);
-                        f.setBoolean(loader, false);
-                        done = true;
-                    } catch (Throwable ignored2) { }
-                }
-                if (done) {
-                    top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
-                            top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                            "System linker forced for " + processName);
-                } else {
-                    top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
-                            top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                            "System linker FAILED for " + processName);
-                }
-                // v1.0.77: shared RELRO-ও বন্ধ করো — সিস্টেম linker দিয়ে random
-                // address-এ লোড হলেও ব্রাউজার consumeRelroLibInfo দিয়ে RELRO
-                // পাঠায়, আর Linker সেটা async-এ remap করলে ভুল address-এর
-                // pointer বসে পরে crash হয় (v1.0.76-এ YouTube কিছুক্ষণ চলে
-                // তারপর "Aw, Snap!")। disableSharedRelros() load-এর আগেই
-                // ডাকতে হবে — এই প্রসেস RELRO তৈরি/ব্যবহার কিছুই করবে না।
-                try {
-                    Class<?> linkerClass = Class.forName("org.chromium.base.library_loader.Linker", true, cl);
-                    Object linker = linkerClass.getMethod("getInstance").invoke(null);
-                    linkerClass.getMethod("disableSharedRelros").invoke(linker);
-                    top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
-                            top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                            "Shared RELRO disabled for " + processName);
-                } catch (Throwable relroErr) {
-                    try {
-                        top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
-                                top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                                "Shared RELRO disable FAILED for " + processName + ": " + relroErr);
-                    } catch (Throwable ignored) { }
-                }
-            }
-        } catch (Throwable t) {
-            try {
-                top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
-                        top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                        "System linker error for " + processName + ": " + t);
-            } catch (Throwable ignored) { }
-        }
+        // v1.0.78: সিস্টেম-লিংকার ফিক্স এখানে আর নেই — এখানে (bind-এর শুরুতে)
+        // চালালে ClassNotFoundException হয়, কারণ LibraryLoader ক্লাস Chrome-এর
+        // chrome split dex-এ থাকে, আর split dex SplitCompat Application.onCreate-এ
+        // ইনস্টল করে (v1.0.77-র ডায়াগনসিসে ৪ বার "System linker error:
+        // ClassNotFoundException: LibraryLoader" এসেছে — ফিক্স একবারও চলেনি)।
+        // তাই ফিক্সটা handleBindApplication-এর শেষে, Application.onCreate-এর
+        // পরে বসানো হয়েছে (নিচে, "done" ট্রেসের আগে) — তখন classloader-এ
+        // LibraryLoader থাকে, আর service onCreate (loadNow) এখনো শুরু হয়নি।
 
         int targetSdkVersion = applicationInfo.targetSdkVersion;
         if (targetSdkVersion < Build.VERSION_CODES.GINGERBREAD) {
@@ -616,6 +557,70 @@ public class BActivityThread extends IBActivityThread.Stub {
             onBeforeApplicationOnCreate(packageName, processName, application);
             AppInstrumentation.get().callApplicationOnCreate(application);
             onAfterApplicationOnCreate(packageName, processName, application);
+
+            // v1.0.78 সিস্টেম-লিংকার (এখানে — Application.onCreate-এর পরে):
+            // Chromium child (renderer) প্রসেসে libchrome.so Chromium linker দিয়ে
+            // লোড হলে fixed-address + shared RELRO remap-এ deterministic SIGSEGV
+            // হয় (15:44/15:45/17:09/17:10, একই PC 0x97889d4/0x97899f8)।
+            // সিস্টেম linker (System.loadLibrary) দিয়ে লোড করলে random address-এ
+            // লোড হয়, RELRO শেয়ার হয় না — ব্রাউজার প্রসেস যেভাবে লোড করে।
+            // LibraryLoader.setLinkerImplementation(false) / mUseChromiumLinker=false
+            // + Linker.disableSharedRelros() — loadNow() চলার আগেই (service
+            // onCreate-এর আগে) সেট করতে হবে। Application.onCreate-এ SplitCompat
+            // split dex ইনস্টল করে, তাই এখন ভার্চুয়াল classloader-এ
+            // LibraryLoader/Linker পাওয়া যাবে (bind-এর শুরুতে পাওয়া যেত না —
+            // v1.0.77-এ ৪ বার ClassNotFoundException হয়েছে)।
+            try {
+                boolean isChromiumChild = processName != null && processName.contains(":")
+                        && packageName != null
+                        && (packageName.contains("chrome") || packageName.contains("brave"));
+                if (isChromiumChild) {
+                    ClassLoader cl = packageContext.getClassLoader();
+                    Class<?> llClass = Class.forName("org.chromium.base.library_loader.LibraryLoader", true, cl);
+                    Object loader = llClass.getMethod("getInstance").invoke(null);
+                    boolean done = false;
+                    try {
+                        llClass.getMethod("setLinkerImplementation", boolean.class).invoke(loader, false);
+                        done = true;
+                    } catch (Throwable ignored) {
+                        try {
+                            java.lang.reflect.Field f = llClass.getDeclaredField("mUseChromiumLinker");
+                            f.setAccessible(true);
+                            f.setBoolean(loader, false);
+                            done = true;
+                        } catch (Throwable ignored2) { }
+                    }
+                    if (done) {
+                        top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                                top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                                "System linker forced for " + processName);
+                    } else {
+                        top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                                top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                                "System linker FAILED for " + processName);
+                    }
+                    try {
+                        Class<?> linkerClass = Class.forName("org.chromium.base.library_loader.Linker", true, cl);
+                        Object linker = linkerClass.getMethod("getInstance").invoke(null);
+                        linkerClass.getMethod("disableSharedRelros").invoke(linker);
+                        top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                                top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                                "Shared RELRO disabled for " + processName);
+                    } catch (Throwable relroErr) {
+                        try {
+                            top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                                    top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                                    "Shared RELRO disable FAILED for " + processName + ": " + relroErr);
+                        } catch (Throwable ignored) { }
+                    }
+                }
+            } catch (Throwable t) {
+                try {
+                    top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                            top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                            "System linker error for " + processName + ": " + t);
+                } catch (Throwable ignored) { }
+            }
 
             HookManager.get().checkEnv(HCallbackProxy.class);
             try {
