@@ -589,7 +589,7 @@ fun ClonerAppScreen() {
             // (System linker, child process died, kept alive, RELRO) — ট্রেসের
             // শেষাংশে না থাকলেও এগুলো দেখা যাবে, যাতে রিপোর্ট পাঠালেই বোঝা যায়
             // ফিক্স চলেছিল কিনা আর renderer কখন মরল।
-            val diagKeywords = listOf("System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy")
+            val diagKeywords = listOf("System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed")
             val diagLines = trace.lines().filter { line -> diagKeywords.any { k -> line.contains(k) } }.takeLast(20)
             sb.append("\n--- ডায়াগনসিস লাইন (renderer) ---\n")
             sb.append(if (diagLines.isEmpty()) "কোনো ডায়াগনসিস লাইন নেই\n" else diagLines.joinToString("\n") + "\n")

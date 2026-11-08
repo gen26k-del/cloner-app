@@ -4,8 +4,12 @@ import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.content.res.Configuration;
+import android.os.Binder;
 import android.os.Handler;
 import android.os.IBinder;
+import android.os.Parcel;
+import android.os.Parcelable;
+import android.os.RemoteException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -60,12 +64,113 @@ public class AppServiceDispatcher {
 
         try {
             IBinder iBinder = service.onBind(intent);
+            iBinder = wrapChromiumChildBinder(iBinder, serviceInfo);
             record.addBinder(intent, iBinder);
             return iBinder;
         } catch (Throwable e) {
             e.printStackTrace();
         }
         return null;
+    }
+
+    // v1.0.82 Fix 1 (Binder-boundary): Chromium child service-এর binder-কে মুড়ে
+    // shared RELRO আটকাও। Chromium M156 AIDL (IChildProcessService):
+    //   কোড 1 bindToCaller, 2 getSourceDir (sync — ফরওয়ার্ড করতেই হবে),
+    //   কোড 3 setupConnection (oneway), 7 consumeRelroLibInfo (oneway)।
+    // RELRO দুটো চ্যানেলে আসে: setupConnection-এর args.relroInfo (১০ নম্বর
+    // ফিল্ড) আর consumeRelroLibInfo। দুটোই নিরপেক্ষ করো। M156-এ
+    // finishLibraryLoad() বলে কিছু নেই, তাই consumeRelroLibInfo ফেলে দিলে
+    // child আটকাবে না। setupConnection ফরওয়ার্ড করতেই হবে
+    // (commandLine/FD/cpuCount দেয়)। load-address hint bind-Intent extra-তে
+    // যায় — v1.0.73-র linker-extra strip সেটা আগেই সরায়।
+    private static final String CHILD_SERVICE_DESCRIPTOR =
+            "org.chromium.base.process_launcher.IChildProcessService";
+    private static final int TRANSACTION_setupConnection = 3;
+    private static final int TRANSACTION_consumeRelroLibInfo = 7;
+
+    private static IBinder wrapChromiumChildBinder(IBinder binder, ServiceInfo serviceInfo) {
+        if (binder == null || serviceInfo == null || serviceInfo.name == null
+                || serviceInfo.packageName == null) {
+            return binder;
+        }
+        boolean isChromiumChild = serviceInfo.name.contains("ProcessService")
+                && (serviceInfo.packageName.contains("chrome")
+                || serviceInfo.packageName.contains("brave"));
+        if (!isChromiumChild) return binder;
+        BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                "v1.0.82 binder wrapped for " + serviceInfo.name);
+        return new ChromiumRelroBlocker(binder);
+    }
+
+    private static class ChromiumRelroBlocker extends Binder {
+        private final IBinder mReal;
+
+        ChromiumRelroBlocker(IBinder real) {
+            mReal = real;
+        }
+
+        @Override
+        public String getInterfaceDescriptor() {
+            return CHILD_SERVICE_DESCRIPTOR;
+        }
+
+        @Override
+        protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
+                throws RemoteException {
+            if (code == TRANSACTION_consumeRelroLibInfo) {
+                // RELRO ফেলে দাও — M156-এ কোনো wait নেই, আটকাবে না।
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "v1.0.82 RELRO blocked: consumeRelroLibInfo dropped");
+                return true;
+            }
+            if (code == TRANSACTION_setupConnection) {
+                try {
+                    return forwardSetupConnectionNulled(data, reply, flags);
+                } catch (Throwable t) {
+                    BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                            "v1.0.82 setupConnection rewrite failed: " + t
+                            + " — forwarding original");
+                    try {
+                        data.setDataPosition(0);
+                    } catch (Throwable ignored) { }
+                    return mReal.transact(code, data, reply, flags);
+                }
+            }
+            return mReal.transact(code, data, reply, flags);
+        }
+
+        private boolean forwardSetupConnectionNulled(Parcel data, Parcel reply, int flags)
+                throws Exception {
+            data.enforceInterface(CHILD_SERVICE_DESCRIPTOR);
+            // IChildProcessArgs পড়ো (CREATOR দিয়ে — ক্লাসটা child প্রসেসের
+            // loader-এ আছে, কারণ Stub নিজেই এটা দিয়ে parcel পড়ে)।
+            Class<?> argsClass = Class.forName(
+                    "org.chromium.base.process_launcher.IChildProcessArgs");
+            Parcelable.Creator<?> creator = (Parcelable.Creator<?>)
+                    argsClass.getField("CREATOR").get(null);
+            Object args = creator.createFromParcel(data);
+            IBinder parentBinder = data.readStrongBinder();
+            java.util.ArrayList<IBinder> clientInterfaces = data.createBinderArrayList();
+            // relroInfo = null করো।
+            java.lang.reflect.Field relroField = argsClass.getField("relroInfo");
+            relroField.setAccessible(true);
+            Object oldRelro = relroField.get(args);
+            relroField.set(args, null);
+            // নতুন parcel বানিয়ে আসল binder-এ পাঠাও।
+            Parcel newData = Parcel.obtain();
+            try {
+                newData.writeInterfaceToken(CHILD_SERVICE_DESCRIPTOR);
+                newData.writeParcelable((Parcelable) args, 0);
+                newData.writeStrongBinder(parentBinder);
+                newData.writeBinderList(clientInterfaces);
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "v1.0.82 setupConnection relroInfo nulled (was "
+                        + (oldRelro != null) + ")");
+                return mReal.transact(TRANSACTION_setupConnection, newData, reply, flags);
+            } finally {
+                newData.recycle();
+            }
+        }
     }
 
     public int onStartCommand(Intent proxyIntent, int flags, int startId) {
