@@ -602,19 +602,26 @@ fun ClonerAppScreen() {
             // রিপোর্টেই ধরো (সংক্ষিপ্ত আকারে: ফ্রেম নম্বর, pc, লাইব্রেরি)।
             var deathLog = ""
             val tombstone = runCatching {
-                val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "3000"))
+                val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "5000"))
                 val logOut = proc.inputStream.bufferedReader().readText()
                 proc.waitFor()
-                // v1.0.90: মৃত্যুর লগ — renderer কীভাবে মরলো (VM exiting /
-                // has died / killed / stopService) — টম্বস্টোনের একই logcat
-                // থেকে নাও, যাতে আলাদা লগ পাঠাতে না হয়।
+                // v1.0.91: মৃত্যুর লগ আরও চওড়া — v1.0.90-তে মৃত্যুর কোনো লাইন
+                // আসেনি (VM exiting / has died / killed কিছুই না), অথচ ৫টি
+                // child মরেছে। দুটি ফাঁক ধরা পড়েছে: (১) "Killing" (LMK/
+                // ActivityManager-এর কিল) keyword-এ ছিল না — "killed" দিয়ে
+                // "Killing" ধরা যায় না; (২) ব্রাউজারের নিজের চোখে মৃত্যুটা
+                // ("Render process exited") ধরা হয়নি। তাই keyword বাড়ানো
+                // হলো, উইন্ডো 3000→5000, লাইন 25→40।
                 val deathKeys = listOf("VM exiting", "has died", "win death",
                     "lowmemorykiller", "Force finishing", "stopService chromium",
                     "onDestroy chromium", "ChildProcessService", "Aw, Snap",
-                    "fatal signal", "SIGSYS", "seccomp", "killed")
+                    "fatal signal", "SIGSYS", "seccomp", "killed",
+                    "Render process", "exited with", "terminated", "crashed",
+                    "ChildProcessLauncher", "RenderProcessHost", "Killing",
+                    "low memory", "renderer process")
                 deathLog = logOut.lines().filter { line ->
                     deathKeys.any { line.contains(it, ignoreCase = true) }
-                }.takeLast(25).joinToString("\n")
+                }.takeLast(40).joinToString("\n")
                 val frameRe = Regex("#(\\d+) pc ([0-9a-f]+)")
                 val offRe = Regex("\\(offset 0x[0-9a-f]+\\)")
                 val allFrames = logOut.lines().filter { frameRe.containsMatchIn(it) }
