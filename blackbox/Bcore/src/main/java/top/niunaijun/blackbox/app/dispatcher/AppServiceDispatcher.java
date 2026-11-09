@@ -146,6 +146,19 @@ public class AppServiceDispatcher {
             return mReal.transact(code, data, reply, flags);
         }
 
+        // v1.0.88: field খোঁজা নমনীয় করো — নামের অংশ (case-insensitive)
+        // দিয়ে declared field খোঁজো, public/declared যাই হোক।
+        private static java.lang.reflect.Field findFieldByNamePart(
+                Class<?> cls, String part) throws NoSuchFieldException {
+            String want = part.toLowerCase(java.util.Locale.US);
+            for (java.lang.reflect.Field f : cls.getDeclaredFields()) {
+                if (f.getName().toLowerCase(java.util.Locale.US).contains(want)) {
+                    return f;
+                }
+            }
+            throw new NoSuchFieldException(part);
+        }
+
         private boolean forwardSetupConnectionNulled(Parcel data, Parcel reply, int flags)
                 throws Exception {
             data.enforceInterface(CHILD_SERVICE_DESCRIPTOR);
@@ -192,7 +205,17 @@ public class AppServiceDispatcher {
             IBinder parentBinder = data.readStrongBinder();
             java.util.ArrayList<IBinder> clientInterfaces = data.createBinderArrayList();
             // relroInfo = null করো।
-            java.lang.reflect.Field relroField = argsClass.getField("relroInfo");
+            // v1.0.88: field-এর আসল নাম trace করো, তারপর "relro" নামের
+            // অংশ দিয়ে খোঁজো — v1.0.87-তে getField("relroInfo")
+            // NoSuchFieldException হয়েছে (field public নয় বা নাম আলাদা)।
+            StringBuilder fieldNames = new StringBuilder();
+            for (java.lang.reflect.Field f : argsClass.getDeclaredFields()) {
+                if (fieldNames.length() > 0) fieldNames.append(',');
+                fieldNames.append(f.getName());
+            }
+            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                    "v1.0.88 IChildProcessArgs fields: " + fieldNames);
+            java.lang.reflect.Field relroField = findFieldByNamePart(argsClass, "relro");
             relroField.setAccessible(true);
             Object oldRelro = relroField.get(args);
             relroField.set(args, null);
@@ -204,7 +227,7 @@ public class AppServiceDispatcher {
             // (21:47:53 cr_seccomp)। commandLine browser-ই বানায়, child
             // RendererMain-এ HasSwitch(kNoSandbox) দেখে sandbox বাদ দেয়।
             try {
-                java.lang.reflect.Field cmdField = argsClass.getField("commandLine");
+                java.lang.reflect.Field cmdField = findFieldByNamePart(argsClass, "commandline");
                 cmdField.setAccessible(true);
                 String[] cmd = (String[]) cmdField.get(args);
                 if (cmd != null) {
