@@ -146,17 +146,28 @@ public class AppServiceDispatcher {
             return mReal.transact(code, data, reply, flags);
         }
 
-        // v1.0.88: field খোঁজা নমনীয় করো — নামের অংশ (case-insensitive)
-        // দিয়ে declared field খোঁজো, public/declared যাই হোক।
-        private static java.lang.reflect.Field findFieldByNamePart(
+        // v1.0.89: TYPE দিয়ে field খোঁজো — type-এর নামে (case-insensitive)
+        // part থাকলেই নেবে (R8 field-এর নাম বদলালেও type একই থাকে)।
+        private static java.lang.reflect.Field findFieldByTypeName(
                 Class<?> cls, String part) throws NoSuchFieldException {
             String want = part.toLowerCase(java.util.Locale.US);
             for (java.lang.reflect.Field f : cls.getDeclaredFields()) {
-                if (f.getName().toLowerCase(java.util.Locale.US).contains(want)) {
+                if (f.getType().getName().toLowerCase(java.util.Locale.US).contains(want)) {
                     return f;
                 }
             }
             throw new NoSuchFieldException(part);
+        }
+
+        // v1.0.89: ঠিক type দিয়ে field খোঁজো (যেমন String[].class)।
+        private static java.lang.reflect.Field findFieldByType(
+                Class<?> cls, Class<?> type) throws NoSuchFieldException {
+            for (java.lang.reflect.Field f : cls.getDeclaredFields()) {
+                if (type.equals(f.getType())) {
+                    return f;
+                }
+            }
+            throw new NoSuchFieldException(type.getName());
         }
 
         private boolean forwardSetupConnectionNulled(Parcel data, Parcel reply, int flags)
@@ -205,20 +216,32 @@ public class AppServiceDispatcher {
             IBinder parentBinder = data.readStrongBinder();
             java.util.ArrayList<IBinder> clientInterfaces = data.createBinderArrayList();
             // relroInfo = null করো।
-            // v1.0.88: field-এর আসল নাম trace করো, তারপর "relro" নামের
-            // অংশ দিয়ে খোঁজো — v1.0.87-তে getField("relroInfo")
-            // NoSuchFieldException হয়েছে (field public নয় বা নাম আলাদা)।
+            // v1.0.89: TYPE দিয়ে field খোঁজো — v1.0.88-তে নাম দিয়ে
+            // খুঁজে পাওয়া যায়নি ("relro" নামের অংশও নেই) — Chromium-এর
+            // R8 build field-এর নাম বদলে দেয় (a, b, c...), কিন্তু TYPE
+            // বদলায় না। relro field-এর type IRelroLibInfo। নাম+type
+            // দুটোই trace করো, যাতে আসল নাম দেখা যায়। relro null করা
+            // ব্যর্থ হলেও --no-sandbox append চলবে — দুটো আলাদা try/catch।
             StringBuilder fieldNames = new StringBuilder();
             for (java.lang.reflect.Field f : argsClass.getDeclaredFields()) {
                 if (fieldNames.length() > 0) fieldNames.append(',');
-                fieldNames.append(f.getName());
+                fieldNames.append(f.getName()).append(':')
+                        .append(f.getType().getSimpleName());
             }
             BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
-                    "v1.0.88 IChildProcessArgs fields: " + fieldNames);
-            java.lang.reflect.Field relroField = findFieldByNamePart(argsClass, "relro");
-            relroField.setAccessible(true);
-            Object oldRelro = relroField.get(args);
-            relroField.set(args, null);
+                    "v1.0.89 IChildProcessArgs fields: " + fieldNames);
+            try {
+                java.lang.reflect.Field relroField = findFieldByTypeName(argsClass, "relro");
+                relroField.setAccessible(true);
+                Object oldRelro = relroField.get(args);
+                relroField.set(args, null);
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "v1.0.82 setupConnection relroInfo nulled (field="
+                        + relroField.getName() + ", was " + (oldRelro != null) + ")");
+            } catch (Throwable t) {
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "v1.0.89 relro null failed: " + t);
+            }
             // v1.0.84: --no-sandbox যোগ করো — M156-এ Android renderer-এর
             // seccomp sandbox বন্ধ করার একমাত্র কার্যকর switch এটাই
             // (--disable-seccomp-filter-sandbox Android-এ ignore হয়)।
@@ -227,7 +250,7 @@ public class AppServiceDispatcher {
             // (21:47:53 cr_seccomp)। commandLine browser-ই বানায়, child
             // RendererMain-এ HasSwitch(kNoSandbox) দেখে sandbox বাদ দেয়।
             try {
-                java.lang.reflect.Field cmdField = findFieldByNamePart(argsClass, "commandline");
+                java.lang.reflect.Field cmdField = findFieldByType(argsClass, String[].class);
                 cmdField.setAccessible(true);
                 String[] cmd = (String[]) cmdField.get(args);
                 if (cmd != null) {
@@ -260,9 +283,6 @@ public class AppServiceDispatcher {
                 newData.writeTypedObject((Parcelable) args, 0);
                 newData.writeStrongBinder(parentBinder);
                 newData.writeBinderList(clientInterfaces);
-                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
-                        "v1.0.82 setupConnection relroInfo nulled (was "
-                        + (oldRelro != null) + ")");
                 return mReal.transact(TRANSACTION_setupConnection, newData, reply, flags);
             } finally {
                 newData.recycle();
