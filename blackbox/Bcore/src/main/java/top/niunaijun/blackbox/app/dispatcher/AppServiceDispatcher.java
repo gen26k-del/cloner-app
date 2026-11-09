@@ -449,6 +449,19 @@ public class AppServiceDispatcher {
         if (record == null)
             return;
         if (record.getService() != null) {
+            // v1.0.90: Chromium child service — stopService-এ onDestroy()
+            // ডেকো না (System.exit(0) করে renderer মেরে দেয়)। v1.0.75-এ
+            // onUnbind/onDestroy-এ keep-alive বসেছিল, কিন্তু stopService-এ
+            // গার্ড ছিল না — v1.0.89-এ renderer নিঃশব্দে মরেছে (টম্বস্টোন
+            // ছাড়া), এটাই পরের ফাঁক। cache-এ রেখে দাও।
+            String svcName = record.getService().getClass().getName();
+            boolean isChromiumChild = svcName.contains("ProcessService")
+                    && svcName.contains("chromium");
+            if (isChromiumChild) {
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "stopService chromium child kept alive: " + svcName);
+                return;
+            }
             boolean destroy = record.getStartId() > 0;
             try {
                 if (destroy) {

@@ -432,7 +432,7 @@ fun ClonerAppScreen() {
                     "chrome", "fatal", "sigsegv", "sigabrt", "sigbus", "dlopen",
                     "chromium", "androidruntime", "tombstone", "crash", "linker",
                     "fatal signal", "native crash", "com.example.cloner",
-                    "com.android.chrome", "has died", "win death"
+                    "com.android.chrome", "has died", "win death", "vm exiting"
                 )
                 val lines = out.lines().filter { line ->
                     val low = line.lowercase()
@@ -591,8 +591,8 @@ fun ClonerAppScreen() {
             // ফিক্স চলেছিল কিনা আর renderer কখন মরল। বিরল লাইনগুলো (setup/
             // transact) পুরো ট্রেস থেকে নাও — শেষ ২০-এ চাপা পড়ে যায় বলে
             // v1.0.82-84-তে "relroInfo nulled"/"transact code=" কখনো দেখা যায়নি।
-            val diagKeywords = listOf("System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed", "transact code=", "no-sandbox", "IChildProcessArgs fields", "relro null failed")
-            val rareKeywords = listOf("transact code=", "relroInfo nulled", "RELRO blocked", "no-sandbox", "binder wrapped", "setupConnection rewrite failed", "IChildProcessArgs fields", "relro null failed")
+            val diagKeywords = listOf("System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed", "transact code=", "no-sandbox", "IChildProcessArgs fields", "relro null failed", "stopService chromium")
+            val rareKeywords = listOf("transact code=", "relroInfo nulled", "RELRO blocked", "no-sandbox", "binder wrapped", "setupConnection rewrite failed", "IChildProcessArgs fields", "relro null failed", "stopService chromium")
             val rareLines = trace.lines().filter { line -> rareKeywords.any { k -> line.contains(k) } }.takeLast(30)
             val diagLines = (rareLines + trace.lines().filter { line -> diagKeywords.any { k -> line.contains(k) } }.takeLast(20)).distinct()
             sb.append("\n--- ডায়াগনসিস লাইন (renderer) ---\n")
@@ -600,10 +600,21 @@ fun ClonerAppScreen() {
             // টম্বস্টোন ফ্রেম: renderer SIGSEGV-র কল স্ট্যাক — কোন ফাংশনে
             // মরলো বোঝার একমাত্র সূত্র। লগ ভিউ ফ্রেমগুলো কেটে ফেলে, তাই
             // রিপোর্টেই ধরো (সংক্ষিপ্ত আকারে: ফ্রেম নম্বর, pc, লাইব্রেরি)।
+            var deathLog = ""
             val tombstone = runCatching {
                 val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "3000"))
                 val logOut = proc.inputStream.bufferedReader().readText()
                 proc.waitFor()
+                // v1.0.90: মৃত্যুর লগ — renderer কীভাবে মরলো (VM exiting /
+                // has died / killed / stopService) — টম্বস্টোনের একই logcat
+                // থেকে নাও, যাতে আলাদা লগ পাঠাতে না হয়।
+                val deathKeys = listOf("VM exiting", "has died", "win death",
+                    "lowmemorykiller", "Force finishing", "stopService chromium",
+                    "onDestroy chromium", "ChildProcessService", "Aw, Snap",
+                    "fatal signal", "SIGSYS", "seccomp", "killed")
+                deathLog = logOut.lines().filter { line ->
+                    deathKeys.any { line.contains(it, ignoreCase = true) }
+                }.takeLast(25).joinToString("\n")
                 val frameRe = Regex("#(\\d+) pc ([0-9a-f]+)")
                 val offRe = Regex("\\(offset 0x[0-9a-f]+\\)")
                 val allFrames = logOut.lines().filter { frameRe.containsMatchIn(it) }
@@ -629,6 +640,8 @@ fun ClonerAppScreen() {
             }.getOrDefault("")
             sb.append("\n--- টম্বস্টোন ফ্রেম (renderer SIGSEGV) ---\n")
             sb.append(if (tombstone.isEmpty()) "কোনো টম্বস্টোন ফ্রেম পাওয়া যায়নি\n" else tombstone + "\n")
+            sb.append("\n--- মৃত্যুর লগ ---\n")
+            sb.append(if (deathLog.isEmpty()) "মৃত্যুর কোনো লগ পাওয়া যায়নি\n" else deathLog + "\n")
             sb.append("\n--- ট্রেস (শেষাংশ) ---\n")
             sb.append(if (traceTail.isEmpty()) "ট্রেস নেই\n" else traceTail + "\n")
             withContext(Dispatchers.Main) { reportText = sb.toString().take(20000) }
