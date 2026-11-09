@@ -19,22 +19,13 @@ public class ProxyService extends Service {
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
-        // v1.0.92: Chromium child stub-কে foreground service বানাও — LMK যাতে
-        // renderer প্রসেস না মারে। আসল Android-এর চোখে virtual bind দেখা যায়
-        // না, তাই renderer stub background প্রসেস হিসেবে গোনা হয়; ভিডিও
-        // চলার সময় মেমোরি চাপে সিস্টেম ওদেরই আগে SIGKILL করে, ব্রাউজার
-        // (foreground) বাঁচে। fork-এর showNotification() আগে থেকেই ছিল,
-        // কিন্তু কখনো ডাকা হয়নি — এখন Chromium child bind-এ ডাকো।
-        try {
-            android.content.pm.ServiceInfo si =
-                    intent.getParcelableExtra("_B_|_service_info_");
-            if (si != null && si.name != null && si.packageName != null
-                    && si.name.contains("ProcessService")
-                    && (si.packageName.contains("chrome") || si.packageName.contains("brave"))) {
-                showNotification(si.name);
-            }
-        } catch (Throwable ignored) {
-        }
+        // v1.0.94: v1.0.92-র foreground promotion বন্ধ করা হলো — v1.0.93
+        // টেস্টে প্রমাণ হয়েছে startForeground() নিজেই child প্রসেস মেরে
+        // ফেলছে: `CannotPostForegroundServiceNotificationException: Bad
+        // notification for startForeground` (privileged_process2 23:22:33,
+        // sandboxed_process0 23:23:03 FATAL)। LMK অনুমান এমনিতেই দুর্বল
+        // ছিল (GPU টাইমআউটই আসল খুনি), আর promotion-টা এখন ক্ষতি করছে।
+        // showNotification() আর ডাকা হবে না।
         return AppServiceDispatcher.get().onBind(intent);
     }
 

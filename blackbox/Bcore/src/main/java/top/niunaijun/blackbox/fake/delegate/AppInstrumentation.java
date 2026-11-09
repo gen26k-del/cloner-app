@@ -174,14 +174,19 @@ public final class AppInstrumentation extends BaseInstrumentationDelegate implem
                 throw e;
             }
         }
-        // v1.0.93: GPU চ্যানেল টাইমআউট (35s, Android-only, no retry) — ব্রাউজার
-        // GPU প্রসেসের Mojo উত্তরের অপেক্ষায় FATAL abort করছে (18:17:22)।
-        // --disable-gpu Android-এ NOTREACHED (software compositing নেই)।
-        // --in-process-gpu একমাত্র switch যা timeout skip করে আর GPU-কে
-        // browser প্রসেসের ভেতরে চালায়। Application.onCreate-এর পরে
-        // append করলে GpuDataManager-এর সিদ্ধান্তের আগেই পৌঁছায় (গবেষণা)।
-        // CommandLine base dex-এ আছে কিনা যাচাই হয়নি — না পেলে trace-এ
-        // লিখে চুপচাপ এড়িয়ে যাও (অ্যাপ ভাঙবে না)।
+        // v1.0.94: v1.0.93-তে নাম দিয়ে খুঁজতে গিয়ে ব্যর্থ হয়েছে —
+        // `NoSuchMethodException: CommandLine.getInstance []` (ক্লাস পাওয়া
+        // গেছে, কিন্তু R8 method-এর নাম বদলে দিয়েছে — v1.0.89-র field-এর
+        // মতোই)। তাই এবার SIGNATURE দিয়ে খোঁজো: getInstance = static,
+        // 0 arg, return type CommandLine; appendSwitch = 1 String arg,
+        // void return — প্রতিটা candidate ডেকে hasSwitch (1 String arg,
+        // boolean return) দিয়ে যাচাই করো, যেটা সত্যিই switch বসায় সেটাই
+        // appendSwitch। GPU চ্যানেল টাইমআউট (35s, Android-only, no retry)
+        // — ব্রাউজার GPU প্রসেসের Mojo উত্তরের অপেক্ষায় FATAL abort করছে
+        // (18:17:22)। --disable-gpu Android-এ NOTREACHED। --in-process-gpu
+        // একমাত্র switch যা timeout skip করে আর GPU-কে browser প্রসেসের
+        // ভেতরে চালায়। Application.onCreate-এর পরে append করলে
+        // GpuDataManager-এর সিদ্ধান্তের আগেই পৌঁছায় (গবেষণা)।
         try {
             String pkg = app.getPackageName();
             if (pkg != null && (pkg.contains("chrome") || pkg.contains("brave"))) {
@@ -198,23 +203,73 @@ public final class AppInstrumentation extends BaseInstrumentationDelegate implem
                         break;
                     } catch (Throwable ignored) { }
                 }
-                if (cmdLineClass != null) {
-                    Object cmdLine = cmdLineClass.getMethod("getInstance").invoke(null);
-                    cmdLineClass.getMethod("appendSwitch", String.class).invoke(cmdLine, "in-process-gpu");
+                if (cmdLineClass == null) {
                     top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
                             top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                            "v1.0.93 in-process-gpu appended to browser commandLine");
+                            "v1.0.94 CommandLine class not found, in-process-gpu skipped");
                 } else {
-                    top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
-                            top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                            "v1.0.93 CommandLine class not found, in-process-gpu skipped");
+                    java.lang.reflect.Method getInstance = null;
+                    java.lang.reflect.Method hasSwitch = null;
+                    for (java.lang.reflect.Method m : cmdLineClass.getDeclaredMethods()) {
+                        Class<?>[] params = m.getParameterTypes();
+                        if (params.length == 0 && java.lang.reflect.Modifier.isStatic(m.getModifiers())
+                                && m.getReturnType() == cmdLineClass) {
+                            getInstance = m;
+                        } else if (params.length == 1 && params[0] == String.class
+                                && m.getReturnType() == boolean.class) {
+                            hasSwitch = m;
+                        }
+                    }
+                    if (getInstance == null) {
+                        top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                                top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                                "v1.0.94 CommandLine getInstance (by signature) not found");
+                    } else {
+                        getInstance.setAccessible(true);
+                        Object cmdLine = getInstance.invoke(null);
+                        if (cmdLine == null) {
+                            top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                                    top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                                    "v1.0.94 CommandLine instance is null");
+                        } else {
+                            boolean done = false;
+                            String usedMethod = null;
+                            for (java.lang.reflect.Method m : cmdLineClass.getDeclaredMethods()) {
+                                Class<?>[] params = m.getParameterTypes();
+                                if (params.length == 1 && params[0] == String.class
+                                        && m.getReturnType() == void.class) {
+                                    try {
+                                        m.setAccessible(true);
+                                        m.invoke(cmdLine, "in-process-gpu");
+                                        if (hasSwitch != null) {
+                                            hasSwitch.setAccessible(true);
+                                            Boolean has = (Boolean) hasSwitch.invoke(cmdLine, "in-process-gpu");
+                                            if (has != null && has) {
+                                                done = true;
+                                                usedMethod = m.getName();
+                                                break;
+                                            }
+                                        } else {
+                                            done = true;
+                                            usedMethod = m.getName() + " (unverified)";
+                                            break;
+                                        }
+                                    } catch (Throwable ignored) { }
+                                }
+                            }
+                            top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                                    top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                                    done ? "v1.0.94 in-process-gpu appended to browser commandLine via " + usedMethod
+                                            : "v1.0.94 in-process-gpu append failed: no candidate worked");
+                        }
+                    }
                 }
             }
         } catch (Throwable t) {
             try {
                 top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
                         top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                        "v1.0.93 in-process-gpu append failed: " + t);
+                        "v1.0.94 in-process-gpu append failed: " + t);
             } catch (Throwable ignored) { }
         }
     }
