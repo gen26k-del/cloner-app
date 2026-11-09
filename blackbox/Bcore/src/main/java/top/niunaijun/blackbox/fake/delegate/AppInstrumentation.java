@@ -174,6 +174,49 @@ public final class AppInstrumentation extends BaseInstrumentationDelegate implem
                 throw e;
             }
         }
+        // v1.0.93: GPU চ্যানেল টাইমআউট (35s, Android-only, no retry) — ব্রাউজার
+        // GPU প্রসেসের Mojo উত্তরের অপেক্ষায় FATAL abort করছে (18:17:22)।
+        // --disable-gpu Android-এ NOTREACHED (software compositing নেই)।
+        // --in-process-gpu একমাত্র switch যা timeout skip করে আর GPU-কে
+        // browser প্রসেসের ভেতরে চালায়। Application.onCreate-এর পরে
+        // append করলে GpuDataManager-এর সিদ্ধান্তের আগেই পৌঁছায় (গবেষণা)।
+        // CommandLine base dex-এ আছে কিনা যাচাই হয়নি — না পেলে trace-এ
+        // লিখে চুপচাপ এড়িয়ে যাও (অ্যাপ ভাঙবে না)।
+        try {
+            String pkg = app.getPackageName();
+            if (pkg != null && (pkg.contains("chrome") || pkg.contains("brave"))) {
+                Class<?> cmdLineClass = null;
+                ClassLoader[] cls = new ClassLoader[] {
+                        app.getClassLoader(),
+                        Thread.currentThread().getContextClassLoader(),
+                        AppInstrumentation.class.getClassLoader()
+                };
+                for (ClassLoader cl : cls) {
+                    if (cl == null) continue;
+                    try {
+                        cmdLineClass = Class.forName("org.chromium.base.CommandLine", false, cl);
+                        break;
+                    } catch (Throwable ignored) { }
+                }
+                if (cmdLineClass != null) {
+                    Object cmdLine = cmdLineClass.getMethod("getInstance").invoke(null);
+                    cmdLineClass.getMethod("appendSwitch", String.class).invoke(cmdLine, "in-process-gpu");
+                    top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                            top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                            "v1.0.93 in-process-gpu appended to browser commandLine");
+                } else {
+                    top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                            top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                            "v1.0.93 CommandLine class not found, in-process-gpu skipped");
+                }
+            }
+        } catch (Throwable t) {
+            try {
+                top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                        top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                        "v1.0.93 in-process-gpu append failed: " + t);
+            } catch (Throwable ignored) { }
+        }
     }
 
     public Activity newActivity(ClassLoader cl, String className, Intent intent) throws InstantiationException, IllegalAccessException, ClassNotFoundException {

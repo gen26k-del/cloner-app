@@ -230,6 +230,50 @@ public class AppServiceDispatcher {
             }
             BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
                     "v1.0.89 IChildProcessArgs fields: " + fieldNames);
+            // v1.0.93: fileDescriptorInfos trace করো — GPU চ্যানেলের Mojo FD
+            // (kMojoIPCChannel) setupConnection-এর args.fileDescriptorInfos
+            // দিয়ে child-এ যায়। ব্রাউজার 35s GPU চ্যানেলের অপেক্ষায় থেকে
+            // FATAL abort করছে (18:17:22) — GPU child bind হলেও Mojo-তে
+            // connect-back না করলে ঠিক এই লক্ষণ হয়। rewrite-এ FD বাঁচে কিনা
+            // (readTypedObject/writeTypedObject round-trip) এখানেই প্রমাণ হবে।
+            // IFileDescriptorInfo-র field-এর নামও R8-এ বদলাতে পারে, তাই id
+            // (int) আর fd (ParcelFileDescriptor) TYPE দিয়ে খোঁজো।
+            try {
+                java.lang.reflect.Field fdsField = findFieldByTypeName(argsClass, "FileDescriptorInfo");
+                fdsField.setAccessible(true);
+                Object fds = fdsField.get(args);
+                if (fds == null) {
+                    BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                            "v1.0.93 setupConnection fileDescriptorInfos is null");
+                } else {
+                    int n = java.lang.reflect.Array.getLength(fds);
+                    StringBuilder ids = new StringBuilder();
+                    for (int i = 0; i < n; i++) {
+                        Object info = java.lang.reflect.Array.get(fds, i);
+                        int id = -1;
+                        boolean fdOk = false;
+                        if (info != null) {
+                            for (java.lang.reflect.Field f : info.getClass().getDeclaredFields()) {
+                                try {
+                                    f.setAccessible(true);
+                                    if (f.getType() == int.class) {
+                                        id = f.getInt(info);
+                                    } else if (f.getType().getName().contains("ParcelFileDescriptor")) {
+                                        fdOk = (f.get(info) != null);
+                                    }
+                                } catch (Throwable ignored) { }
+                            }
+                        }
+                        if (i > 0) ids.append(',');
+                        ids.append(id).append(fdOk ? ":fd" : ":nofd");
+                    }
+                    BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                            "v1.0.93 setupConnection fileDescriptorInfos count=" + n + " ids=[" + ids + "]");
+                }
+            } catch (Throwable t) {
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "v1.0.93 fileDescriptorInfos trace failed: " + t);
+            }
             try {
                 java.lang.reflect.Field relroField = findFieldByTypeName(argsClass, "relro");
                 relroField.setAccessible(true);
