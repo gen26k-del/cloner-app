@@ -591,8 +591,8 @@ fun ClonerAppScreen() {
             // ফিক্স চলেছিল কিনা আর renderer কখন মরল। বিরল লাইনগুলো (setup/
             // transact) পুরো ট্রেস থেকে নাও — শেষ ২০-এ চাপা পড়ে যায় বলে
             // v1.0.82-84-তে "relroInfo nulled"/"transact code=" কখনো দেখা যায়নি।
-            val diagKeywords = listOf("System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed", "transact code=", "no-sandbox", "IChildProcessArgs fields", "relro null failed", "stopService chromium")
-            val rareKeywords = listOf("transact code=", "relroInfo nulled", "RELRO blocked", "no-sandbox", "binder wrapped", "setupConnection rewrite failed", "IChildProcessArgs fields", "relro null failed", "stopService chromium")
+            val diagKeywords = listOf("System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed", "transact code=", "no-sandbox", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed")
+            val rareKeywords = listOf("transact code=", "relroInfo nulled", "RELRO blocked", "no-sandbox", "binder wrapped", "setupConnection rewrite failed", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed")
             val rareLines = trace.lines().filter { line -> rareKeywords.any { k -> line.contains(k) } }.takeLast(30)
             val diagLines = (rareLines + trace.lines().filter { line -> diagKeywords.any { k -> line.contains(k) } }.takeLast(20)).distinct()
             sb.append("\n--- ডায়াগনসিস লাইন (renderer) ---\n")
@@ -602,9 +602,24 @@ fun ClonerAppScreen() {
             // রিপোর্টেই ধরো (সংক্ষিপ্ত আকারে: ফ্রেম নম্বর, pc, লাইব্রেরি)।
             var deathLog = ""
             val tombstone = runCatching {
-                val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "5000"))
-                val logOut = proc.inputStream.bufferedReader().readText()
+                // v1.0.92: সময়-সীমা logcat — v1.0.91-তে -t 5000 (লাইন-সীমা)
+                // Chrome-এর verbose লগে মাত্র কয়েক সেকেন্ড ধরে; মৃত্যুর ৫১
+                // সেকেন্ড পরের রিপোর্টে উইন্ডো পেরিয়ে গেছে, তাই "মৃত্যুর লগ"
+                // একদম খালি ছিল। এখন রিপোর্টের ৩ মিনিট আগের সময় থেকে সব
+                // লাইন নাও — যত লাইনই হোক, keyword ফিল্টার আউটপুট ছোট রাখবে।
+                // Locale.US জরুরি — ডিফল্ট locale-এ সংখ্যা বাংলা হলে logcat
+                // সময় পার্স করতে পারবে না। খালি এলে লাইন-সীমায় ফিরে যাও।
+                val cal = java.util.Calendar.getInstance()
+                cal.add(java.util.Calendar.MINUTE, -3)
+                val since = java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.US).format(cal.time)
+                val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", since))
+                var logOut = proc.inputStream.bufferedReader().readText()
                 proc.waitFor()
+                if (logOut.isBlank()) {
+                    val proc2 = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "5000"))
+                    logOut = proc2.inputStream.bufferedReader().readText()
+                    proc2.waitFor()
+                }
                 // v1.0.91: মৃত্যুর লগ আরও চওড়া — v1.0.90-তে মৃত্যুর কোনো লাইন
                 // আসেনি (VM exiting / has died / killed কিছুই না), অথচ ৫টি
                 // child মরেছে। দুটি ফাঁক ধরা পড়েছে: (১) "Killing" (LMK/

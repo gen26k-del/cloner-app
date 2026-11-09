@@ -19,6 +19,22 @@ public class ProxyService extends Service {
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
+        // v1.0.92: Chromium child stub-কে foreground service বানাও — LMK যাতে
+        // renderer প্রসেস না মারে। আসল Android-এর চোখে virtual bind দেখা যায়
+        // না, তাই renderer stub background প্রসেস হিসেবে গোনা হয়; ভিডিও
+        // চলার সময় মেমোরি চাপে সিস্টেম ওদেরই আগে SIGKILL করে, ব্রাউজার
+        // (foreground) বাঁচে। fork-এর showNotification() আগে থেকেই ছিল,
+        // কিন্তু কখনো ডাকা হয়নি — এখন Chromium child bind-এ ডাকো।
+        try {
+            android.content.pm.ServiceInfo si =
+                    intent.getParcelableExtra("_B_|_service_info_");
+            if (si != null && si.name != null && si.packageName != null
+                    && si.name.contains("ProcessService")
+                    && (si.packageName.contains("chrome") || si.packageName.contains("brave"))) {
+                showNotification(si.name);
+            }
+        } catch (Throwable ignored) {
+        }
         return AppServiceDispatcher.get().onBind(intent);
     }
 
@@ -58,11 +74,41 @@ public class ProxyService extends Service {
         return false;
     }
 
-    private void showNotification() {
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(getApplicationContext(), getPackageName() + ".blackbox_proxy")
-                .setPriority(NotificationCompat.PRIORITY_MAX);
-        if (BuildCompat.isOreo()) {
+    private static boolean sForegroundPromoted = false;
+
+    private void showNotification(String serviceName) {
+        // এক প্রসেসে একবারই — প্রতিটি bind-এ নোটিফিকেশন আবার পোস্ট কোরো না।
+        if (sForegroundPromoted) return;
+        sForegroundPromoted = true;
+        try {
+            String channelId = getPackageName() + ".blackbox_proxy";
+            if (BuildCompat.isOreo()) {
+                android.app.NotificationManager nm =
+                        (android.app.NotificationManager) getSystemService(android.content.Context.NOTIFICATION_SERVICE);
+                if (nm != null) {
+                    android.app.NotificationChannel ch = new android.app.NotificationChannel(
+                            channelId, "CloneMe — Chrome",
+                            android.app.NotificationManager.IMPORTANCE_MIN);
+                    ch.setDescription("ক্লোন Chrome-এর renderer সক্রিয় রাখে");
+                    nm.createNotificationChannel(ch);
+                }
+            }
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(getApplicationContext(), channelId)
+                    .setContentTitle("CloneMe — Chrome চলছে")
+                    .setContentText("ক্লোন Chrome-এর renderer সক্রিয় রাখা হয়েছে")
+                    .setSmallIcon(android.R.drawable.sym_def_app_icon)
+                    .setOngoing(true)
+                    .setPriority(NotificationCompat.PRIORITY_MIN);
             startForeground(BlackBoxCore.getHostPkg().hashCode(), builder.build());
+            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                    "v1.0.92 foreground promoted for " + serviceName);
+        } catch (Throwable t) {
+            // ফোরগ্রাউন্ড ব্যর্থ হলেও bind চলবে — শুধু trace করো।
+            try {
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "v1.0.92 foreground promote failed: " + t);
+            } catch (Throwable ignored) {
+            }
         }
     }
 
