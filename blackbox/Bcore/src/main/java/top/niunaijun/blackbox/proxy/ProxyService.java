@@ -19,13 +19,26 @@ public class ProxyService extends Service {
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
-        // v1.0.94: v1.0.92-র foreground promotion বন্ধ করা হলো — v1.0.93
-        // টেস্টে প্রমাণ হয়েছে startForeground() নিজেই child প্রসেস মেরে
-        // ফেলছে: `CannotPostForegroundServiceNotificationException: Bad
-        // notification for startForeground` (privileged_process2 23:22:33,
-        // sandboxed_process0 23:23:03 FATAL)। LMK অনুমান এমনিতেই দুর্বল
-        // ছিল (GPU টাইমআউটই আসল খুনি), আর promotion-টা এখন ক্ষতি করছে।
-        // showNotification() আর ডাকা হবে না।
+        // v1.0.95: foreground promotion আবার চালু — v1.0.94-এ বন্ধ করার পর
+        // renderer সাথে সাথে মরতে শুরু করেছে (YouTube চালুই হয় না, শর্টকাট
+        // আইকন কালো, সাদা স্ক্রিন)। v1.0.92-তে promotion থাকতে ভিডিও ~20s
+        // চলতো। v1.0.93-র "Bad notification" ক্র্যাশের কারণ: stub-এ চ্যানেল
+        // বানালে NotificationManager proxy package নাম বদলে দেয়, তাই
+        // চ্যানেল আসল সিস্টেমে host package-এর নামে তৈরি হয় না।
+        // এবার stub-এ চ্যানেল বানিয়ো না — KeepAliveService-এর
+        // "cloneme_keepalive" চ্যানেল (main process-এ তৈরি, প্রমাণিত) ব্যবহার
+        // করো। আর try/catch দিয়ে এই exception ধরা যায় না — এটা main
+        // thread-এর handler-এ async আসে — তাই নোটিফিকেশন বৈধ হতেই হবে।
+        try {
+            android.content.pm.ServiceInfo si =
+                    intent.getParcelableExtra("_B_|_service_info_");
+            if (si != null && si.name != null && si.packageName != null
+                    && si.name.contains("ProcessService")
+                    && (si.packageName.contains("chrome") || si.packageName.contains("brave"))) {
+                showNotification(si.name);
+            }
+        } catch (Throwable ignored) {
+        }
         return AppServiceDispatcher.get().onBind(intent);
     }
 
@@ -72,32 +85,32 @@ public class ProxyService extends Service {
         if (sForegroundPromoted) return;
         sForegroundPromoted = true;
         try {
-            String channelId = getPackageName() + ".blackbox_proxy";
-            if (BuildCompat.isOreo()) {
-                android.app.NotificationManager nm =
-                        (android.app.NotificationManager) getSystemService(android.content.Context.NOTIFICATION_SERVICE);
-                if (nm != null) {
-                    android.app.NotificationChannel ch = new android.app.NotificationChannel(
-                            channelId, "CloneMe — Chrome",
-                            android.app.NotificationManager.IMPORTANCE_MIN);
-                    ch.setDescription("ক্লোন Chrome-এর renderer সক্রিয় রাখে");
-                    nm.createNotificationChannel(ch);
-                }
-            }
-            NotificationCompat.Builder builder = new NotificationCompat.Builder(getApplicationContext(), channelId)
+            // v1.0.95: চ্যানেল stub-এ বানিয়ো না — INotificationManagerProxy
+            // package নাম বদলে দেয়, তাই চ্যানেল আসল সিস্টেমে host package-এর
+            // নামে তৈরি হয় না ("Bad notification")। KeepAliveService-এর
+            // "cloneme_keepalive" চ্যানেল ব্যবহার করো — এটা main process-এ
+            // তৈরি হয় আর প্রমাণিতভাবে কাজ করে। host app-এর icon ব্যবহার করো।
+            android.content.Context hostCtx = BlackBoxCore.getContext();
+            int icon = android.R.drawable.sym_def_app_icon;
+            try {
+                if (hostCtx != null) icon = hostCtx.getApplicationInfo().icon;
+            } catch (Throwable ignored) { }
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(getApplicationContext(), "cloneme_keepalive")
                     .setContentTitle("CloneMe — Chrome চলছে")
                     .setContentText("ক্লোন Chrome-এর renderer সক্রিয় রাখা হয়েছে")
-                    .setSmallIcon(android.R.drawable.sym_def_app_icon)
+                    .setSmallIcon(icon)
                     .setOngoing(true)
                     .setPriority(NotificationCompat.PRIORITY_MIN);
             startForeground(BlackBoxCore.getHostPkg().hashCode(), builder.build());
             BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
-                    "v1.0.92 foreground promoted for " + serviceName);
+                    "v1.0.95 foreground promoted for " + serviceName);
         } catch (Throwable t) {
             // ফোরগ্রাউন্ড ব্যর্থ হলেও bind চলবে — শুধু trace করো।
+            // (তবে "Bad notification" exception async আসে, try/catch ধরে না —
+            // তাই চ্যানেল/আইকন বৈধ হতেই হবে।)
             try {
                 BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
-                        "v1.0.92 foreground promote failed: " + t);
+                        "v1.0.95 foreground promote failed: " + t);
             } catch (Throwable ignored) {
             }
         }
