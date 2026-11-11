@@ -594,7 +594,21 @@ fun ClonerAppScreen() {
             val diagKeywords = listOf("System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed", "transact code=", "no-sandbox", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu")
             val rareKeywords = listOf("transact code=", "relroInfo nulled", "RELRO blocked", "no-sandbox", "setupConnection rewrite failed", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu")
             val rareLines = trace.lines().filter { line -> rareKeywords.any { k -> line.contains(k) } }.takeLast(30)
-            val diagLines = (rareLines + trace.lines().filter { line -> diagKeywords.any { k -> line.contains(k) } }.takeLast(20)).distinct()
+            // v1.0.96 রিপোর্ট-স্বাস্থ্য: একই লাইন বারবার আসে (যেমন
+            // "foreground promoted" ২২ বার, শুধু সময়/PID আলাদা) — distinct()
+            // তাতে কাজ হয় না, কারণ সময় আলাদা বলে লাইনগুলো আলাদা স্ট্রিং।
+            // তাই "] "-এর পরের বার্তা দিয়ে গুছিয়ে এক লাইনে count দেখাও
+            // (×N) — জায়গা বাঁচে, "child process died"-এর মতো বিরল লাইন
+            // আর চাপা পড়ে না। শেষের ২০টি আলাদা বার্তা নাও।
+            val diagCandidates = rareLines + trace.lines().filter { line -> diagKeywords.any { k -> line.contains(k) } }.takeLast(20)
+            val diagGrouped = diagCandidates.groupBy { line ->
+                val idx = line.indexOf("] ")
+                if (idx >= 0) line.substring(idx + 2) else line
+            }
+            val diagLines = diagGrouped.entries.toList().takeLast(20).map { (_, lines) ->
+                val first = lines.first()
+                if (lines.size > 1) "$first (×${lines.size})" else first
+            }
             sb.append("\n--- ডায়াগনসিস লাইন (renderer) ---\n")
             sb.append(if (diagLines.isEmpty()) "কোনো ডায়াগনসিস লাইন নেই\n" else diagLines.joinToString("\n") + "\n")
             // টম্বস্টোন ফ্রেম: renderer SIGSEGV-র কল স্ট্যাক — কোন ফাংশনে
@@ -633,10 +647,21 @@ fun ClonerAppScreen() {
                     "fatal signal", "SIGSYS", "seccomp", "killed",
                     "Render process", "exited with", "terminated", "crashed",
                     "ChildProcessLauncher", "RenderProcessHost", "Killing",
-                    "low memory", "renderer process")
-                deathLog = logOut.lines().filter { line ->
+                    "low memory", "renderer process", "onServiceDisconnected",
+                    "child process died")
+                // v1.0.96 রিপোর্ট-স্বাস্থ্য: "Creating new ChildProcessService"
+                // লাইনটাই deathKeys-এ ("ChildProcessService") ধরা পড়ে —
+                // v1.0.95-র রিপোর্টে ১৮টি একই লাইন মৃত্যুর লগ ভরে দিয়েছিল,
+                // আসল খুনি দেখা যায়নি। এখন ওগুলো বাদ দিয়ে শুধু সংখ্যা দেখাও।
+                val deathMatched = logOut.lines().filter { line ->
                     deathKeys.any { line.contains(it, ignoreCase = true) }
-                }.takeLast(40).joinToString("\n")
+                }
+                val creatingCount = deathMatched.count { it.contains("Creating new ChildProcessService") }
+                val deathLines = deathMatched.filterNot { it.contains("Creating new ChildProcessService") }.takeLast(40)
+                val deathSummary = if (creatingCount > 0)
+                    listOf("ChildProcessService নতুন তৈরি: ${creatingCount} বার — renderer বারবার নতুন করে তৈরি হচ্ছে (churn); উপরের লাইনগুলোতেই আসল মৃত্যুর কারণ খুঁজতে হবে")
+                else emptyList()
+                deathLog = (deathSummary + deathLines).joinToString("\n")
                 val frameRe = Regex("#(\\d+) pc ([0-9a-f]+)")
                 val offRe = Regex("\\(offset 0x[0-9a-f]+\\)")
                 val allFrames = logOut.lines().filter { frameRe.containsMatchIn(it) }
