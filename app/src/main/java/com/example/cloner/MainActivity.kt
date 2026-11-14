@@ -686,6 +686,29 @@ fun ClonerAppScreen() {
                 for ((pid, desc) in lastSeen) {
                     if (pid !in current) {
                         lines.append("$now GONE pid=$pid $desc (memAvail=${memAvail}kB)\n")
+                        // v1.0.116: সিস্টেমের অফিসিয়াল মৃত্যুর কারণ পড়ো
+                        // (API 30+, নিজের প্যাকেজের প্রসেসের জন্য অনুমতি
+                        // লাগে না) — নিজে exit, সিগন্যাল, লো-মেমরি, ক্র্যাশ,
+                        // নাকি অন্য kill, সেটা নিশ্চিতভাবে জানা যাবে।
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                            runCatching {
+                                val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                                val info = am.getHistoricalProcessExitReasons(ctx.packageName, pid, 3).firstOrNull()
+                                if (info != null) {
+                                    val reasonName = when (info.reason) {
+                                        0 -> "UNKNOWN"; 1 -> "EXIT_SELF"; 2 -> "SIGNALED"
+                                        3 -> "LOW_MEMORY"; 4 -> "CRASH"; 5 -> "ANR"
+                                        6 -> "INIT_FAILURE"; 7 -> "PERMISSION_CHANGE"
+                                        8 -> "EXCESSIVE_RESOURCE"; 9 -> "OTHER"
+                                        10 -> "USER_REQUESTED"; 11 -> "USER_STOPPED"
+                                        12 -> "DEPENDENCY_DIED"; else -> "REASON_${info.reason}"
+                                    }
+                                    lines.append("$now EXIT pid=$pid reason=$reasonName importance=${info.importance} rss=${info.rss}kB desc=${info.description}\n")
+                                } else {
+                                    lines.append("$now EXIT pid=$pid no-exit-info\n")
+                                }
+                            }
+                        }
                     }
                 }
                 lastSeen = current
@@ -934,7 +957,7 @@ fun ClonerAppScreen() {
                 // v1.0.114: GONE লাইন (মৃত্যুর মুহূর্তের শেষ মাপসহ) + শেষ
                 // নমুনাগুলো দেখাও — আগের take(4000) শুধু পুরনো অংশ দেখাতো।
                 val watchText = runCatching { watchFile.readText() }.getOrDefault("পড়া যায়নি")
-                val goneLines = watchText.lines().filter { it.contains("GONE") }.takeLast(5)
+                val goneLines = watchText.lines().filter { it.contains("GONE") || it.contains("EXIT pid=") }.takeLast(10)
                 if (goneLines.isEmpty()) sb.append("GONE লাইন নেই — নজরদারির সময় কোনো প্রসেস উধাও হয়নি।\n")
                 else sb.append("GONE (মৃত্যু):\n" + goneLines.joinToString("\n") + "\n")
                 sb.append("--- শেষ নমুনা ---\n" + watchText.takeLast(1500) + "\n")
