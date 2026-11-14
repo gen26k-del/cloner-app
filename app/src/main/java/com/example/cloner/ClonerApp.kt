@@ -160,6 +160,13 @@ class ClonerApp : Application() {
                     )
                 } catch (_: Exception) { }
             })
+            // v1.0.118: হুক বসেছে তার প্রমাণ — পরের রিপোর্টে এই লাইন
+            // থাকলে অথচ HOOK FIRED না থাকলে EXIT_SELF মানে নেটিভ exit।
+            val proc0 = java.io.File("/proc/self/cmdline").readText()
+                .replace(" ", " ").trim()
+            java.io.File(cacheDir, "init_trace.txt").appendText(
+                "${java.util.Date()} [$proc0] SHUTDOWN HOOK REGISTERED\n"
+            )
         } catch (_: Exception) { }
         // Crash রিপোর্টার: virtual অ্যাপ crash করলে stack trace ফাইলে রেখে দেয়,
         // যাতে UI থেকে দেখে কারণ বোঝা যায়। (প্রসেস অনুযায়ী আলাদা ফাইল)
