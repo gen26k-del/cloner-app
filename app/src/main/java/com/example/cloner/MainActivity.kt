@@ -1006,7 +1006,7 @@ fun ClonerAppScreen() {
             sb.append("\n--- নেটিভ exit ট্রেস ---\n")
             val exitFile = java.io.File(ctx.cacheDir, "exit_trace.txt")
             if (exitFile.exists()) {
-                sb.append(runCatching { exitFile.readText() }.getOrDefault("পড়া যায়নি").takeLast(2000) + "\n")
+                sb.append(runCatching { exitFile.readText() }.getOrDefault("পড়া যায়নি").takeLast(4000) + "\n")
             } else {
                 sb.append("নেটিভ exit ট্রেস ফাইল নেই — কোনো প্রসেস exit() ডাকেনি (বা ট্রেসার বসেনি)।\n")
             }
