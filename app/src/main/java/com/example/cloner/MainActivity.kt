@@ -1001,6 +1001,15 @@ fun ClonerAppScreen() {
             } else {
                 sb.append("হুক যাচাই ফাইল নেই — কোনো প্রসেসে হুক বসেনি।\n")
             }
+            // v1.0.120: নেটিভ exit ট্রেস — exit() ডাকলে C++ backtrace
+            // লেখে (exit_trace.txt)। খালি থাকলে মৃত্যু _exit/SIGKILL-ধরনের।
+            sb.append("\n--- নেটিভ exit ট্রেস ---\n")
+            val exitFile = java.io.File(ctx.cacheDir, "exit_trace.txt")
+            if (exitFile.exists()) {
+                sb.append(runCatching { exitFile.readText() }.getOrDefault("পড়া যায়নি").takeLast(2000) + "\n")
+            } else {
+                sb.append("নেটিভ exit ট্রেস ফাইল নেই — কোনো প্রসেস exit() ডাকেনি (বা ট্রেসার বসেনি)।\n")
+            }
             // ডায়াগনসিস মার্কার — Chromium renderer-এর মৃত্যু/ফিক্সের লাইন
             // (System linker, child process died, kept alive, RELRO) — ট্রেসের
             // শেষাংশে না থাকলেও এগুলো দেখা যাবে, যাতে রিপোর্ট পাঠালেই বোঝা যায়
