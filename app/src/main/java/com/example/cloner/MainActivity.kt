@@ -1250,7 +1250,6 @@ fun ClonerAppScreen() {
     // অ্যাপ খুললেই সব অ্যাপ চেকআপ বিরক্তিকর)। চেকআপ শুধু ⋮ মেনু থেকে
     // হাতে চাপলে চলবে (runFullCheckup)।
 
-    val bgBrush = remember { Brush.verticalGradient(listOf(Color(0xFFE8F4FE), Color(0xFFF1E9FB))) }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         floatingActionButtonPosition = FabPosition.Center,
@@ -1272,7 +1271,7 @@ fun ClonerAppScreen() {
         // v1.0.100: Multiple App-এর মতো হালকা নীল-বেগুনি গ্রেডিয়েন্ট ব্যাকগ্রাউন্ড।
         Column(
             Modifier.padding(pad).fillMaxSize()
-                .background(bgBrush)
+                .background(Brush.verticalGradient(listOf(Color(0xFFE8F4FE), Color(0xFFF1E9FB))))
         ) {
             if (tab == 1) {
                 // হোম টপ বার (স্ক্রিনশটের মতো): শিরোনাম + পেন্সিল + সার্চ + ⋮ মেনু।
@@ -1408,32 +1407,26 @@ fun ClonerAppScreen() {
             } else if (tab == 0) {
                 // v1.0.100: শুধু চলবে এমন অ্যাপ দেখাও — ব্যর্থ/অসমর্থিত
                 // অ্যাপ লুকিয়ে রাখো (উপরের টগলে দেখানো যায়)।
-                val filtered = remember(apps, query, showHidden, failedPkgs) {
-                    apps.filter {
-                        (query.isBlank() || it.label.contains(query, ignoreCase = true) ||
-                            it.pkg.contains(query, ignoreCase = true)) &&
-                        (showHidden || (!it.isSystemOnly && it.pkg !in failedPkgs && !isUnsupportedPackage(it.pkg) && !isGmsSystemPackage(it.pkg)))
-                    }
+                val filtered = apps.filter {
+                    (query.isBlank() || it.label.contains(query, ignoreCase = true) ||
+                        it.pkg.contains(query, ignoreCase = true)) &&
+                    (showHidden || (!it.isSystemOnly && it.pkg !in failedPkgs && !isUnsupportedPackage(it.pkg) && !isGmsSystemPackage(it.pkg)))
                 }
                 // v1.0.100: স্ক্রিনশটের মতো HOT সেকশন — জনপ্রিয় অ্যাপ আগে।
                 // HOT অ্যাপগুলো নিচের অক্ষর-সেকশনেও থাকবে (Multiple App-এর মতো — দুই জায়গায়)।
-                val hotApps = remember(filtered) {
-                    val hotPkgs = listOf(
-                        "com.facebook.katana", "com.facebook.orca", "com.android.chrome",
-                        "com.zhiliaoapp.musically", "com.whatsapp", "org.telegram.messenger",
-                        "com.brave.browser", "com.google.android.gm", "com.lemon.lvovideoeditor",
-                        "com.google.android.apps.photos", "com.google.android.apps.maps",
-                        "com.google.android.apps.docs"
-                    )
-                    hotPkgs.mapNotNull { p -> filtered.find { it.pkg == p } }.take(12)
-                }
-                val sections = remember(filtered) {
-                    filtered.groupBy { app ->
-                        val c = app.label.firstOrNull()?.uppercaseChar() ?: '#'
-                        if (c in 'A'..'Z') c else '#'
-                    }.entries.sortedWith(compareBy({ if (it.key == '#') 1 else 0 }, { it.key }))
-                }
-                val selectedApps = remember(apps, selectedPkgs) { apps.filter { it.pkg in selectedPkgs } }
+                val hotPkgs = listOf(
+                    "com.facebook.katana", "com.facebook.orca", "com.android.chrome",
+                    "com.zhiliaoapp.musically", "com.whatsapp", "org.telegram.messenger",
+                    "com.brave.browser", "com.google.android.gm", "com.lemon.lvovideoeditor",
+                    "com.google.android.apps.photos", "com.google.android.apps.maps",
+                    "com.google.android.apps.docs"
+                )
+                val hotApps = hotPkgs.mapNotNull { p -> filtered.find { it.pkg == p } }.take(12)
+                val sections = filtered.groupBy { app ->
+                    val c = app.label.firstOrNull()?.uppercaseChar() ?: '#'
+                    if (c in 'A'..'Z') c else '#'
+                }.entries.sortedWith(compareBy({ if (it.key == '#') 1 else 0 }, { it.key }))
+                val selectedApps = apps.filter { it.pkg in selectedPkgs }
                 if (filtered.isEmpty()) {
                     EmptyHint("No apps found", Modifier.weight(1f))
                 } else {
@@ -1512,24 +1505,20 @@ fun ClonerAppScreen() {
                 // v1.0.100: Multiple App-এর মতো ক্লোন হোম — অ্যাপ অনুযায়ী
                 // গ্রুপ, ৪ কলামের গ্রিড; চাপলে চালু, চেপে ধরলে মেনু,
                 // এডিট মোডে (পেন্সিল) চাপলে মোছার ডায়ালগ।
-                val shownClones = remember(clones, apps, query) {
-                    clones.filter { clone ->
-                        if (query.isBlank()) true else {
-                            val a = apps.find { it.pkg == clone.pkg }
-                            a != null && (a.label.contains(query, ignoreCase = true) ||
-                                a.pkg.contains(query, ignoreCase = true))
-                        }
-                    }.sortedWith(compareBy({ it.pkg }, { it.userId }))
-                }
+                val shownClones = clones.filter { clone ->
+                    if (query.isBlank()) true else {
+                        val a = apps.find { it.pkg == clone.pkg }
+                        a != null && (a.label.contains(query, ignoreCase = true) ||
+                            a.pkg.contains(query, ignoreCase = true))
+                    }
+                }.sortedWith(compareBy({ it.pkg }, { it.userId }))
                 if (clones.isEmpty()) {
                     EmptyHint("No clones yet.\nTap the + button below to clone.", Modifier.weight(1f))
                 } else if (shownClones.isEmpty()) {
                     EmptyHint("No clones found", Modifier.weight(1f))
                 } else {
-                    val groups = remember(shownClones, apps) {
-                        shownClones.groupBy { it.pkg }.entries.sortedBy { entry ->
-                            apps.find { it.pkg == entry.key }?.label?.lowercase() ?: entry.key
-                        }
+                    val groups = shownClones.groupBy { it.pkg }.entries.sortedBy { entry ->
+                        apps.find { it.pkg == entry.key }?.label?.lowercase() ?: entry.key
                     }
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(4),
@@ -1566,7 +1555,6 @@ fun ClonerAppScreen() {
                                     DropdownMenu(
                                         expanded = pendingMenu == clone,
                                         onDismissRequest = { pendingMenu = null },
-                                        modifier = Modifier.width(280.dp),
                                         shape = RoundedCornerShape(16.dp),
                                         containerColor = Color(0xFF6B6A70)
                                     ) {
@@ -1582,25 +1570,25 @@ fun ClonerAppScreen() {
                                             Spacer(Modifier.width(12.dp))
                                             Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                                         }
-                                        DarkMenuItem("Delete", "delete") {
+                                        DarkMenuItem("Delete", Icons.Filled.Delete) {
                                             pendingMenu = null; pendingDelete = clone
                                         }
-                                        DarkMenuItem("Force stop", "forceStop") {
+                                        DarkMenuItem("Force stop", Icons.Filled.Warning) {
                                             pendingMenu = null; doForceStop(clone)
                                         }
-                                        DarkMenuItem("Create shortcut", "shortcut") {
+                                        DarkMenuItem("Create shortcut", Icons.Filled.Share) {
                                             pendingMenu = null; pendingShortcut = clone
                                         }
-                                        DarkMenuItem("Edit Name/Icon", "edit") {
+                                        DarkMenuItem("Edit Name/Icon", Icons.Filled.Edit) {
                                             pendingMenu = null; renameText = title; pendingRename = clone
                                         }
-                                        DarkMenuItem("Clear data", "broom") {
+                                        DarkMenuItem("Clear data", Icons.Filled.Delete) {
                                             pendingMenu = null; pendingClearData = clone
                                         }
-                                        DarkMenuItem("Clear cache", "broom") {
+                                        DarkMenuItem("Clear cache", Icons.Filled.Delete) {
                                             pendingMenu = null; doClearCache(clone)
                                         }
-                                        DarkMenuItem("Clone apps", "clone") {
+                                        DarkMenuItem("Clone apps", Icons.Filled.Add) {
                                             pendingMenu = null; doClone(app)
                                         }
                                     }
@@ -1984,72 +1972,11 @@ fun AppGridItem(
 }
 
 @Composable
-fun MenuGlyph(kind: String) {
-    // v1.0.103: স্ক্রিনশটের মতো পাতলা আউটলাইন চিহ্ন — Material-এ এই চিহ্নগুলো
-    // নেই, তাই হাতে আঁকা (বৃত্ত-বিয়োগ, সতর্ক-ত্রিভুজ, বাঁকা তীর, ঝাঁটা, দুই বর্গ)।
-    if (kind == "edit") {
-        Icon(Icons.Outlined.Edit, contentDescription = null, tint = Color.White)
-        return
-    }
-    Canvas(Modifier.size(24.dp)) {
-        val u = size.width / 24f
-        fun p(x: Float, y: Float) = Offset(x * u, y * u)
-        val white = Color.White
-        val sw = 1.7f * u
-        val stroke = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
-        when (kind) {
-            "delete" -> {
-                drawCircle(white, radius = 8.5f * u, center = p(12f, 12f), style = stroke)
-                drawLine(white, p(7f, 12f), p(17f, 12f), sw, StrokeCap.Round)
-            }
-            "forceStop" -> {
-                val tri = Path().apply {
-                    moveTo(12f * u, 4.5f * u)
-                    lineTo(20f * u, 19f * u)
-                    lineTo(4f * u, 19f * u)
-                    close()
-                }
-                drawPath(tri, white, style = stroke)
-                drawLine(white, p(12f, 10f), p(12f, 14.2f), sw, StrokeCap.Round)
-                drawCircle(white, radius = 1.1f * u, center = p(12f, 16.8f))
-            }
-            "shortcut" -> {
-                val curve = Path().apply {
-                    moveTo(5f * u, 18f * u)
-                    cubicTo(5f * u, 9f * u, 10f * u, 6f * u, 17f * u, 6f * u)
-                }
-                drawPath(curve, white, style = stroke)
-                drawLine(white, p(17f, 6f), p(13.4f, 2.8f), sw, StrokeCap.Round)
-                drawLine(white, p(17f, 6f), p(13.4f, 9.2f), sw, StrokeCap.Round)
-            }
-            "broom" -> {
-                drawLine(white, p(6f, 4f), p(11.5f, 9.5f), sw, StrokeCap.Round)
-                val head = Path().apply {
-                    moveTo(10f * u, 11f * u)
-                    lineTo(17f * u, 11f * u)
-                    lineTo(19.5f * u, 18f * u)
-                    lineTo(12.5f * u, 18f * u)
-                    close()
-                }
-                drawPath(head, white, style = stroke)
-                drawLine(white, p(13.8f, 12.6f), p(13.8f, 16.6f), sw, StrokeCap.Round)
-                drawLine(white, p(16.2f, 12.6f), p(16.2f, 16.6f), sw, StrokeCap.Round)
-            }
-            "clone" -> {
-                drawRoundRect(white, p(8f, 4f), Size(12f * u, 12f * u), CornerRadius(2f * u), stroke)
-                drawRoundRect(Color(0xFF6B6A70), p(4f, 8f), Size(12f * u, 12f * u), CornerRadius(2f * u))
-                drawRoundRect(white, p(4f, 8f), Size(12f * u, 12f * u), CornerRadius(2f * u), stroke)
-            }
-        }
-    }
-}
-
-@Composable
-fun DarkMenuItem(text: String, glyph: String, onClick: () -> Unit) {
-    // v1.0.100: লং-প্রেস মেনুর আইটেম — সাদা লেখা, ডানে আউটলাইন চিহ্ন (স্ক্রিনশটের মতো)।
+fun DarkMenuItem(text: String, icon: ImageVector, onClick: () -> Unit) {
+    // v1.0.100: লং-প্রেস মেনুর আইটেম — সাদা লেখা, ডানে আইকন (স্ক্রিনশটের মতো)।
     DropdownMenuItem(
-        text = { Box(Modifier.padding(horizontal = 8.dp)) { Text(text, color = Color.White, fontSize = 15.sp) } },
-        trailingIcon = { Box(Modifier.padding(horizontal = 8.dp)) { MenuGlyph(glyph) } },
+        text = { Text(text, color = Color.White, fontSize = 14.sp) },
+        trailingIcon = { Icon(icon, contentDescription = null, tint = Color.White) },
         onClick = onClick
     )
 }
