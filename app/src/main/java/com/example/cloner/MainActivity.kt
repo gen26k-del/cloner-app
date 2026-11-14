@@ -884,12 +884,8 @@ fun ClonerAppScreen() {
                 val traceBefore = runCatching { traceFile.readText().length }.getOrDefault(0)
                 // চালাও
                 val lr = Engine.current.launchClone(pkg, 0)
-                val verdict: String
-                if (lr.isFailure) {
-                    verdict = "❌ ${app.label}: লঞ্চ কল ব্যর্থ (${lr.exceptionOrNull()?.message ?: "?"})"
-                    failCount++
-                } else {
-                    kotlinx.coroutines.delay(4000)
+                // v1.0.99: রায় বের করার লজিক এক জায়গায় — দুইবার ডাকা যায়।
+                fun evalOnce(): String {
                     val newTrace = runCatching {
                         val full = traceFile.readText()
                         if (full.length > traceBefore) full.substring(traceBefore) else ""
@@ -905,7 +901,7 @@ fun ClonerAppScreen() {
                     val hasStart = clsName != null &&
                         newTrace.contains("callActivityOnCreate start: $clsName")
                     val hasBind = newTrace.contains("handleBindApplication done: $pkg")
-                    verdict = when {
+                    return when {
                         hasResume -> "✅ ${app.label}: চালু হয়েছে"
                         hasDone -> "⚠️ ${app.label}: onCreate হয়েছে, onResume হয়নি"
                         hasStart -> "❌ ${app.label}: onCreate-এ আটকেছে/ক্র্যাশ"
@@ -913,18 +909,42 @@ fun ClonerAppScreen() {
                         alive -> "⚠️ ${app.label}: প্রসেস চলছে কিন্তু অ্যাক্টিভিটি দেখা যায়নি"
                         else -> "❌ ${app.label}: চালু হয়নি (প্রসেস মারা গেছে)"
                     }
+                }
+                val verdict: String
+                if (lr.isFailure) {
+                    verdict = "❌ ${app.label}: লঞ্চ কল ব্যর্থ (${lr.exceptionOrNull()?.message ?: "?"})"
+                    failCount++
+                } else {
+                    kotlinx.coroutines.delay(4000)
+                    var v = evalOnce()
+                    if (!v.startsWith("✅")) {
+                        // v1.0.99: ভারী অ্যাপ (Facebook/Messenger) ধীরে চালু হয় —
+                        // ৪ সেকেন্ডে রায় দিলে ভুল ❌ হয় (v1.0.97-এ Facebook-ই
+                        // ভুল করে লুকিয়ে গিয়েছিল)। আরও ৬ সেকেন্ড দাও, ভালো
+                        // রায় পেলে সেটাই নাও (✅ > ⚠️ > ❌)।
+                        kotlinx.coroutines.delay(6000)
+                        val v2 = evalOnce()
+                        val rank = { s: String ->
+                            when { s.startsWith("✅") -> 2; s.startsWith("⚠️") -> 1; else -> 0 }
+                        }
+                        if (rank(v2) > rank(v)) v = v2
+                    }
+                    verdict = v
                     if (verdict.startsWith("✅")) okCount++
                     else if (!verdict.startsWith("⚠️")) failCount++
                 }
-                // v1.0.97: পাস করলে পাস-তালিকায় রাখো আর ব্যর্থ-তালিকা থেকে
-                // সরাও; ব্যর্থ (❌/⚠️) হলে ব্যর্থ-তালিকায় রাখো — তালিকায়
-                // আর দেখাবে না। ব্যর্থ অ্যাপ পরের চেকআপে আবার চেক হয়।
+                // v1.0.99: শুধু ❌ লুকাবে। ✅ পাস-তালিকায়; ⚠️ কোনো তালিকাতেই
+                // না — পরের চেকআপে আবার চেক হবে, তালিকায় দেখাবে। (v1.0.97-এ
+                // ⚠️ লুকিয়ে TikTok/WhatsApp/Gmail হারিয়ে গিয়েছিল।)
                 if (verdict.startsWith("✅")) {
                     if (passed.add(pkg)) savePassedPkgs(ctx, passed)
-                    if (failed.remove(pkg)) saveFailedPkgs(ctx, failed)
-                } else {
-                    if (passed.remove(pkg)) savePassedPkgs(ctx, passed)
+                } else if (passed.remove(pkg)) {
+                    savePassedPkgs(ctx, passed)
+                }
+                if (verdict.startsWith("❌")) {
                     if (failed.add(pkg)) saveFailedPkgs(ctx, failed)
+                } else if (failed.remove(pkg)) {
+                    saveFailedPkgs(ctx, failed)
                 }
                 appendCheckupLine(ctx, verdict)
                 withContext(Dispatchers.Main) {
