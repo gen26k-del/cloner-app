@@ -2080,7 +2080,20 @@ fun AppGridItem(
                 contentAlignment = Alignment.Center
             ) {
                 if (selected) {
-                    Text("✓", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                    // v1.0.110: 8sp লেখার টিক দেখা যেত না — Canvas-এ মোটা
+                    // দাগে আঁকা টিক, বাক্সের ভেতর স্পষ্ট দেখাবে।
+                    Canvas(Modifier.size(8.dp)) {
+                        val path = Path().apply {
+                            moveTo(size.width * 0.15f, size.height * 0.55f)
+                            lineTo(size.width * 0.40f, size.height * 0.80f)
+                            lineTo(size.width * 0.85f, size.height * 0.25f)
+                        }
+                        drawPath(
+                            path,
+                            Color.White,
+                            style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                        )
+                    }
                 }
             }
         }
