@@ -20,6 +20,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -41,6 +42,7 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -111,6 +113,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -1357,7 +1361,7 @@ fun ClonerAppScreen() {
                 ) {
                     Text(
                         "CloneMe",
-                        fontSize = 22.sp,
+                        fontSize = 19.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f).padding(start = 8.dp)
                     )
@@ -1378,7 +1382,7 @@ fun ClonerAppScreen() {
                     }
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
-                            Icon(Icons.Filled.MoreVert, contentDescription = "Menu", tint = Color.Black)
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Menu", tint = Color.Black, modifier = Modifier.size(20.dp))
                         }
                         DropdownMenu(
                             expanded = menuOpen,
@@ -1400,21 +1404,7 @@ fun ClonerAppScreen() {
                     }
                 }
                 if (homeSearch) {
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = { query = it },
-                        placeholder = { Text("Search", fontSize = 15.sp, color = Color(0xFF9E9E9E)) },
-                        leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, tint = Color(0xFF9E9E9E)) },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                        singleLine = true,
-                        shape = RoundedCornerShape(16.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color.White,
-                            unfocusedContainerColor = Color.White,
-                            focusedBorderColor = Color.Transparent,
-                            unfocusedBorderColor = Color.Transparent
-                        )
-                    )
+                    SearchField(query, { query = it }, Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                 }
                 if (!Engine.current.isReady()) {
                     Card(
@@ -1439,38 +1429,24 @@ fun ClonerAppScreen() {
                     }
                     Text(
                         "CloneMe",
-                        fontSize = 22.sp,
+                        fontSize = 19.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f)
                     )
-                    Switch(
-                        checked = showHidden,
-                        onCheckedChange = { showHidden = it },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = AccentBlue,
-                            checkedBorderColor = Color.Transparent,
-                            uncheckedThumbColor = Color.White,
-                            uncheckedTrackColor = Color(0xFFE0E0E0),
-                            uncheckedBorderColor = Color.Transparent
+                    // v1.0.109: Multiple App-এর মতো ছোট টগল (মাপা 54x40px; M3 Switch অনেক বড়)।
+                    Box(
+                        modifier = Modifier.size(width = 28.dp, height = 18.dp)
+                            .background(if (showHidden) AccentBlue else Color(0xFFE0E0E0), RoundedCornerShape(9.dp))
+                            .clickable { showHidden = !showHidden },
+                        contentAlignment = if (showHidden) Alignment.CenterEnd else Alignment.CenterStart
+                    ) {
+                        Box(
+                            Modifier.padding(horizontal = 2.dp).size(14.dp)
+                                .background(Color.White, CircleShape)
                         )
-                    )
+                    }
                 }
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    placeholder = { Text("Search", fontSize = 15.sp, color = Color(0xFF9E9E9E)) },
-                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, tint = Color(0xFF9E9E9E)) },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                    singleLine = true,
-                    shape = RoundedCornerShape(16.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color.White,
-                        unfocusedContainerColor = Color.White,
-                        focusedBorderColor = Color.Transparent,
-                        unfocusedBorderColor = Color.Transparent
-                    )
-                )
+                SearchField(query, { query = it }, Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
             }
             if (loading) {
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -1987,6 +1963,78 @@ fun AppRow(
 }
 
 @Composable
+fun SearchField(value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier) {
+    // v1.0.109: Multiple App-এর মতো 40dp সার্চ ফিল্ড (মাপা 102px) — M3
+    // OutlinedTextField 48dp-এর নিচে নামে না, তাই BasicTextField + সাদা বাক্স।
+    Box(
+        modifier = modifier.fillMaxWidth().height(40.dp)
+            .background(Color.White, RoundedCornerShape(16.dp))
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Search, contentDescription = null, tint = Color(0xFF9E9E9E), modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = true,
+                textStyle = TextStyle(fontSize = 15.sp, color = Color.Black),
+                modifier = Modifier.weight(1f),
+                decorationBox = { innerTextField ->
+                    Box {
+                        if (value.isEmpty()) {
+                            Text("Search", fontSize = 15.sp, color = Color(0xFF9E9E9E))
+                        }
+                        innerTextField()
+                    }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun TileLabel(text: String) {
+    // v1.0.109: Multiple App-এর মতো ".." দিয়ে ছাঁটা লেবেল — চওড়া মেপে
+    // কাটে, আর হোম টাইলের " N" প্রত্যয় বাঁচিয়ে রাখে ("Facebo.. 2")।
+    val density = LocalDensity.current
+    val paint = remember {
+        android.graphics.Paint().apply {
+            textSize = with(density) { 12.sp.toPx() }
+            typeface = android.graphics.Typeface.DEFAULT
+        }
+    }
+    BoxWithConstraints(contentAlignment = Alignment.Center) {
+        val maxW = with(density) { maxWidth.toPx() }
+        val display = remember(text, maxW) {
+            val suffix = Regex(" \\d+$").find(text)?.value ?: ""
+            val name = text.removeSuffix(suffix)
+            if (paint.measureText(text) <= maxW) text
+            else {
+                val dotsW = paint.measureText("..")
+                val suffixW = paint.measureText(suffix)
+                var lo = 0
+                var hi = name.length
+                while (lo < hi) {
+                    val mid = (lo + hi + 1) / 2
+                    if (paint.measureText(name, 0, mid) + dotsW + suffixW <= maxW) lo = mid else hi = mid - 1
+                }
+                name.take(lo) + ".." + suffix
+            }
+        }
+        Text(
+            display,
+            fontSize = 12.sp,
+            lineHeight = 14.sp,
+            maxLines = 1,
+            textAlign = TextAlign.Center,
+            color = Color(0xFF7A7A84)
+        )
+    }
+}
+
+@Composable
 fun AppGridItem(
     app: AppInfo,
     selected: Boolean,
@@ -2022,25 +2070,17 @@ fun AppGridItem(
                     }
                 }
                 Spacer(Modifier.height(14.dp))
-                Text(
-                    app.label,
-                    fontSize = 12.sp,
-                    lineHeight = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    color = Color(0xFF7A7A84)
-                )
+                TileLabel(app.label)
             }
             Box(
-                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)
-                    .size(18.dp)
-                    .background(if (selected) AccentBlue else Color.White, RoundedCornerShape(5.dp))
-                    .border(1.5.dp, if (selected) AccentBlue else Color(0xFFD0D0D0), RoundedCornerShape(5.dp)),
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 3.dp)
+                    .size(12.dp)
+                    .background(if (selected) AccentBlue else Color.White, RoundedCornerShape(2.dp))
+                    .border(1.dp, if (selected) AccentBlue else Color(0xFFD0D0D0), RoundedCornerShape(2.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 if (selected) {
-                    Text("✓", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("✓", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -2168,15 +2208,7 @@ fun CloneGridItem(
                 }
             }
             Spacer(Modifier.height(14.dp))
-            Text(
-                title,
-                fontSize = 12.sp,
-                lineHeight = 14.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-                color = Color(0xFF7A7A84)
-            )
+            TileLabel(title)
         }
     }
 }
