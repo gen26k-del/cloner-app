@@ -1357,7 +1357,7 @@ fun ClonerAppScreen() {
                 ) {
                     Text(
                         "CloneMe",
-                        fontSize = 26.sp,
+                        fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f).padding(start = 8.dp)
                     )
@@ -1372,8 +1372,7 @@ fun ClonerAppScreen() {
                         onClick = {
                             homeSearch = !homeSearch
                             if (!homeSearch) query = ""
-                        },
-                        modifier = Modifier.background(Color(0xFFE0E0E0), CircleShape)
+                        }
                     ) {
                         Icon(Icons.Outlined.Search, contentDescription = "Search", tint = Color.Black)
                     }
@@ -1440,7 +1439,7 @@ fun ClonerAppScreen() {
                     }
                     Text(
                         "CloneMe",
-                        fontSize = 26.sp,
+                        fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f)
                     )
@@ -1609,7 +1608,7 @@ fun ClonerAppScreen() {
                                 Text(
                                     app.label,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
+                                    fontSize = 12.sp,
                                     modifier = Modifier.padding(top = 6.dp)
                                 )
                             }
