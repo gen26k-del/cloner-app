@@ -323,7 +323,7 @@ class MainActivity : ComponentActivity() {
     fun pinCloneShortcut(clone: CloneId, app: AppInfo, title: String) {
         val sm = getSystemService(ShortcutManager::class.java)
         if (sm == null || !sm.isRequestPinShortcutSupported) {
-            Toast.makeText(this, "এই ফোনে শর্টকাট সাপোর্ট করে না", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Shortcuts are not supported on this phone", Toast.LENGTH_LONG).show()
             return
         }
         val intent = Intent(this, ShortcutLaunchActivity::class.java).apply {
@@ -458,7 +458,7 @@ fun ClonerAppScreen() {
                 )
                 ctx.startActivity(intent)
             } catch (_: Exception) {
-                toast("Settings → Battery → CloneMe → Unrestricted করুন")
+                toast("Settings → Battery → CloneMe → Unrestricted")
             }
         }
     }
@@ -471,7 +471,7 @@ fun ClonerAppScreen() {
             )
             ctx.startActivity(intent)
         } catch (_: Exception) {
-            toast("Settings → Battery → CloneMe → Unrestricted করুন")
+            toast("Settings → Battery → CloneMe → Unrestricted")
         }
     }
 
@@ -483,7 +483,7 @@ fun ClonerAppScreen() {
             val uid = Engine.current.nextUserId(app.pkg)
             if (uid < 0) {
                 withContext(Dispatchers.Main) {
-                    toast("সর্বোচ্চ ক্লোন সংখ্যা পূর্ণ হয়েছে")
+                    toast("Maximum number of clones reached")
                 }
                 return@launch
             }
@@ -499,9 +499,9 @@ fun ClonerAppScreen() {
                             persist()
                         }
                         val n = clones.count { it.pkg == app.pkg }
-                        toast("${app.label} ক্লোন হয়েছে" + if (n > 1) " ($n)" else "")
+                        toast("${app.label} cloned" + if (n > 1) " ($n)" else "")
                     },
-                    onFailure = { toast(it.message ?: "ক্লোন করা যায়নি") }
+                    onFailure = { toast(it.message ?: "Couldn't clone") }
                 )
             }
         }
@@ -536,7 +536,7 @@ fun ClonerAppScreen() {
             withContext(Dispatchers.Main) {
                 busyClone = null
                 selectedPkgs = emptySet()
-                toast("${ok}টি ক্লোন হয়েছে" + if (fail > 0) ", ${fail}টি হয়নি" else "")
+                toast("${ok} cloned" + if (fail > 0) ", $fail failed" else "")
             }
         }
     }
@@ -588,7 +588,7 @@ fun ClonerAppScreen() {
             val result = Engine.current.launchClone(clone.pkg, clone.userId)
             withContext(Dispatchers.Main) {
                 busyClone = null
-                result.onFailure { toast(it.message ?: "চালু করা যায়নি") }
+                result.onFailure { toast(it.message ?: "Couldn't launch") }
                 result.onSuccess {
                     // v1.0.98: ফোরগ্রাউন্ড নোটিফিকেশন আসলে পোস্ট হলো কিনা যাচাই শুরু করো।
                     startFgsCheck()
@@ -604,16 +604,16 @@ fun ClonerAppScreen() {
                             if (!alive) {
                                 android.widget.Toast.makeText(
                                     ctx,
-                                    "${clone.pkg}-এর প্রসেস চালু হয়নি / বন্ধ হয়ে গেছে — ট্রেসটা কপি করে পাঠাও",
+                                    "Process for ${clone.pkg} didn't start / died — please copy the trace and send it",
                                     android.widget.Toast.LENGTH_SHORT
                                 ).show()
                                 // ট্রেস কার্ড নিজে থেকেই দেখাও — ব্যবহারকারীকে আর বোতাম চাপতে হবে না
                                 scope.launch(Dispatchers.IO) {
                                     val text = runCatching {
                                         val f = java.io.File(ctx.cacheDir, "init_trace.txt")
-                                        if (!f.exists()) "ট্রেস ফাইল নেই (init_trace.txt পাওয়া যায়নি)"
-                                        else f.readText().takeLast(4000).ifEmpty { "ট্রেস ফাইল খালি" }
-                                    }.getOrDefault("ট্রেস পড়া যায়নি")
+                                        if (!f.exists()) "No trace file (init_trace.txt not found)"
+                                        else f.readText().takeLast(4000).ifEmpty { "Trace file is empty" }
+                                    }.getOrDefault("Couldn't read trace")
                                     withContext(Dispatchers.Main) { traceText = text }
                                 }
                             }
@@ -644,9 +644,9 @@ fun ClonerAppScreen() {
                     !low.contains("packageparser") &&
                     keys.any { low.contains(it) }
                 }.takeLast(60)
-                if (lines.isEmpty()) "লগে ক্র্যাশের কোনো লাইন পাওয়া যায়নি (লগ খালি বা এই ফোনে লগ পড়া বন্ধ আছে)"
+                if (lines.isEmpty()) "No crash lines in log (log empty or log reading blocked on this phone)"
                 else lines.joinToString("\n").take(4000)
-            }.getOrDefault("লগ পড়া যায়নি — logcat চালানো ব্যর্থ হয়েছে")
+            }.getOrDefault("Couldn't read log — failed to run logcat")
             withContext(Dispatchers.Main) { logText = text }
         }
     }
@@ -657,9 +657,9 @@ fun ClonerAppScreen() {
         scope.launch(Dispatchers.IO) {
             val text = runCatching {
                 val f = java.io.File(ctx.cacheDir, "init_trace.txt")
-                if (!f.exists()) "ট্রেস ফাইল নেই (init_trace.txt পাওয়া যায়নি)"
-                else f.readText().takeLast(4000).ifEmpty { "ট্রেস ফাইল খালি" }
-            }.getOrDefault("ট্রেস পড়া যায়নি")
+                if (!f.exists()) "No trace file (init_trace.txt not found)"
+                else f.readText().takeLast(4000).ifEmpty { "Trace file is empty" }
+            }.getOrDefault("Couldn't read trace")
             withContext(Dispatchers.Main) { traceText = text }
         }
     }
@@ -944,16 +944,16 @@ fun ClonerAppScreen() {
         else allTargets.filter { it.pkg !in passed }
         if (targets.isEmpty()) {
             if (skippedPassed > 0) {
-                toast("সব অ্যাপই আগে পাস করেছে — আবার চেক করতে 'সব আবার চেক করো' চাপুন")
+                toast("All apps passed before — tap 'Re-check All' to check again")
             } else {
-                toast("চেক করার মতো কোনো অ্যাপ নেই")
+                toast("No apps to check")
             }
             return
         }
         checkupRunning = true
         checkupStop = false
         checkupLines.clear()
-        checkupProgress = "শুরু হচ্ছে…"
+        checkupProgress = "Starting…"
         // আগের চেকআপের ফাইল মুছে নতুন করে শুরু করো
         runCatching { java.io.File(ctx.cacheDir, "checkup_report.txt").delete() }
         scope.launch(Dispatchers.IO) {
@@ -973,7 +973,7 @@ fun ClonerAppScreen() {
                 if (!already) {
                     val uid = Engine.current.nextUserId(pkg)
                     if (uid < 0) {
-                        val line = "⏭️ ${app.label}: ক্লোন সংখ্যা পূর্ণ — বাদ"
+                        val line = "⏭️ ${app.label}: clone limit reached — skipped"
                         appendCheckupLine(ctx, line)
                         withContext(Dispatchers.Main) {
                             checkupLines.add(line)
@@ -991,7 +991,7 @@ fun ClonerAppScreen() {
                     }
                 }
                 if (!cloned) {
-                    val line = "❌ ${app.label}: ক্লোন হয়নি"
+                    val line = "❌ ${app.label}: couldn't clone"
                     // v1.0.97: ক্লোনই হয়নি — ব্যর্থ-তালিকায় রাখো, দেখাবে না।
                     if (failed.add(pkg)) saveFailedPkgs(ctx, failed)
                     if (passed.remove(pkg)) savePassedPkgs(ctx, passed)
@@ -1043,17 +1043,17 @@ fun ClonerAppScreen() {
                         newTrace.contains("callActivityOnCreate start: $clsName")
                     val hasBind = newTrace.contains("handleBindApplication done: $pkg")
                     return when {
-                        hasResume -> "✅ ${app.label}: চালু হয়েছে"
-                        hasDone -> "⚠️ ${app.label}: onCreate হয়েছে, onResume হয়নি"
-                        hasStart -> "❌ ${app.label}: onCreate-এ আটকেছে/ক্র্যাশ"
-                        hasBind -> "❌ ${app.label}: bind হয়েছে, অ্যাক্টিভিটি শুরু হয়নি"
-                        alive -> "⚠️ ${app.label}: প্রসেস চলছে কিন্তু অ্যাক্টিভিটি দেখা যায়নি"
-                        else -> "❌ ${app.label}: চালু হয়নি (প্রসেস মারা গেছে)"
+                        hasResume -> "✅ ${app.label}: launched"
+                        hasDone -> "⚠️ ${app.label}: onCreate done, no onResume"
+                        hasStart -> "❌ ${app.label}: stuck/crashed in onCreate"
+                        hasBind -> "❌ ${app.label}: bind done, activity didn't start"
+                        alive -> "⚠️ ${app.label}: process alive but no activity seen"
+                        else -> "❌ ${app.label}: didn't launch (process died)"
                     }
                 }
                 val verdict: String
                 if (lr.isFailure) {
-                    verdict = "❌ ${app.label}: লঞ্চ কল ব্যর্থ (${lr.exceptionOrNull()?.message ?: "?"})"
+                    verdict = "❌ ${app.label}: launch call failed (${lr.exceptionOrNull()?.message ?: "?"})"
                     failCount++
                 } else {
                     kotlinx.coroutines.delay(4000)
@@ -1096,22 +1096,22 @@ fun ClonerAppScreen() {
                 runCatching { BlackBoxCore.get().stopPackage(pkg, 0) }
             }
             val stopped = checkupStop
-            if (!stopped) appendCheckupLine(ctx, "=== চেকআপ শেষ ===")
+            if (!stopped) appendCheckupLine(ctx, "=== Checkup finished ===")
             val summary = buildString {
-                append("=== CloneMe সব অ্যাপ চেকআপ ===\n")
-                append("সময়: ${java.util.Date()}\n")
-                append("মোট: ${targets.size}টি অ্যাপ")
-                if (skippedPassed > 0) append(" (+ পাস করা ${skippedPassed}টি বাদ দেওয়া হয়েছে)")
+                append("=== CloneMe Check All Apps ===\n")
+                append("Time: ${java.util.Date()}\n")
+                append("Total: ${targets.size} apps")
+                if (skippedPassed > 0) append(" (+ ${skippedPassed} passed skipped)")
                 append("\n")
-                append("✅ চালু: $okCount | ❌ ব্যর্থ: $failCount | ⏭️ বাদ: $skipCount\n")
-                if (stopped) append("(মাঝপথে থামানো হয়েছে)\n")
+                append("✅ Passed: $okCount | ❌ Failed: $failCount | ⏭️ Skipped: $skipCount\n")
+                if (stopped) append("(stopped midway)\n")
                 append("\n")
                 append(checkupLines.joinToString("\n"))
                 append("\n")
             }
             withContext(Dispatchers.Main) {
                 checkupRunning = false
-                checkupProgress = if (stopped) "থামানো হয়েছে" else "শেষ — ✅ $okCount, ❌ $failCount"
+                checkupProgress = if (stopped) "Stopped" else "Done — ✅ $okCount, ❌ $failCount"
                 reportText = summary.take(5000)
             }
         }
@@ -1127,8 +1127,8 @@ fun ClonerAppScreen() {
             withContext(Dispatchers.Main) {
                 gmsState = if (ok) "installed" else "failed"
                 toast(
-                    if (ok) "Google সার্ভিস ইনস্টল হয়েছে — এবার ক্লোনগুলো আবার চালু করে দেখো"
-                    else "Google সার্ভিস ইনস্টল ব্যর্থ — আবার চেষ্টা করো"
+                    if (ok) "Google services installed — try launching the clones again"
+                    else "Google services install failed — try again"
                 )
             }
         }
@@ -1146,8 +1146,8 @@ fun ClonerAppScreen() {
             withContext(Dispatchers.Main) {
                 gmsState = if (!nowInstalled) "ready" else "installed"
                 toast(
-                    if (!nowInstalled) "Google সার্ভিস সরিয়ে ফেলা হয়েছে"
-                    else "সরানো ব্যর্থ — আবার চেষ্টা করো"
+                    if (!nowInstalled) "Google services removed"
+                    else "Removal failed — try again"
                 )
             }
         }
@@ -1164,13 +1164,13 @@ fun ClonerAppScreen() {
                     onSuccess = {
                         clones.remove(clone)
                         persist()
-                        toast("ক্লোন মুছে ফেলা হয়েছে")
+                        toast("Clone deleted")
                     },
                     onFailure = {
                         // ইঞ্জিনে ডিলিট না থাকলে শুধু লিস্ট থেকে সরাও
                         clones.remove(clone)
                         persist()
-                        toast("তালিকা থেকে সরানো হয়েছে")
+                        toast("Removed from list")
                     }
                 )
             }
@@ -1189,7 +1189,7 @@ fun ClonerAppScreen() {
     fun doForceStop(clone: CloneId) {
         scope.launch(Dispatchers.IO) {
             runCatching { BlackBoxCore.get().stopPackage(clone.pkg, clone.userId) }
-            withContext(Dispatchers.Main) { toast("বন্ধ করা হয়েছে") }
+            withContext(Dispatchers.Main) { toast("Stopped") }
         }
     }
 
@@ -1203,7 +1203,7 @@ fun ClonerAppScreen() {
             val result = Engine.current.installClone(clone.pkg, clone.userId)
             withContext(Dispatchers.Main) {
                 busyClone = null
-                toast(if (result.isSuccess) "ডেটা মুছে ফেলা হয়েছে" else "ডেটা মোছা যায়নি")
+                toast(if (result.isSuccess) "Data cleared" else "Couldn't clear data")
             }
         }
     }
@@ -1218,7 +1218,7 @@ fun ClonerAppScreen() {
                 done
             }.getOrDefault(false)
             withContext(Dispatchers.Main) {
-                toast(if (ok) "ক্যাশ মুছে ফেলা হয়েছে" else "ক্যাশ মোছা যায়নি")
+                toast(if (ok) "Cache cleared" else "Couldn't clear cache")
             }
         }
     }
@@ -1239,6 +1239,7 @@ fun ClonerAppScreen() {
     // অ্যাপ খুললেই সব অ্যাপ চেকআপ বিরক্তিকর)। চেকআপ শুধু ⋮ মেনু থেকে
     // হাতে চাপলে চলবে (runFullCheckup)।
 
+    val bgBrush = remember { Brush.verticalGradient(listOf(Color(0xFFE8F4FE), Color(0xFFF1E9FB))) }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         floatingActionButton = {
@@ -1259,7 +1260,7 @@ fun ClonerAppScreen() {
         // v1.0.100: Multiple App-এর মতো হালকা নীল-বেগুনি গ্রেডিয়েন্ট ব্যাকগ্রাউন্ড।
         Column(
             Modifier.padding(pad).fillMaxSize()
-                .background(Brush.verticalGradient(listOf(Color(0xFFE8F4FE), Color(0xFFF1E9FB))))
+                .background(bgBrush)
         ) {
             if (tab == 1) {
                 // হোম টপ বার (স্ক্রিনশটের মতো): শিরোনাম + পেন্সিল + সার্চ + ⋮ মেনু।
@@ -1276,7 +1277,7 @@ fun ClonerAppScreen() {
                     IconButton(onClick = { editMode = !editMode }) {
                         Icon(
                             Icons.Filled.Edit,
-                            contentDescription = "সম্পাদনা",
+                            contentDescription = "Edit",
                             tint = if (editMode) AccentBlue else Color.Black
                         )
                     }
@@ -1290,26 +1291,26 @@ fun ClonerAppScreen() {
                             CircleShape
                         )
                     ) {
-                        Icon(Icons.Filled.Search, contentDescription = "খুঁজুন", tint = Color.Black)
+                        Icon(Icons.Filled.Search, contentDescription = "Search", tint = Color.Black)
                     }
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
-                            Icon(Icons.Filled.MoreVert, contentDescription = "মেনু", tint = Color.Black)
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Menu", tint = Color.Black)
                         }
                         DropdownMenu(
                             expanded = menuOpen,
                             onDismissRequest = { menuOpen = false }
                         ) {
                             DropdownMenuItem(
-                                text = { Text("🔍 স্মার্ট রিপোর্ট") },
+                                text = { Text("Smart Report") },
                                 onClick = { menuOpen = false; generateReport() }
                             )
                             DropdownMenuItem(
-                                text = { Text("🔍 সব অ্যাপ চেকআপ") },
+                                text = { Text("Check All Apps") },
                                 onClick = { menuOpen = false; checkupDialogOpen = true; runFullCheckup() }
                             )
                             DropdownMenuItem(
-                                text = { Text("সব আবার চেক করো") },
+                                text = { Text("Re-check All") },
                                 onClick = { menuOpen = false; checkupDialogOpen = true; runFullCheckup(recheckAll = true) }
                             )
                         }
@@ -1319,8 +1320,8 @@ fun ClonerAppScreen() {
                     OutlinedTextField(
                         value = query,
                         onValueChange = { query = it },
-                        placeholder = { Text("অ্যাপ খুঁজুন") },
-                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                        placeholder = { Text("Search", fontSize = 15.sp, color = Color(0xFF9E9E9E)) },
+                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, tint = Color(0xFF9E9E9E)) },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                         singleLine = true,
                         shape = RoundedCornerShape(16.dp),
@@ -1338,7 +1339,7 @@ fun ClonerAppScreen() {
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            "সতর্কতা: ভার্চুয়ালাইজেশন ইঞ্জিন যুক্ত নেই, তাই ক্লোন কাজ করবে না।",
+                            "Warning: virtualization engine not included, so clones won't work.",
                             modifier = Modifier.padding(12.dp),
                             fontSize = 13.sp
                         )
@@ -1351,7 +1352,7 @@ fun ClonerAppScreen() {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = { query = ""; tab = 1 }) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "ফিরুন", tint = Color.Black)
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = Color.Black)
                     }
                     Text(
                         "CloneMe",
@@ -1365,15 +1366,18 @@ fun ClonerAppScreen() {
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
                             checkedTrackColor = AccentBlue,
-                            checkedBorderColor = Color.Transparent
+                            checkedBorderColor = Color.Transparent,
+                            uncheckedThumbColor = Color.White,
+                            uncheckedTrackColor = Color(0xFFE0E0E0),
+                            uncheckedBorderColor = Color.Transparent
                         )
                     )
                 }
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    placeholder = { Text("অ্যাপ খুঁজুন") },
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    placeholder = { Text("Search", fontSize = 15.sp, color = Color(0xFF9E9E9E)) },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, tint = Color(0xFF9E9E9E)) },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                     singleLine = true,
                     shape = RoundedCornerShape(16.dp),
@@ -1389,50 +1393,56 @@ fun ClonerAppScreen() {
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(color = BrandBlue)
-                        Text("অ্যাপের তালিকা লোড হচ্ছে…", modifier = Modifier.padding(top = 12.dp))
+                        Text("Loading apps…", modifier = Modifier.padding(top = 12.dp))
                     }
                 }
             } else if (tab == 0) {
                 // v1.0.100: শুধু চলবে এমন অ্যাপ দেখাও — ব্যর্থ/অসমর্থিত
                 // অ্যাপ লুকিয়ে রাখো (উপরের টগলে দেখানো যায়)।
-                val filtered = apps.filter {
-                    (query.isBlank() || it.label.contains(query, ignoreCase = true) ||
-                        it.pkg.contains(query, ignoreCase = true)) &&
-                    (showHidden || (!it.isSystemOnly && it.pkg !in failedPkgs && !isUnsupportedPackage(it.pkg) && !isGmsSystemPackage(it.pkg)))
+                val filtered = remember(apps, query, showHidden, failedPkgs) {
+                    apps.filter {
+                        (query.isBlank() || it.label.contains(query, ignoreCase = true) ||
+                            it.pkg.contains(query, ignoreCase = true)) &&
+                        (showHidden || (!it.isSystemOnly && it.pkg !in failedPkgs && !isUnsupportedPackage(it.pkg) && !isGmsSystemPackage(it.pkg)))
+                    }
                 }
                 // v1.0.100: স্ক্রিনশটের মতো HOT সেকশন — জনপ্রিয় অ্যাপ আগে।
-                val hotPkgs = listOf(
-                    "com.facebook.katana", "com.facebook.orca", "com.android.chrome",
-                    "com.zhiliaoapp.musically", "com.whatsapp", "org.telegram.messenger",
-                    "com.brave.browser", "com.google.android.gm", "com.lemon.lvovideoeditor",
-                    "com.google.android.apps.photos", "com.google.android.apps.maps",
-                    "com.google.android.apps.docs"
-                )
-                val hotApps = hotPkgs.mapNotNull { p -> filtered.find { it.pkg == p } }.take(12)
-                val restApps = filtered.filter { it !in hotApps }
-                val sections = restApps.groupBy { app ->
-                    val c = app.label.firstOrNull()?.uppercaseChar() ?: '#'
-                    if (c in 'A'..'Z') c else '#'
-                }.entries.sortedWith(compareBy({ if (it.key == '#') 1 else 0 }, { it.key }))
-                val selectedApps = apps.filter { it.pkg in selectedPkgs }
+                // HOT অ্যাপগুলো নিচের অক্ষর-সেকশনেও থাকবে (Multiple App-এর মতো — দুই জায়গায়)।
+                val hotApps = remember(filtered) {
+                    val hotPkgs = listOf(
+                        "com.facebook.katana", "com.facebook.orca", "com.android.chrome",
+                        "com.zhiliaoapp.musically", "com.whatsapp", "org.telegram.messenger",
+                        "com.brave.browser", "com.google.android.gm", "com.lemon.lvovideoeditor",
+                        "com.google.android.apps.photos", "com.google.android.apps.maps",
+                        "com.google.android.apps.docs"
+                    )
+                    hotPkgs.mapNotNull { p -> filtered.find { it.pkg == p } }.take(12)
+                }
+                val sections = remember(filtered) {
+                    filtered.groupBy { app ->
+                        val c = app.label.firstOrNull()?.uppercaseChar() ?: '#'
+                        if (c in 'A'..'Z') c else '#'
+                    }.entries.sortedWith(compareBy({ if (it.key == '#') 1 else 0 }, { it.key }))
+                }
+                val selectedApps = remember(apps, selectedPkgs) { apps.filter { it.pkg in selectedPkgs } }
                 if (filtered.isEmpty()) {
-                    EmptyHint("কোনো অ্যাপ পাওয়া যায়নি", Modifier.weight(1f))
+                    EmptyHint("No apps found", Modifier.weight(1f))
                 } else {
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(4),
                         modifier = Modifier.weight(1f).padding(vertical = 4.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         if (hotApps.isNotEmpty()) {
                             item(span = { GridItemSpan(maxLineSpan) }) {
                                 Text(
                                     "HOT",
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
+                                    fontSize = 15.sp,
                                     color = Color.Black,
-                                    modifier = Modifier.padding(top = 8.dp)
+                                    modifier = Modifier.padding(top = 6.dp)
                                 )
                             }
                             items(hotApps.size, key = { hotApps[it].pkg }) { idx ->
@@ -1452,9 +1462,9 @@ fun ClonerAppScreen() {
                                 Text(
                                     letter.toString(),
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
+                                    fontSize = 15.sp,
                                     color = Color.Black,
-                                    modifier = Modifier.padding(top = 8.dp)
+                                    modifier = Modifier.padding(top = 6.dp)
                                 )
                             }
                             items(sectionApps.size, key = { sectionApps[it].pkg }) { idx ->
@@ -1474,7 +1484,7 @@ fun ClonerAppScreen() {
                 // নিচে স্থায়ী "ক্লোন করো" বোতাম (স্ক্রিনশটের Clone Apps-এর মতো)।
                 Button(
                     onClick = {
-                        if (selectedApps.isEmpty()) toast("ক্লোন করতে অ্যাপ বাছুন")
+                        if (selectedApps.isEmpty()) toast("Select apps to clone")
                         else doCloneSelected(selectedApps)
                     },
                     enabled = busyClone == null,
@@ -1483,8 +1493,8 @@ fun ClonerAppScreen() {
                     colors = ButtonDefaults.buttonColors(containerColor = AccentBlue)
                 ) {
                     Text(
-                        if (selectedApps.isEmpty()) "ক্লোন করো"
-                        else "ক্লোন করো (${selectedApps.size}টি)",
+                        if (selectedApps.isEmpty()) "Clone Apps"
+                        else "Clone Apps (${selectedApps.size})",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -1493,27 +1503,31 @@ fun ClonerAppScreen() {
                 // v1.0.100: Multiple App-এর মতো ক্লোন হোম — অ্যাপ অনুযায়ী
                 // গ্রুপ, ৪ কলামের গ্রিড; চাপলে চালু, চেপে ধরলে মেনু,
                 // এডিট মোডে (পেন্সিল) চাপলে মোছার ডায়ালগ।
-                val shownClones = clones.filter { clone ->
-                    if (query.isBlank()) true else {
-                        val a = apps.find { it.pkg == clone.pkg }
-                        a != null && (a.label.contains(query, ignoreCase = true) ||
-                            a.pkg.contains(query, ignoreCase = true))
-                    }
-                }.sortedWith(compareBy({ it.pkg }, { it.userId }))
+                val shownClones = remember(clones, apps, query) {
+                    clones.filter { clone ->
+                        if (query.isBlank()) true else {
+                            val a = apps.find { it.pkg == clone.pkg }
+                            a != null && (a.label.contains(query, ignoreCase = true) ||
+                                a.pkg.contains(query, ignoreCase = true))
+                        }
+                    }.sortedWith(compareBy({ it.pkg }, { it.userId }))
+                }
                 if (clones.isEmpty()) {
-                    EmptyHint("এখনো কোনো ক্লোন নেই।\nনিচের + বোতামে চাপ দিয়ে ক্লোন করুন।", Modifier.weight(1f))
+                    EmptyHint("No clones yet.\nTap the + button below to clone.", Modifier.weight(1f))
                 } else if (shownClones.isEmpty()) {
-                    EmptyHint("কোনো ক্লোন পাওয়া যায়নি", Modifier.weight(1f))
+                    EmptyHint("No clones found", Modifier.weight(1f))
                 } else {
-                    val groups = shownClones.groupBy { it.pkg }.entries.sortedBy { entry ->
-                        apps.find { it.pkg == entry.key }?.label?.lowercase() ?: entry.key
+                    val groups = remember(shownClones, apps) {
+                        shownClones.groupBy { it.pkg }.entries.sortedBy { entry ->
+                            apps.find { it.pkg == entry.key }?.label?.lowercase() ?: entry.key
+                        }
                     }
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(4),
                         modifier = Modifier.weight(1f).padding(vertical = 4.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         for ((pkg, groupClones) in groups) {
                             val app = apps.find { it.pkg == pkg } ?: continue
@@ -1521,8 +1535,8 @@ fun ClonerAppScreen() {
                                 Text(
                                     app.label,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
-                                    modifier = Modifier.padding(top = 8.dp)
+                                    fontSize = 15.sp,
+                                    modifier = Modifier.padding(top = 6.dp)
                                 )
                             }
                             items(groupClones.size, key = { groupClones[it].toString() }) { idx ->
@@ -1543,7 +1557,8 @@ fun ClonerAppScreen() {
                                     DropdownMenu(
                                         expanded = pendingMenu == clone,
                                         onDismissRequest = { pendingMenu = null },
-                                        modifier = Modifier.background(Color(0xFF6B6A70), RoundedCornerShape(16.dp))
+                                        shape = RoundedCornerShape(16.dp),
+                                        containerColor = Color(0xFF6B6A70)
                                     ) {
                                         Row(
                                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -1558,25 +1573,25 @@ fun ClonerAppScreen() {
                                             Text(title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                                         }
                                         HorizontalDivider(color = Color.White.copy(alpha = 0.25f))
-                                        DarkMenuItem("মুছুন", Icons.Filled.Delete) {
+                                        DarkMenuItem("Delete", Icons.Filled.Delete) {
                                             pendingMenu = null; pendingDelete = clone
                                         }
-                                        DarkMenuItem("জোর করে বন্ধ করুন", Icons.Filled.Warning) {
+                                        DarkMenuItem("Force stop", Icons.Filled.Warning) {
                                             pendingMenu = null; doForceStop(clone)
                                         }
-                                        DarkMenuItem("শর্টকাট বানান", Icons.Filled.Share) {
+                                        DarkMenuItem("Create shortcut", Icons.Filled.Share) {
                                             pendingMenu = null; pendingShortcut = clone
                                         }
-                                        DarkMenuItem("নাম বদলান", Icons.Filled.Edit) {
+                                        DarkMenuItem("Edit Name/Icon", Icons.Filled.Edit) {
                                             pendingMenu = null; renameText = title; pendingRename = clone
                                         }
-                                        DarkMenuItem("ডেটা মুছুন", Icons.Filled.Delete) {
+                                        DarkMenuItem("Clear data", Icons.Filled.Delete) {
                                             pendingMenu = null; pendingClearData = clone
                                         }
-                                        DarkMenuItem("ক্যাশ মুছুন", Icons.Filled.Delete) {
+                                        DarkMenuItem("Clear cache", Icons.Filled.Delete) {
                                             pendingMenu = null; doClearCache(clone)
                                         }
-                                        DarkMenuItem("আরও ক্লোন করুন", Icons.Filled.Add) {
+                                        DarkMenuItem("Clone apps", Icons.Filled.Add) {
                                             pendingMenu = null; doClone(app)
                                         }
                                     }
@@ -1595,16 +1610,16 @@ fun ClonerAppScreen() {
             val delTitle = if (delApp != null) displayTitle(delClone, delApp) else delClone.pkg
             AlertDialog(
                 onDismissRequest = { pendingDelete = null },
-                title = { Text("$delTitle মুছবেন?") },
-                text = { Text("এই ক্লোনটি মুছে ফেলা হবে। এর সব ডেটা মুছে যাবে এবং ফেরানো যাবে না।") },
+                title = { Text("Delete $delTitle?") },
+                text = { Text("This clone will be deleted. All its data will be erased and cannot be recovered.") },
                 confirmButton = {
                     TextButton(onClick = {
                         pendingDelete = null
                         doDelete(delClone)
-                    }) { Text("মুছুন") }
+                    }) { Text("Delete") }
                 },
                 dismissButton = {
-                    TextButton(onClick = { pendingDelete = null }) { Text("বাতিল") }
+                    TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
                 }
             )
         }
@@ -1616,18 +1631,18 @@ fun ClonerAppScreen() {
             AlertDialog(
                 onDismissRequest = { pendingShortcut = null },
                 title = { Text(scTitle) },
-                text = { Text("হোম স্ক্রিনে এই ক্লোনের শর্টকাট যোগ করবেন?") },
+                text = { Text("Add a shortcut for this clone to the home screen?") },
                 confirmButton = {
                     TextButton(onClick = {
                         pendingShortcut = null
                         if (scApp != null) {
                             (ctx as? MainActivity)?.pinCloneShortcut(scClone, scApp, scTitle)
-                                ?: toast("শর্টকাট যোগ করা যায়নি")
+                                ?: toast("Couldn't add shortcut")
                         }
-                    }) { Text("শর্টকাট যোগ করুন") }
+                    }) { Text("Add Shortcut") }
                 },
                 dismissButton = {
-                    TextButton(onClick = { pendingShortcut = null }) { Text("বাতিল") }
+                    TextButton(onClick = { pendingShortcut = null }) { Text("Cancel") }
                 }
             )
         }
@@ -1636,7 +1651,7 @@ fun ClonerAppScreen() {
         if (rnClone != null) {
             AlertDialog(
                 onDismissRequest = { pendingRename = null },
-                title = { Text("নাম বদলান") },
+                title = { Text("Edit Name") },
                 text = {
                     OutlinedTextField(
                         value = renameText,
@@ -1655,7 +1670,7 @@ fun ClonerAppScreen() {
                             scope.launch(Dispatchers.IO) { saveCustomLabels(ctx, updated) }
                         }
                         pendingRename = null
-                    }) { Text("সংরক্ষণ করুন") }
+                    }) { Text("Save") }
                 },
                 dismissButton = {
                     Row {
@@ -1666,9 +1681,9 @@ fun ClonerAppScreen() {
                                 customLabels = updated
                                 scope.launch(Dispatchers.IO) { saveCustomLabels(ctx, updated) }
                                 pendingRename = null
-                            }) { Text("আগের নাম") }
+                            }) { Text("Original name") }
                         }
-                        TextButton(onClick = { pendingRename = null }) { Text("বাতিল") }
+                        TextButton(onClick = { pendingRename = null }) { Text("Cancel") }
                     }
                 }
             )
@@ -1680,16 +1695,16 @@ fun ClonerAppScreen() {
             val cdTitle = if (cdApp != null) displayTitle(cdClone, cdApp) else cdClone.pkg
             AlertDialog(
                 onDismissRequest = { pendingClearData = null },
-                title = { Text("$cdTitle-এর ডেটা মুছবেন?") },
-                text = { Text("এই ক্লোনের সব ডেটা (লগইনসহ) মুছে যাবে। ক্লোনটি নতুনের মতো হয়ে যাবে।") },
+                title = { Text("Clear data for $cdTitle?") },
+                text = { Text("All data for this clone (including login) will be erased. The clone will be like new.") },
                 confirmButton = {
                     TextButton(onClick = {
                         pendingClearData = null
                         doClearData(cdClone)
-                    }) { Text("মুছুন") }
+                    }) { Text("Clear data") }
                 },
                 dismissButton = {
-                    TextButton(onClick = { pendingClearData = null }) { Text("বাতিল") }
+                    TextButton(onClick = { pendingClearData = null }) { Text("Cancel") }
                 }
             )
         }
@@ -1702,7 +1717,7 @@ fun ClonerAppScreen() {
                 ) {
                     Column(Modifier.padding(16.dp)) {
                         Text(
-                            "🔍 স্মার্ট রিপোর্ট",
+                            "Smart Report",
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
                         )
@@ -1719,9 +1734,9 @@ fun ClonerAppScreen() {
                             TextButton(onClick = {
                                 val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                 cm.setPrimaryClip(ClipData.newPlainText("report", report))
-                                toast("রিপোর্ট কপি হয়েছে")
-                            }) { Text("কপি করুন") }
-                            TextButton(onClick = { reportText = null }) { Text("বন্ধ করুন") }
+                                toast("Report copied")
+                            }) { Text("Copy") }
+                            TextButton(onClick = { reportText = null }) { Text("Close") }
                         }
                     }
                 }
@@ -1736,7 +1751,7 @@ fun ClonerAppScreen() {
                 ) {
                     Column(Modifier.padding(16.dp)) {
                         Text(
-                            "📜 স্টার্টআপ ট্রেস",
+                            "Startup Trace",
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
                         )
@@ -1753,9 +1768,9 @@ fun ClonerAppScreen() {
                             TextButton(onClick = {
                                 val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                 cm.setPrimaryClip(ClipData.newPlainText("trace", trace))
-                                toast("ট্রেস কপি হয়েছে")
-                            }) { Text("কপি করুন") }
-                            TextButton(onClick = { traceText = null }) { Text("বন্ধ করুন") }
+                                toast("Trace copied")
+                            }) { Text("Copy") }
+                            TextButton(onClick = { traceText = null }) { Text("Close") }
                         }
                     }
                 }
@@ -1770,7 +1785,7 @@ fun ClonerAppScreen() {
                 ) {
                     Column(Modifier.padding(16.dp)) {
                         Text(
-                            "🔍 সব অ্যাপ চেকআপ",
+                            "Check All Apps",
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
                         )
@@ -1791,9 +1806,9 @@ fun ClonerAppScreen() {
                         }
                         Row {
                             if (checkupRunning) {
-                                TextButton(onClick = { checkupStop = true }) { Text("থামান") }
+                                TextButton(onClick = { checkupStop = true }) { Text("Stop") }
                             }
-                            TextButton(onClick = { checkupDialogOpen = false }) { Text("বন্ধ করুন") }
+                            TextButton(onClick = { checkupDialogOpen = false }) { Text("Close") }
                         }
                     }
                 }
@@ -1909,9 +1924,9 @@ fun AppGridItem(
     // নিচে নাম, কোণায় টিক-বাক্স। চাপলে টিক ওঠে/নামে।
     Card(
         modifier = Modifier.clickable(onClick = onToggle),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         // টিক-বাক্স কার্ডের কোণায় (স্ক্রিনশটের মতো), আইকনের উপরে নয়।
         Box {
@@ -1936,19 +1951,19 @@ fun AppGridItem(
                 Spacer(Modifier.height(4.dp))
                 Text(
                     app.label,
-                    fontSize = 11.sp,
-                    lineHeight = 13.sp,
+                    fontSize = 12.sp,
+                    lineHeight = 14.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
-                    color = Color(0xFF757575)
+                    color = Color(0xFF616161)
                 )
             }
             Box(
                 modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)
-                    .size(20.dp)
-                    .background(if (selected) AccentBlue else Color.White, RoundedCornerShape(6.dp))
-                    .border(1.5.dp, if (selected) AccentBlue else Color(0xFFBDBDBD), RoundedCornerShape(6.dp)),
+                    .size(18.dp)
+                    .background(if (selected) AccentBlue else Color.White, RoundedCornerShape(5.dp))
+                    .border(1.5.dp, if (selected) AccentBlue else Color(0xFFD0D0D0), RoundedCornerShape(5.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 if (selected) {
@@ -1986,9 +2001,9 @@ fun CloneGridItem(
             onClick = onClick,
             onLongClick = onLongClick
         ),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -2021,12 +2036,12 @@ fun CloneGridItem(
             Spacer(Modifier.height(4.dp))
             Text(
                 title,
-                fontSize = 11.sp,
-                lineHeight = 13.sp,
+                fontSize = 12.sp,
+                lineHeight = 14.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
-                color = Color(0xFF757575)
+                color = Color(0xFF616161)
             )
         }
     }
