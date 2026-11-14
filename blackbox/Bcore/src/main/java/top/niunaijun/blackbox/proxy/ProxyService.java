@@ -16,6 +16,21 @@ import top.niunaijun.blackbox.utils.compat.BuildCompat;
 public class ProxyService extends Service {
     public static final String TAG = "StubService";
 
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        // v1.0.118: সব stub-কে foreground-এ তোলো — শুধু Chrome/Brave-এর
+        // ProcessService নয়। v1.0.117-এর সিস্টেম রেকর্ড দেখিয়েছে: stub
+        // মৃত্যুর ৮/১০টি LOW_MEMORY, importance=400 (cached) — সিস্টেম
+        // stub-গুলোকে "পেছনের/অপ্রয়োজনীয়" ভেবে মেমরির চাপে ছাঁটাই
+        // করছিল। প্রতিটি stub foreground হলে সিস্টেম আগে অন্য অ্যাপের
+        // cached প্রসেস ছাঁটবে। একই নোটিফিকেশন আইডি — শেডে একটাই দেখাবে।
+        try {
+            showNotification(getClass().getSimpleName());
+        } catch (Throwable ignored) {
+        }
+    }
+
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
@@ -96,8 +111,8 @@ public class ProxyService extends Service {
                 if (hostCtx != null) icon = hostCtx.getApplicationInfo().icon;
             } catch (Throwable ignored) { }
             NotificationCompat.Builder builder = new NotificationCompat.Builder(getApplicationContext(), "cloneme_keepalive")
-                    .setContentTitle("CloneMe — Chrome চলছে")
-                    .setContentText("ক্লোন Chrome-এর renderer সক্রিয় রাখা হয়েছে")
+                    .setContentTitle("CloneMe — ক্লোন চলছে")
+                    .setContentText("ক্লোনের প্রসেস সক্রিয় রাখা হয়েছে")
                     .setSmallIcon(icon)
                     .setOngoing(true)
                     .setPriority(NotificationCompat.PRIORITY_MIN);
