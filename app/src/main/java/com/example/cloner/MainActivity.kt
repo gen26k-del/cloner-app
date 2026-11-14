@@ -640,7 +640,16 @@ fun ClonerAppScreen() {
         scope.launch(Dispatchers.IO) {
             val outFile = java.io.File(ctx.cacheDir, "death_watch.txt")
             val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+            // v1.0.114: আগের চালুর নমুনা মুছে ফেলো না — ফাইলের শেষ
+            // ৩০০ লাইন নিয়ে শুরু করো, যাতে পুরনো মৃত্যুর GONE লাইনও
+            // রিপোর্টে থাকে (v1.0.113-এর রিপোর্টে মৃত্যুর মুহূর্ত হারিয়েছিল)।
             val lines = StringBuilder()
+            runCatching {
+                if (outFile.exists()) {
+                    val old = outFile.readText().lines().takeLast(300)
+                    if (old.isNotEmpty()) lines.append(old.joinToString("\n") + "\n")
+                }
+            }
             lines.append("সময়: ${java.util.Date()}\n")
             var lastSeen = mapOf<Int, String>()
             var sawAny = false
@@ -689,10 +698,10 @@ fun ClonerAppScreen() {
                     val procs = current.entries.joinToString(" | ") { (pid, desc) -> "$pid:$desc" }
                     lines.append("$now memAvail=${memAvail}kB $procs\n")
                 }
-                runCatching { outFile.writeText(lines.toString().takeLast(6000)) }
+                runCatching { outFile.writeText(lines.toString().lines().takeLast(300).joinToString("\n")) }
                 kotlinx.coroutines.delay(2000)
             }
-            runCatching { outFile.writeText(lines.toString().takeLast(6000)) }
+            runCatching { outFile.writeText(lines.toString().lines().takeLast(300).joinToString("\n")) }
         }
     }
 
@@ -922,7 +931,13 @@ fun ClonerAppScreen() {
             sb.append("\n--- মৃত্যুর নজরদারি ---\n")
             val watchFile = java.io.File(ctx.cacheDir, "death_watch.txt")
             if (watchFile.exists()) {
-                sb.append(runCatching { watchFile.readText() }.getOrDefault("পড়া যায়নি").take(4000) + "\n")
+                // v1.0.114: GONE লাইন (মৃত্যুর মুহূর্তের শেষ মাপসহ) + শেষ
+                // নমুনাগুলো দেখাও — আগের take(4000) শুধু পুরনো অংশ দেখাতো।
+                val watchText = runCatching { watchFile.readText() }.getOrDefault("পড়া যায়নি")
+                val goneLines = watchText.lines().filter { it.contains("GONE") }.takeLast(5)
+                if (goneLines.isEmpty()) sb.append("GONE লাইন নেই — নজরদারির সময় কোনো প্রসেস উধাও হয়নি।\n")
+                else sb.append("GONE (মৃত্যু):\n" + goneLines.joinToString("\n") + "\n")
+                sb.append("--- শেষ নমুনা ---\n" + watchText.takeLast(1500) + "\n")
             } else {
                 sb.append("এখনো নজরদারি হয়নি — ক্লোন চালু করলে ১০ মিনিট ধরে নমুনা নেওয়া হয়।\n")
             }
