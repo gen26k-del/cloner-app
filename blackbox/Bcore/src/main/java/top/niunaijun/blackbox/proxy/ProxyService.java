@@ -101,7 +101,10 @@ public class ProxyService extends Service {
                     .setSmallIcon(icon)
                     .setOngoing(true)
                     .setPriority(NotificationCompat.PRIORITY_MIN);
-            startForeground(BlackBoxCore.getHostPkg().hashCode(), builder.build());
+            // v1.0.117: DaemonService ইতিমধ্যে hashCode() আইডি ব্যবহার
+            // করে ("BlackBox Core") — একই আইডি হলে দুই নোটিফিকেশন একই
+            // স্লটে লড়াই করে; +1 দিয়ে আলাদা স্লট নাও।
+            startForeground(BlackBoxCore.getHostPkg().hashCode() + 1, builder.build());
             BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
                     "v1.0.95 foreground promoted for " + serviceName);
         } catch (Throwable t) {
