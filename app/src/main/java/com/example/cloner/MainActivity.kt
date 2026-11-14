@@ -2005,7 +2005,7 @@ fun AppGridItem(
         Box {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth().padding(8.dp)
+                modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 12.dp, bottom = 10.dp)
             ) {
                 Box {
                     Image(
@@ -2021,7 +2021,7 @@ fun AppGridItem(
                         )
                     }
                 }
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(14.dp))
                 Text(
                     app.label,
                     fontSize = 12.sp,
@@ -2141,7 +2141,7 @@ fun CloneGridItem(
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxWidth().padding(8.dp)
+            modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 12.dp, bottom = 10.dp)
         ) {
             Box {
                 Image(
@@ -2167,7 +2167,7 @@ fun CloneGridItem(
                     )
                 }
             }
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(14.dp))
             Text(
                 title,
                 fontSize = 12.sp,
