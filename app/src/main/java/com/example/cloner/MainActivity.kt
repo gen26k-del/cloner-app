@@ -156,6 +156,17 @@ private val BrandCyan = Color(0xFF4FC3F7)
 private val BrandNavy = Color(0xFF0A1A3C)
 private val BrandDeepBlue = Color(0xFF14337A)
 
+// v1.0.117: ApplicationExitInfo.reason-এর নাম — death watcher (GONE-এর
+// মুহূর্তে) আর রিপোর্ট (দেরিতে) দুই জায়গায় একই ম্যাপিং।
+private fun exitReasonName(reason: Int): String = when (reason) {
+    0 -> "UNKNOWN"; 1 -> "EXIT_SELF"; 2 -> "SIGNALED"
+    3 -> "LOW_MEMORY"; 4 -> "CRASH"; 5 -> "ANR"
+    6 -> "INIT_FAILURE"; 7 -> "PERMISSION_CHANGE"
+    8 -> "EXCESSIVE_RESOURCE"; 9 -> "OTHER"
+    10 -> "USER_REQUESTED"; 11 -> "USER_STOPPED"
+    12 -> "DEPENDENCY_DIED"; else -> "REASON_$reason"
+}
+
 private val ClonerLightColors = lightColorScheme(
     primary = BrandBlue,
     onPrimary = Color.White,
@@ -600,7 +611,10 @@ fun ClonerAppScreen() {
         scope.launch(Dispatchers.IO) {
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE)
                 as android.app.NotificationManager
-            val wantId = ctx.packageName.hashCode()
+            // v1.0.117: প্রমোশন নোটিফিকেশন এখন hashCode()+1 আইডিতে —
+            // hashCode() স্লটটা BlackBox-এর DaemonService ("BlackBox Core")
+            // ব্যবহার করে, দুজনে এক স্লটে লড়াই করতো।
+            val wantId = ctx.packageName.hashCode() + 1
             var seen = false
             var firstSeenAt = ""
             val t0 = System.currentTimeMillis()
@@ -695,14 +709,7 @@ fun ClonerAppScreen() {
                                 val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
                                 val info = am.getHistoricalProcessExitReasons(ctx.packageName, pid, 3).firstOrNull()
                                 if (info != null) {
-                                    val reasonName = when (info.reason) {
-                                        0 -> "UNKNOWN"; 1 -> "EXIT_SELF"; 2 -> "SIGNALED"
-                                        3 -> "LOW_MEMORY"; 4 -> "CRASH"; 5 -> "ANR"
-                                        6 -> "INIT_FAILURE"; 7 -> "PERMISSION_CHANGE"
-                                        8 -> "EXCESSIVE_RESOURCE"; 9 -> "OTHER"
-                                        10 -> "USER_REQUESTED"; 11 -> "USER_STOPPED"
-                                        12 -> "DEPENDENCY_DIED"; else -> "REASON_${info.reason}"
-                                    }
+                                    val reasonName = exitReasonName(info.reason)
                                     lines.append("$now EXIT pid=$pid reason=$reasonName importance=${info.importance} rss=${info.rss}kB desc=${info.description}\n")
                                 } else {
                                     lines.append("$now EXIT pid=$pid no-exit-info\n")
@@ -963,6 +970,26 @@ fun ClonerAppScreen() {
                 sb.append("--- শেষ নমুনা ---\n" + watchText.takeLast(1500) + "\n")
             } else {
                 sb.append("এখনো নজরদারি হয়নি — ক্লোন চালু করলে ১০ মিনিট ধরে নমুনা নেওয়া হয়।\n")
+            }
+            // v1.0.117: সিস্টেমের মৃত্যুর রেকর্ড — রিপোর্ট বানানোর সময়
+            // (মৃত্যুর কয়েক মিনিট পরে) আবার জিজ্ঞেস করো। GONE-এর মুহূর্তে
+            // (v1.0.116) রেকর্ড খালি ছিল — হয় সিস্টেম দেরিতে লেখে, নয়
+            // রাখেই না; দেরিতে জিজ্ঞেস করলে দুটো আলাদা হবে।
+            sb.append("\n--- প্রসেস মৃত্যুর কারণ (সিস্টেম রেকর্ড) ---\n")
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                val exitInfos = runCatching {
+                    val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                    am.getHistoricalProcessExitReasons(ctx.packageName, 0, 10)
+                }.getOrDefault(emptyList<android.app.ApplicationExitInfo>())
+                if (exitInfos.isEmpty()) {
+                    sb.append("সিস্টেম কোনো মৃত্যুর রেকর্ড রাখেনি (খালি)।\n")
+                } else {
+                    for (info in exitInfos) {
+                        sb.append("${java.util.Date(info.timestamp)} pid=${info.pid} ${info.processName} reason=${exitReasonName(info.reason)} importance=${info.importance} rss=${info.rss}kB desc=${info.description}\n")
+                    }
+                }
+            } else {
+                sb.append("API 30-এর নিচে এই রেকর্ড পাওয়া যায় না।\n")
             }
             // ডায়াগনসিস মার্কার — Chromium renderer-এর মৃত্যু/ফিক্সের লাইন
             // (System linker, child process died, kept alive, RELRO) — ট্রেসের
