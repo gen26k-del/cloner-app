@@ -45,6 +45,28 @@ val GmsSystemPackages = setOf(
 fun isGmsSystemPackage(pkg: String): Boolean = pkg in GmsSystemPackages
 
 /**
+ * v1.0.97: চালু হলেও কাজ করে না — এমন অ্যাপ (hard limit)। চেকআপ এদের
+ * ধরতে পারে না, কারণ অ্যাক্টিভিটি ঠিকই চালু হয় — ব্যর্থতাটা সার্ভার/
+ * লগইন ধাপে। তাই তালিকা আর চেকআপ — দুই জায়গা থেকেই বাদ। ব্যবহারকারী
+ * চেয়েছে: শুধু চলবে এমন অ্যাপই দেখাবে, অতিরিক্ত কিছু থাকবে না।
+ * (প্যাকেজ নাম ফোনের রিপোর্ট/ট্রেস থেকে যাচাই করা; ChatGPT/YouTube-এর
+ * নাম দুটি অফিসিয়াল প্যাকেজ নাম — না মিললে শুধু কোনো প্রভাব পড়বে না।)
+ */
+val UnsupportedPackages = setOf(
+    "com.openai.chatgpt",          // ChatGPT: সবসময় "An error has occurred" (সার্ভার integrity check)
+    "com.google.android.youtube",  // YouTube অ্যাপ: "device not compatible" (ডিভাইস সার্টিফিকেশন)
+    "com.instagram.android",       // Instagram: লগইন পেজের পর আটকে যায়
+    "com.facebook.lite",           // Lite: onCreate-এ NPE, bind শেষ হয় না
+    "com.instagram.lite",          // Lite: একই NPE
+    "com.google.android.apps.tachyon", // Meet: bind-এর আগেই Firebase deadlock
+    "com.transsion.smartmessage",  // বিল্ট-ইন SMS: UID মেলে না (সিস্টেম অ্যাপ)
+    "com.google.android.setupwizard", // Setup Wizard: লঞ্চার অ্যাক্টিভিটি নেই
+    "com.android.settings"         // Settings: সিস্টেম অ্যাপ, ক্লোন করার মতো নয়
+)
+
+fun isUnsupportedPackage(pkg: String): Boolean = pkg in UnsupportedPackages
+
+/**
  * ভার্চুয়ালাইজেশন ইঞ্জিনের সংযোগস্থল।
  * আসল ইঞ্জিন (যেমন BlackBox-ভিত্তিক) যুক্ত করার পর
  * এই ইন্টারফেস ইমপ্লিমেন্ট করে Engine.current-এ বসাতে হবে।

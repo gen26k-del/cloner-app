@@ -89,6 +89,7 @@ data class AppInfo(val label: String, val pkg: String, val icon: ImageBitmap)
 private const val PREFS = "cloner_prefs"
 private const val KEY_CLONES = "clones"
 private const val KEY_CHECKUP_PASSED = "checkup_passed"
+private const val KEY_CHECKUP_FAILED = "checkup_failed"
 
 /** ব্র্যান্ড রঙ — CloneMe লোগোর সাথে মিলিয়ে */
 private val BrandBlue = Color(0xFF1B9BF5)
@@ -215,6 +216,17 @@ private fun savePassedPkgs(ctx: Context, passed: Set<String>) {
         .edit().putStringSet(KEY_CHECKUP_PASSED, passed).apply()
 }
 
+// v1.0.97: চেকআপে ব্যর্থ অ্যাপের প্যাকেজ নাম — এগুলো তালিকায় দেখানো
+// হবে না (শুধু চলবে এমন অ্যাপই দেখাবে)। পাস করলে তালিকা থেকে সরবে।
+private fun readFailedPkgs(ctx: Context): MutableSet<String> =
+    ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .getStringSet(KEY_CHECKUP_FAILED, emptySet())?.toMutableSet() ?: mutableSetOf()
+
+private fun saveFailedPkgs(ctx: Context, failed: Set<String>) {
+    ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .edit().putStringSet(KEY_CHECKUP_FAILED, failed).apply()
+}
+
 class MainActivity : ComponentActivity() {
 
     companion object {
@@ -282,6 +294,14 @@ fun ClonerAppScreen() {
     var batteryIgnored by remember { mutableStateOf(true) }
     val apps = remember { mutableStateListOf<AppInfo>() }
     val clones = remember { mutableStateListOf<CloneId>() }
+    // v1.0.97: চেকআপে ব্যর্থ অ্যাপ — তালিকায় দেখানো হবে না। লোড হয়
+    // LaunchedEffect(Unit)-এ, আপডেট হয় runFullCheckup-এ।
+    var failedPkgs by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // v1.0.97: লুকানো (ব্যর্থ/অসমর্থিত) অ্যাপগুলোও দেখানোর টগল — ডিফল্টে বন্ধ।
+    var showHidden by remember { mutableStateOf(false) }
+    // v1.0.97: শর্টকাট থেকে এলে অটো-চেকআপ চালাবে না — ক্লোনটাই চালু হবে।
+    // (প্রথম কম্পোজিশনে ধরা হয় — তখনো launchPkg খরচ হয়নি।)
+    val wasShortcutLaunch = remember { MainActivity.launchPkg != null }
 
     fun toast(msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
 
@@ -321,6 +341,8 @@ fun ClonerAppScreen() {
             .filter { !isGmsSystemPackage(it.pkg) }
         clones.addAll((parsed + engineClones).distinct())
         apps.addAll(loaded)
+        // v1.0.97: ব্যর্থ অ্যাপের তালিকা পড়ে নাও — এরা তালিকায় দেখাবে না
+        failedPkgs = withContext(Dispatchers.IO) { readFailedPkgs(ctx) }
         loading = false
     }
 
@@ -714,7 +736,16 @@ fun ClonerAppScreen() {
         } else {
             readPassedPkgs(ctx)
         }
-        val allTargets = apps.filter { !isGmsSystemPackage(it.pkg) }
+        // v1.0.97: ব্যর্থ তালিকাও পড়ে নাও; সব আবার চেক করলে মুছে ফেলো।
+        val failed = if (recheckAll) {
+            saveFailedPkgs(ctx, emptySet())
+            failedPkgs = emptySet()
+            mutableSetOf<String>()
+        } else {
+            readFailedPkgs(ctx)
+        }
+        // v1.0.97: hard-limit অ্যাপ চেকই কোরো না — ওরা চালু হয়েও কাজ করে না।
+        val allTargets = apps.filter { !isGmsSystemPackage(it.pkg) && !isUnsupportedPackage(it.pkg) }
         val skippedPassed = if (recheckAll) 0 else allTargets.count { it.pkg in passed }
         val targets = if (recheckAll) allTargets
         else allTargets.filter { it.pkg !in passed }
@@ -768,9 +799,13 @@ fun ClonerAppScreen() {
                 }
                 if (!cloned) {
                     val line = "❌ ${app.label}: ক্লোন হয়নি"
+                    // v1.0.97: ক্লোনই হয়নি — ব্যর্থ-তালিকায় রাখো, দেখাবে না।
+                    if (failed.add(pkg)) saveFailedPkgs(ctx, failed)
+                    if (passed.remove(pkg)) savePassedPkgs(ctx, passed)
                     appendCheckupLine(ctx, line)
                     withContext(Dispatchers.Main) {
                         checkupLines.add(line)
+                        failedPkgs = failed.toSet()
                     }
                     failCount++
                     continue
@@ -829,15 +864,21 @@ fun ClonerAppScreen() {
                     if (verdict.startsWith("✅")) okCount++
                     else if (!verdict.startsWith("⚠️")) failCount++
                 }
-                // পাস করা অ্যাপ মনে রাখো (পরের চেকআপে বাদ যাবে);
-                // ব্যর্থ হলে তালিকা থেকে সরাও, যাতে পরের বার আবার চেক হয়।
+                // v1.0.97: পাস করলে পাস-তালিকায় রাখো আর ব্যর্থ-তালিকা থেকে
+                // সরাও; ব্যর্থ (❌/⚠️) হলে ব্যর্থ-তালিকায় রাখো — তালিকায়
+                // আর দেখাবে না। ব্যর্থ অ্যাপ পরের চেকআপে আবার চেক হয়।
                 if (verdict.startsWith("✅")) {
                     if (passed.add(pkg)) savePassedPkgs(ctx, passed)
-                } else if (passed.remove(pkg)) {
-                    savePassedPkgs(ctx, passed)
+                    if (failed.remove(pkg)) saveFailedPkgs(ctx, failed)
+                } else {
+                    if (passed.remove(pkg)) savePassedPkgs(ctx, passed)
+                    if (failed.add(pkg)) saveFailedPkgs(ctx, failed)
                 }
                 appendCheckupLine(ctx, verdict)
-                withContext(Dispatchers.Main) { checkupLines.add(verdict) }
+                withContext(Dispatchers.Main) {
+                    checkupLines.add(verdict)
+                    failedPkgs = failed.toSet()
+                }
                 // এই অ্যাপের প্রসেস থামাও, পরেরটার জন্য পরিষ্কার রাখো
                 runCatching { BlackBoxCore.get().stopPackage(pkg, 0) }
             }
@@ -933,6 +974,28 @@ fun ClonerAppScreen() {
                 doLaunch(CloneId(lp, 0))
             }
         }
+    }
+
+    // v1.0.97: প্রথমবার চালু হলে স্বয়ংক্রিয় চেকআপ — ফোনের সব অ্যাপ
+    // যাচাই করে শুধু চলবে এমনগুলো তালিকায় রাখবে। (ব্যবহারকারীর অনুরোধ:
+    // "অটোমেটিক চেকআপ করে যেগুলো সাপোর্ট করবে সেইগুলোই শুধু দেখাবে।")
+    // আগের রায় থাকলে আর অটো-চালু হবে না — নতুন অ্যাপের জন্য হাতের
+    // "চেকআপ শুরু করো" বোতাম আছে (পাস করাগুলো বাদ দিয়ে শুধু নতুনগুলো চেক হয়)।
+    var autoCheckupDone by remember { mutableStateOf(false) }
+    LaunchedEffect(loading) {
+        if (loading || autoCheckupDone || wasShortcutLaunch) return@LaunchedEffect
+        autoCheckupDone = true
+        val hasVerdicts = withContext(Dispatchers.IO) {
+            readPassedPkgs(ctx).isNotEmpty() || readFailedPkgs(ctx).isNotEmpty()
+        }
+        if (hasVerdicts) return@LaunchedEffect
+        // ইঞ্জিন চালু হওয়া পর্যন্ত একটু অপেক্ষা করো
+        var waited = 0
+        while (!Engine.current.isReady() && waited < 15) {
+            kotlinx.coroutines.delay(1000)
+            waited++
+        }
+        if (Engine.current.isReady()) runFullCheckup()
     }
 
     Scaffold(containerColor = MaterialTheme.colorScheme.background) { pad ->
@@ -1284,9 +1347,30 @@ fun ClonerAppScreen() {
                     }
                 }
             } else if (tab == 0) {
+                // v1.0.97: শুধু চলবে এমন অ্যাপ দেখাও — ব্যর্থ/অসমর্থিত
+                // অ্যাপ লুকিয়ে রাখো (টগলে দেখানো যায়)।
+                val hiddenCount = apps.count {
+                    it.pkg in failedPkgs || isUnsupportedPackage(it.pkg) || isGmsSystemPackage(it.pkg)
+                }
                 val filtered = apps.filter {
-                    query.isBlank() || it.label.contains(query, ignoreCase = true) ||
-                        it.pkg.contains(query, ignoreCase = true)
+                    (query.isBlank() || it.label.contains(query, ignoreCase = true) ||
+                        it.pkg.contains(query, ignoreCase = true)) &&
+                    (showHidden || (it.pkg !in failedPkgs && !isUnsupportedPackage(it.pkg) && !isGmsSystemPackage(it.pkg)))
+                }
+                if (hiddenCount > 0) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "🚫 ${hiddenCount}টি অ্যাপ লুকানো আছে (চলে না)",
+                            fontSize = 12.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { showHidden = !showHidden }) {
+                            Text(if (showHidden) "লুকাও" else "দেখাও")
+                        }
+                    }
                 }
                 if (filtered.isEmpty()) {
                     EmptyHint("কোনো অ্যাপ পাওয়া যায়নি")
