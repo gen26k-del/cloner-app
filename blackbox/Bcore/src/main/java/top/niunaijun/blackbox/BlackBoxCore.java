@@ -1847,7 +1847,18 @@ public class BlackBoxCore extends ClientConfiguration {
                 // JNI রেজিস্ট্রেশন হয়ে গেছে। ব্যর্থ হলে চুপচাপ এগোও।
                 java.io.File cacheDir = sContext.getCacheDir();
                 if (cacheDir != null) {
-                    NativeCore.installExitTracer(new java.io.File(cacheDir, "exit_trace.txt").getAbsolutePath());
+                    java.io.File traceFile = new java.io.File(cacheDir, "exit_trace.txt");
+                    NativeCore.installExitTracer(traceFile.getAbsolutePath());
+                    // v1.0.121: ইনস্টল প্রমাণ — জাভা দিক থেকে লাইন লেখো
+                    // (hook_check.txt-এর ধাঁচে)। রিপোর্টে এই লাইন থাকলে
+                    // ট্রেসার বসেছে; NATIVE EXIT লাইন না থাকলে মৃত্যু
+                    // exit() এড়িয়ে যায় (_exit-ধরনের)।
+                    try {
+                        java.io.FileWriter w = new java.io.FileWriter(traceFile, true);
+                        w.write("TRACER INSTALLED (java) pid=" + android.os.Process.myPid() + "\n");
+                        w.close();
+                    } catch (Throwable ignored2) {
+                    }
                 }
             } catch (Throwable ignored) {
             }
