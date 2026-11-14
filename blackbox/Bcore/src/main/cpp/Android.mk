@@ -52,5 +52,5 @@ LOCAL_ARM_MODE := arm
 
 LOCAL_CPP_FEATURES := exceptions
 LOCAL_STATIC_LIBRARIES := libdobby xdl
-LOCAL_LDLIBS := -llog -landroid -lz
+LOCAL_LDLIBS := -llog -landroid -lz -ldl
 include $(BUILD_SHARED_LIBRARY)
