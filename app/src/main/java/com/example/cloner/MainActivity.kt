@@ -1447,7 +1447,7 @@ fun ClonerAppScreen() {
                                     modifier = Modifier.padding(top = 6.dp)
                                 )
                             }
-                            items(hotApps.size, key = { hotApps[it].pkg }) { idx ->
+                            items(hotApps.size, key = { "hot:" + hotApps[it].pkg }) { idx ->
                                 val app = hotApps[idx]
                                 AppGridItem(
                                     app = app,
@@ -1469,7 +1469,7 @@ fun ClonerAppScreen() {
                                     modifier = Modifier.padding(top = 6.dp)
                                 )
                             }
-                            items(sectionApps.size, key = { sectionApps[it].pkg }) { idx ->
+                            items(sectionApps.size, key = { letter.toString() + ":" + sectionApps[it].pkg }) { idx ->
                                 val app = sectionApps[idx]
                                 AppGridItem(
                                     app = app,
