@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -113,6 +114,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -392,6 +394,16 @@ fun ClonerAppScreen() {
     var pendingClearData by remember { mutableStateOf<CloneId?>(null) }
     var customLabels by remember { mutableStateOf<Map<CloneId, String>>(emptyMap()) }
     var checkupDialogOpen by remember { mutableStateOf(false) }
+
+    // v1.0.111: সিস্টেম ব্যাক বাটন — পিকার থেকে হোমে ফেরে, হোমে সার্চ/
+    // এডিট মোড বন্ধ করে; হোমে আর কিছু খোলা না থাকলে স্বাভাবিকভাবে বের হয়।
+    BackHandler(enabled = tab == 0 || homeSearch || editMode) {
+        when {
+            tab == 0 -> { query = ""; tab = 1 }
+            homeSearch -> { homeSearch = false; query = "" }
+            editMode -> editMode = false
+        }
+    }
 
     fun toast(msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
 
@@ -1547,7 +1559,7 @@ fun ClonerAppScreen() {
                 ) {
                     Text(
                         if (selectedApps.isEmpty()) "Clone Apps"
-                        else "Clone Apps (${selectedApps.size})",
+                        else "Clone (${selectedApps.size})",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -1998,40 +2010,44 @@ fun SearchField(value: String, onValueChange: (String) -> Unit, modifier: Modifi
 fun TileLabel(text: String) {
     // v1.0.109: Multiple App-এর মতো ".." দিয়ে ছাঁটা লেবেল — চওড়া মেপে
     // কাটে, আর হোম টাইলের " N" প্রত্যয় বাঁচিয়ে রাখে ("Facebo.. 2")।
+    // v1.0.111: BoxWithConstraints সরানো (প্রতি টাইলে আলাদা মাপ স্ক্রল
+    // আটকাতো) — চওড়া স্ক্রিনের মাপ থেকে একবার হিসাব; 4dp নিরাপত্তা
+    // ফাঁকা, যাতে ".." কখনো কাটা না পড়ে আর "Messenger" পুরো আঁটে।
     val density = LocalDensity.current
+    val screenW = LocalConfiguration.current.screenWidthDp
+    val maxW = remember(screenW) {
+        with(density) { ((screenW.dp - 48.dp) / 4 - 12.dp).toPx() }
+    }
     val paint = remember {
         android.graphics.Paint().apply {
             textSize = with(density) { 12.sp.toPx() }
             typeface = android.graphics.Typeface.DEFAULT
         }
     }
-    BoxWithConstraints(contentAlignment = Alignment.Center) {
-        val maxW = with(density) { maxWidth.toPx() }
-        val display = remember(text, maxW) {
-            val suffix = Regex(" \\d+$").find(text)?.value ?: ""
-            val name = text.removeSuffix(suffix)
-            if (paint.measureText(text) <= maxW) text
-            else {
-                val dotsW = paint.measureText("..")
-                val suffixW = paint.measureText(suffix)
-                var lo = 0
-                var hi = name.length
-                while (lo < hi) {
-                    val mid = (lo + hi + 1) / 2
-                    if (paint.measureText(name, 0, mid) + dotsW + suffixW <= maxW) lo = mid else hi = mid - 1
-                }
-                name.take(lo) + ".." + suffix
+    val display = remember(text, maxW) {
+        val suffix = Regex(" \\d+$").find(text)?.value ?: ""
+        val name = text.removeSuffix(suffix)
+        if (paint.measureText(text) <= maxW) text
+        else {
+            val dotsW = paint.measureText("..")
+            val suffixW = paint.measureText(suffix)
+            var lo = 0
+            var hi = name.length
+            while (lo < hi) {
+                val mid = (lo + hi + 1) / 2
+                if (paint.measureText(name, 0, mid) + dotsW + suffixW <= maxW) lo = mid else hi = mid - 1
             }
+            name.take(lo) + ".." + suffix
         }
-        Text(
-            display,
-            fontSize = 12.sp,
-            lineHeight = 14.sp,
-            maxLines = 1,
-            textAlign = TextAlign.Center,
-            color = Color(0xFF7A7A84)
-        )
     }
+    Text(
+        display,
+        fontSize = 12.sp,
+        lineHeight = 14.sp,
+        maxLines = 1,
+        textAlign = TextAlign.Center,
+        color = Color(0xFF7A7A84)
+    )
 }
 
 @Composable
@@ -2053,7 +2069,7 @@ fun AppGridItem(
         Box {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 12.dp, bottom = 10.dp)
+                modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 12.dp, bottom = 10.dp)
             ) {
                 Box {
                     Image(
@@ -2194,7 +2210,7 @@ fun CloneGridItem(
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 12.dp, bottom = 10.dp)
+            modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 12.dp, bottom = 10.dp)
         ) {
             Box {
                 Image(
