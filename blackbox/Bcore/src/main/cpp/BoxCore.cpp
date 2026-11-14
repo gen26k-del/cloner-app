@@ -170,7 +170,111 @@ static _Unwind_Reason_Code exitTraceUnwind(struct _Unwind_Context *context, void
     return state->count >= state->max ? _URC_END_OF_STACK : _URC_NO_REASON;
 }
 
-static void writeExitTrace(const char *label) {
+// v1.0.123: capture the JAVA stack of the thread calling exit/_exit.
+// The thread is inside a JNI call, so the VM is alive and JNI upcalls
+// are safe. Every step checks for failure and bails out quietly --
+// the process is exiting, so a failed capture must never crash it.
+// NOTE: getEnv() in this file returns garbage when the thread is
+// detached, so the JNIEnv is fetched here with the return checked.
+static void writeJavaStack(int fd) {
+    JNIEnv *env = NULL;
+    if (VMEnv.vm == NULL ||
+        VMEnv.vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) != JNI_OK ||
+        env == NULL) {
+        const char *msg = "(no JNIEnv: calling thread is not attached to the VM)\n";
+        ssize_t w = write(fd, msg, strlen(msg));
+        (void) w;
+        return;
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        const char *msg = "(a pending Java exception was cleared)\n";
+        ssize_t w = write(fd, msg, strlen(msg));
+        (void) w;
+    }
+    if (env->PushLocalFrame(64) != 0) {
+        const char *msg = "(PushLocalFrame failed)\n";
+        ssize_t w = write(fd, msg, strlen(msg));
+        (void) w;
+        return;
+    }
+    const char *head = "--- Java stack ---\n";
+    ssize_t w0 = write(fd, head, strlen(head));
+    (void) w0;
+    // Thread name.
+    jclass threadClass = env->FindClass("java/lang/Thread");
+    if (threadClass != NULL && !env->ExceptionCheck()) {
+        jmethodID currentThread = env->GetStaticMethodID(threadClass, "currentThread",
+                                                         "()Ljava/lang/Thread;");
+        jmethodID getName = env->GetMethodID(threadClass, "getName", "()Ljava/lang/String;");
+        if (currentThread != NULL && getName != NULL && !env->ExceptionCheck()) {
+            jobject thread = env->CallStaticObjectMethod(threadClass, currentThread);
+            if (thread != NULL && !env->ExceptionCheck()) {
+                auto nameObj = (jstring) env->CallObjectMethod(thread, getName);
+                if (nameObj != NULL && !env->ExceptionCheck()) {
+                    const char *name = env->GetStringUTFChars(nameObj, NULL);
+                    if (name != NULL) {
+                        char line[256];
+                        int len = snprintf(line, sizeof(line), "Thread: %s\n", name);
+                        if (len > 0) {
+                            ssize_t w = write(fd, line, (size_t) len);
+                            (void) w;
+                        }
+                        env->ReleaseStringUTFChars(nameObj, name);
+                    }
+                }
+            }
+        }
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    // new Throwable().getStackTrace()
+    jclass throwableClass = env->FindClass("java/lang/Throwable");
+    jmethodID ctor = NULL;
+    jmethodID getStackTrace = NULL;
+    if (throwableClass != NULL && !env->ExceptionCheck()) {
+        ctor = env->GetMethodID(throwableClass, "<init>", "()V");
+        getStackTrace = env->GetMethodID(throwableClass, "getStackTrace",
+                                         "()[Ljava/lang/StackTraceElement;");
+    }
+    if (throwableClass != NULL && ctor != NULL && getStackTrace != NULL &&
+        !env->ExceptionCheck()) {
+        jobject throwable = env->NewObject(throwableClass, ctor);
+        if (throwable != NULL && !env->ExceptionCheck()) {
+            auto traces = (jobjectArray) env->CallObjectMethod(throwable, getStackTrace);
+            if (traces != NULL && !env->ExceptionCheck()) {
+                jsize count = env->GetArrayLength(traces);
+                jclass elementClass = env->FindClass("java/lang/StackTraceElement");
+                jmethodID toString = NULL;
+                if (elementClass != NULL && !env->ExceptionCheck()) {
+                    toString = env->GetMethodID(elementClass, "toString",
+                                                "()Ljava/lang/String;");
+                }
+                for (jsize i = 0; i < count && toString != NULL; i++) {
+                    jobject element = env->GetObjectArrayElement(traces, i);
+                    if (element == NULL || env->ExceptionCheck()) break;
+                    auto text = (jstring) env->CallObjectMethod(element, toString);
+                    if (text == NULL || env->ExceptionCheck()) break;
+                    const char *chars = env->GetStringUTFChars(text, NULL);
+                    if (chars != NULL) {
+                        char line[512];
+                        int len = snprintf(line, sizeof(line), "  at %s\n", chars);
+                        if (len > 0) {
+                            ssize_t w = write(fd, line, (size_t) len);
+                            (void) w;
+                        }
+                        env->ReleaseStringUTFChars(text, chars);
+                    }
+                    env->DeleteLocalRef(element);
+                    env->DeleteLocalRef(text);
+                }
+            }
+        }
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->PopLocalFrame(NULL);
+}
+
+static void writeExitTrace(const char *label, int status) {
     if (gExitTracePath[0] == '\0') return;
     int fd = open(gExitTracePath, O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (fd < 0) return;
@@ -183,8 +287,8 @@ static void writeExitTrace(const char *label) {
     }
     char header[1024];
     int len = snprintf(header, sizeof(header),
-                       "=== %s pid=%d time=%ld cmdline=%s ===\n",
-                       label, (int) getpid(), (long) time(NULL), cmdline);
+                       "=== %s pid=%d status=%d time=%ld cmdline=%s ===\n",
+                       label, (int) getpid(), status, (long) time(NULL), cmdline);
     if (len > 0) {
         ssize_t w = write(fd, header, (size_t) len);
         (void) w;
@@ -217,6 +321,7 @@ static void writeExitTrace(const char *label) {
             (void) w;
         }
     }
+    writeJavaStack(fd);
     const char *tail = "=== END EXIT TRACE ===\n";
     ssize_t w2 = write(fd, tail, strlen(tail));
     (void) w2;
@@ -224,7 +329,7 @@ static void writeExitTrace(const char *label) {
 }
 
 static void exitTraceHandler() {
-    writeExitTrace("atexit");
+    writeExitTrace("atexit", -1);
 }
 
 typedef void (*ExitFunc)(int);
@@ -233,17 +338,17 @@ static ExitFunc orig_underscore_exit = NULL;
 static ExitFunc orig_capital_exit = NULL;
 
 static void exitHook(int status) {
-    writeExitTrace("exit-hook");
+    writeExitTrace("exit-hook", status);
     if (orig_exit != NULL) orig_exit(status);
 }
 
 static void underscoreExitHook(int status) {
-    writeExitTrace("_exit-hook");
+    writeExitTrace("_exit-hook", status);
     if (orig_underscore_exit != NULL) orig_underscore_exit(status);
 }
 
 static void capitalExitHook(int status) {
-    writeExitTrace("_Exit-hook");
+    writeExitTrace("_Exit-hook", status);
     if (orig_capital_exit != NULL) orig_capital_exit(status);
 }
 
