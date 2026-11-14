@@ -147,6 +147,20 @@ class ClonerApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // v1.0.115: শাটডাউন হুক — প্রসেস নিজে থেকে clean exit (System.exit)
+        // করলে এই লাইন ট্রেসে পড়বে; SIGKILL-এ পড়বে না। এতে বোঝা যাবে
+        // renderer নিজে মরছে নাকি বাইরে থেকে মারা হচ্ছে।
+        try {
+            Runtime.getRuntime().addShutdownHook(Thread {
+                try {
+                    val proc = java.io.File("/proc/self/cmdline").readText()
+                        .replace(" ", " ").trim()
+                    java.io.File(cacheDir, "init_trace.txt").appendText(
+                        "${java.util.Date()} [$proc] SHUTDOWN HOOK FIRED — clean VM exit, not SIGKILL\n"
+                    )
+                } catch (_: Exception) { }
+            })
+        } catch (_: Exception) { }
         // Crash রিপোর্টার: virtual অ্যাপ crash করলে stack trace ফাইলে রেখে দেয়,
         // যাতে UI থেকে দেখে কারণ বোঝা যায়। (প্রসেস অনুযায়ী আলাদা ফাইল)
         val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
