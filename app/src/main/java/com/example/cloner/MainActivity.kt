@@ -97,6 +97,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -366,6 +367,15 @@ class MainActivity : ComponentActivity() {
         sm.requestPinShortcut(info, null)
     }
 }
+
+// v1.0.114: HOT তালিকা একবারই বানানো হয় (আগে প্রতি কম্পোজিশনে নতুন লিস্ট হতো)।
+private val HotPkgs = listOf(
+    "com.facebook.katana", "com.facebook.orca", "com.android.chrome",
+    "com.zhiliaoapp.musically", "com.whatsapp", "org.telegram.messenger",
+    "com.brave.browser", "com.google.android.gm", "com.lemon.lvovideoeditor",
+    "com.google.android.apps.photos", "com.google.android.apps.maps",
+    "com.google.android.apps.docs"
+)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -1472,8 +1482,10 @@ fun ClonerAppScreen() {
                         modifier = Modifier.weight(1f)
                     )
                     // v1.0.109: Multiple App-এর মতো ছোট টগল (মাপা 54x40px; M3 Switch অনেক বড়)।
-                    // v1.0.113: Multiple App-এর মতো "All" পিল (মাপা 32x18dp) —
+                    // v1.0.113: Multiple App-এর মতো "All" পিল —
                     // চালু হলে নীল হয় + "All" লেখা ওঠে, গুটি স্লাইড হয়ে সরে।
+                    // v1.0.114: 36dp চওড়া + 9sp লেখা — 32dp-তে শেষের "l"
+                    // গুটির নিচে ঢাকা পড়তো (স্ক্রিনশটে মাপা), এখন পুরো "All" দেখায়।
                     val pillColor by animateColorAsState(
                         targetValue = if (showHidden) AccentBlue else Color(0xFFE0E0E0),
                         animationSpec = tween(durationMillis = 200)
@@ -1483,11 +1495,11 @@ fun ClonerAppScreen() {
                         animationSpec = tween(durationMillis = 200)
                     )
                     val thumbX by animateDpAsState(
-                        targetValue = if (showHidden) 16.dp else 2.dp,
+                        targetValue = if (showHidden) 20.dp else 2.dp,
                         animationSpec = tween(durationMillis = 200)
                     )
                     Box(
-                        modifier = Modifier.size(width = 32.dp, height = 18.dp)
+                        modifier = Modifier.size(width = 36.dp, height = 18.dp)
                             .background(pillColor, RoundedCornerShape(9.dp))
                             .clickable { showHidden = !showHidden },
                         contentAlignment = Alignment.CenterStart
@@ -1495,7 +1507,7 @@ fun ClonerAppScreen() {
                         Text(
                             "All",
                             color = Color.White.copy(alpha = labelAlpha),
-                            fontSize = 10.sp,
+                            fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(start = 5.dp)
                         )
@@ -1517,26 +1529,31 @@ fun ClonerAppScreen() {
             } else if (t == 0) {
                 // v1.0.100: শুধু চলবে এমন অ্যাপ দেখাও — ব্যর্থ/অসমর্থিত
                 // অ্যাপ লুকিয়ে রাখো (উপরের টগলে দেখানো যায়)।
-                val filtered = apps.filter {
-                    (query.isBlank() || it.label.contains(query, ignoreCase = true) ||
-                        it.pkg.contains(query, ignoreCase = true)) &&
-                    (showHidden || (!it.isSystemOnly && it.pkg !in failedPkgs && !isUnsupportedPackage(it.pkg) && !isGmsSystemPackage(it.pkg)))
+                // v1.0.114: লিস্ট হিসাবগুলো derivedStateOf-এ — নির্ভরশীল
+                // স্টেট না বদলালে আবার হিসাব হয় না, স্ক্রল/ট্যাপ মসৃণ থাকে।
+                val filtered by remember {
+                    derivedStateOf {
+                        apps.filter {
+                            (query.isBlank() || it.label.contains(query, ignoreCase = true) ||
+                                it.pkg.contains(query, ignoreCase = true)) &&
+                            (showHidden || (!it.isSystemOnly && it.pkg !in failedPkgs && !isUnsupportedPackage(it.pkg) && !isGmsSystemPackage(it.pkg)))
+                        }
+                    }
                 }
                 // v1.0.100: স্ক্রিনশটের মতো HOT সেকশন — জনপ্রিয় অ্যাপ আগে।
                 // HOT অ্যাপগুলো নিচের অক্ষর-সেকশনেও থাকবে (Multiple App-এর মতো — দুই জায়গায়)।
-                val hotPkgs = listOf(
-                    "com.facebook.katana", "com.facebook.orca", "com.android.chrome",
-                    "com.zhiliaoapp.musically", "com.whatsapp", "org.telegram.messenger",
-                    "com.brave.browser", "com.google.android.gm", "com.lemon.lvovideoeditor",
-                    "com.google.android.apps.photos", "com.google.android.apps.maps",
-                    "com.google.android.apps.docs"
-                )
-                val hotApps = hotPkgs.mapNotNull { p -> filtered.find { it.pkg == p } }.take(12)
-                val sections = filtered.groupBy { app ->
-                    val c = app.label.firstOrNull()?.uppercaseChar() ?: '#'
-                    if (c in 'A'..'Z') c else '#'
-                }.entries.sortedWith(compareBy({ if (it.key == '#') 1 else 0 }, { it.key }))
-                val selectedApps = apps.filter { it.pkg in selectedPkgs }
+                val hotApps by remember {
+                    derivedStateOf { HotPkgs.mapNotNull { p -> filtered.find { it.pkg == p } }.take(12) }
+                }
+                val sections by remember {
+                    derivedStateOf {
+                        filtered.groupBy { app ->
+                            val c = app.label.firstOrNull()?.uppercaseChar() ?: '#'
+                            if (c in 'A'..'Z') c else '#'
+                        }.entries.sortedWith(compareBy({ if (it.key == '#') 1 else 0 }, { it.key }))
+                    }
+                }
+                val selectedApps by remember { derivedStateOf { apps.filter { it.pkg in selectedPkgs } } }
                 if (filtered.isEmpty()) {
                     EmptyHint("No apps found", Modifier.weight(1f))
                 } else {
@@ -1615,20 +1632,28 @@ fun ClonerAppScreen() {
                 // v1.0.100: Multiple App-এর মতো ক্লোন হোম — অ্যাপ অনুযায়ী
                 // গ্রুপ, ৪ কলামের গ্রিড; চাপলে চালু, চেপে ধরলে মেনু,
                 // এডিট মোডে (পেন্সিল) চাপলে মোছার ডায়ালগ।
-                val shownClones = clones.filter { clone ->
-                    if (query.isBlank()) true else {
-                        val a = apps.find { it.pkg == clone.pkg }
-                        a != null && (a.label.contains(query, ignoreCase = true) ||
-                            a.pkg.contains(query, ignoreCase = true))
+                val shownClones by remember {
+                    derivedStateOf {
+                        clones.filter { clone ->
+                            if (query.isBlank()) true else {
+                                val a = apps.find { it.pkg == clone.pkg }
+                                a != null && (a.label.contains(query, ignoreCase = true) ||
+                                    a.pkg.contains(query, ignoreCase = true))
+                            }
+                        }.sortedWith(compareBy({ it.pkg }, { it.userId }))
                     }
-                }.sortedWith(compareBy({ it.pkg }, { it.userId }))
+                }
                 if (clones.isEmpty()) {
                     EmptyHint("No clones yet.\nTap the + button below to clone.", Modifier.weight(1f))
                 } else if (shownClones.isEmpty()) {
                     EmptyHint("No clones found", Modifier.weight(1f))
                 } else {
-                    val groups = shownClones.groupBy { it.pkg }.entries.sortedBy { entry ->
-                        apps.find { it.pkg == entry.key }?.label?.lowercase() ?: entry.key
+                    val groups by remember {
+                        derivedStateOf {
+                            shownClones.groupBy { it.pkg }.entries.sortedBy { entry ->
+                                apps.find { it.pkg == entry.key }?.label?.lowercase() ?: entry.key
+                            }
+                        }
                     }
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(4),
