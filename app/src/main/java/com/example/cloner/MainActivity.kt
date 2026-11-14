@@ -991,6 +991,16 @@ fun ClonerAppScreen() {
             } else {
                 sb.append("API 30-এর নিচে এই রেকর্ড পাওয়া যায় না।\n")
             }
+            // v1.0.119: শাটডাউন হুক যাচাই — হুক আসলেই বসেছিল কিনা আর
+            // কখনো জ্বলেছিল কিনা (hook_check.txt)। diag-এর grouping-এ
+            // REGISTERED/FIRED লাইন চাপা পড়ে যায়, তাই আলাদা বিভাগ।
+            sb.append("\n--- শাটডাউন হুক যাচাই ---\n")
+            val hookFile = java.io.File(ctx.cacheDir, "hook_check.txt")
+            if (hookFile.exists()) {
+                sb.append(runCatching { hookFile.readText() }.getOrDefault("পড়া যায়নি").takeLast(1000) + "\n")
+            } else {
+                sb.append("হুক যাচাই ফাইল নেই — কোনো প্রসেসে হুক বসেনি।\n")
+            }
             // ডায়াগনসিস মার্কার — Chromium renderer-এর মৃত্যু/ফিক্সের লাইন
             // (System linker, child process died, kept alive, RELRO) — ট্রেসের
             // শেষাংশে না থাকলেও এগুলো দেখা যাবে, যাতে রিপোর্ট পাঠালেই বোঝা যায়
