@@ -13,15 +13,19 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -29,7 +33,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -75,6 +83,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
@@ -310,6 +320,8 @@ fun ClonerAppScreen() {
     var failedPkgs by remember { mutableStateOf<Set<String>>(emptySet()) }
     // v1.0.97: লুকানো (ব্যর্থ/অসমর্থিত) অ্যাপগুলোও দেখানোর টগল — ডিফল্টে বন্ধ।
     var showHidden by remember { mutableStateOf(false) }
+    // v1.0.100: গ্রিডে টিক দেওয়া অ্যাপ — "ক্লোন করো" বোতামে একসাথে ক্লোন হবে।
+    var selectedPkgs by remember { mutableStateOf<Set<String>>(emptySet()) }
     // v1.0.97: শর্টকাট থেকে এলে অটো-চেকআপ চালাবে না — ক্লোনটাই চালু হবে।
     // (প্রথম কম্পোজিশনে ধরা হয় — তখনো launchPkg খরচ হয়নি।)
     val wasShortcutLaunch = remember { MainActivity.launchPkg != null }
@@ -407,6 +419,40 @@ fun ClonerAppScreen() {
                     },
                     onFailure = { toast(it.message ?: "ক্লোন করা যায়নি") }
                 )
+            }
+        }
+    }
+
+    // v1.0.100: টিক দেওয়া সব অ্যাপ একসাথে ক্লোন করো — একটা একটা করে,
+    // ক্রমানুসারে (ইঞ্জিন একসাথে একটাই ইনস্টল সামলায়)।
+    fun doCloneSelected(selected: List<AppInfo>) {
+        if (busyClone != null || selected.isEmpty()) return
+        scope.launch(Dispatchers.IO) {
+            var ok = 0
+            var fail = 0
+            for (app in selected) {
+                val uid = Engine.current.nextUserId(app.pkg)
+                if (uid < 0) { fail++; continue }
+                val newClone = CloneId(app.pkg, uid)
+                withContext(Dispatchers.Main) { busyClone = newClone }
+                val result = Engine.current.installClone(app.pkg, uid)
+                withContext(Dispatchers.Main) {
+                    result.fold(
+                        onSuccess = {
+                            if (!clones.contains(newClone)) {
+                                clones.add(newClone)
+                                persist()
+                            }
+                            ok++
+                        },
+                        onFailure = { fail++ }
+                    )
+                }
+            }
+            withContext(Dispatchers.Main) {
+                busyClone = null
+                selectedPkgs = emptySet()
+                toast("${ok}টি ক্লোন হয়েছে" + if (fail > 0) ", ${fail}টি হয়নি" else "")
             }
         }
     }
@@ -1459,21 +1505,58 @@ fun ClonerAppScreen() {
                 if (filtered.isEmpty()) {
                     EmptyHint("কোনো অ্যাপ পাওয়া যায়নি")
                 } else {
-                    // তালিকা আবার LazyColumn (লেজি) — সব রো একসাথে কম্পোজ হলে
-                    // মূল থ্রেড ভারী হয়ে ANR ("CloneMe isn't responding") দেয়।
-                    // নির্দিষ্ট উচ্চতা দেওয়া হয়েছে যাতে বাইরের স্ক্রল-করা
-                    // Column-এর ভেতরে LazyColumn কাজ করতে পারে।
-                    LazyColumn(
-                        modifier = Modifier.padding(vertical = 4.dp).height(600.dp)
+                    // v1.0.100: Multiple App-এর মতো ইন্টারফেস — বর্ণানুক্রমিক
+                    // সেকশন, ৪ কলামের গ্রিড, টিক-বাক্স, আর "ক্লোন করো" বোতাম।
+                    val selectedApps = apps.filter { it.pkg in selectedPkgs }
+                    if (selectedApps.isNotEmpty()) {
+                        Button(
+                            onClick = { doCloneSelected(selectedApps) },
+                            enabled = busyClone == null,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = BrandBlue)
+                        ) {
+                            Text(
+                                "ক্লোন করো (${selectedApps.size}টি)",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    val sections = filtered.groupBy { app ->
+                        val c = app.label.firstOrNull()?.uppercaseChar() ?: '#'
+                        if (c in 'A'..'Z') c else '#'
+                    }.entries.sortedWith(compareBy({ if (it.key == '#') 1 else 0 }, { it.key }))
+                    // গ্রিড লেজি — নির্দিষ্ট উচ্চতা দেওয়া হয়েছে যাতে বাইরের
+                    // স্ক্রল-করা Column-এর ভেতরে কাজ করতে পারে।
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(4),
+                        modifier = Modifier.padding(vertical = 4.dp).height(600.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        items(filtered, key = { it.pkg }) { app ->
-                            val n = clones.count { it.pkg == app.pkg }
-                            AppRow(
-                                app = app,
-                                buttonLabel = if (n > 0) "ক্লোন ($n)" else "ক্লোন",
-                                busy = busyClone?.pkg == app.pkg,
-                                buttonEnabled = busyClone == null
-                            ) { doClone(app) }
+                        for ((letter, sectionApps) in sections) {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                Text(
+                                    letter.toString(),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = Color.Gray,
+                                    modifier = Modifier.padding(top = 8.dp)
+                                )
+                            }
+                            items(sectionApps.size, key = { sectionApps[it].pkg }) { idx ->
+                                val app = sectionApps[idx]
+                                AppGridItem(
+                                    app = app,
+                                    selected = app.pkg in selectedPkgs,
+                                    busy = busyClone?.pkg == app.pkg
+                                ) {
+                                    selectedPkgs = if (app.pkg in selectedPkgs)
+                                        selectedPkgs - app.pkg else selectedPkgs + app.pkg
+                                }
+                            }
                         }
                     }
                 }
@@ -1608,6 +1691,57 @@ fun AppRow(
                 ) { Text(buttonLabel, fontSize = 13.sp) }
             }
         }
+    }
+}
+
+@Composable
+fun AppGridItem(
+    app: AppInfo,
+    selected: Boolean,
+    busy: Boolean,
+    onToggle: () -> Unit
+) {
+    // v1.0.100: Multiple App-এর মতো গ্রিড আইটেম — বড় আইকন, নিচে নাম,
+    // কোণায় টিক-বাক্স। চাপলে টিক ওঠে/নামে।
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.clickable(onClick = onToggle).padding(4.dp)
+    ) {
+        Box {
+            Image(
+                bitmap = app.icon,
+                contentDescription = null,
+                modifier = Modifier.size(56.dp).clip(RoundedCornerShape(14.dp))
+            )
+            Box(
+                modifier = Modifier.align(Alignment.TopEnd)
+                    .offset(x = 4.dp, y = (-4).dp)
+                    .size(20.dp)
+                    .background(if (selected) BrandBlue else Color.White, CircleShape)
+                    .border(1.5.dp, if (selected) BrandBlue else Color(0xFFBDBDBD), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                if (selected) {
+                    Text("✓", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            if (busy) {
+                CircularProgressIndicator(
+                    modifier = Modifier.align(Alignment.Center).size(28.dp),
+                    strokeWidth = 3.dp,
+                    color = BrandBlue
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            app.label,
+            fontSize = 11.sp,
+            lineHeight = 13.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
+        )
     }
 }
 
