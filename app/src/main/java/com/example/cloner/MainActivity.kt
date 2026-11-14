@@ -43,23 +43,35 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
@@ -84,6 +96,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -91,6 +104,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.core.graphics.drawable.toBitmap
 import top.niunaijun.blackbox.BlackBoxCore
 import top.niunaijun.blackbox.core.env.BEnvironment
@@ -105,9 +119,11 @@ private const val KEY_CLONES = "clones"
 private const val KEY_CHECKUP_PASSED = "checkup_passed"
 private const val KEY_CHECKUP_FAILED = "checkup_failed"
 private const val KEY_BATTERY_ASKED = "battery_asked"
+private const val KEY_CUSTOM_LABELS = "custom_labels"
 
 /** ব্র্যান্ড রঙ — CloneMe লোগোর সাথে মিলিয়ে */
 private val BrandBlue = Color(0xFF1B9BF5)
+private val AccentBlue = Color(0xFF0174B7)
 private val BrandCyan = Color(0xFF4FC3F7)
 private val BrandNavy = Color(0xFF0A1A3C)
 private val BrandDeepBlue = Color(0xFF14337A)
@@ -253,6 +269,27 @@ private fun saveFailedPkgs(ctx: Context, failed: Set<String>) {
         .edit().putStringSet(KEY_CHECKUP_FAILED, failed).apply()
 }
 
+// v1.0.100: ক্লোনের নিজের নাম (লং-প্রেস মেনু → নাম বদলান) — "pkg|userId|নাম" আকারে।
+private fun readCustomLabels(ctx: Context): Map<CloneId, String> {
+    val raw = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .getStringSet(KEY_CUSTOM_LABELS, emptySet()).orEmpty()
+    val out = mutableMapOf<CloneId, String>()
+    for (entry in raw) {
+        val parts = entry.split("|", limit = 3)
+        if (parts.size == 3) {
+            val uid = parts[1].toIntOrNull() ?: continue
+            out[CloneId(parts[0], uid)] = parts[2]
+        }
+    }
+    return out
+}
+
+private fun saveCustomLabels(ctx: Context, labels: Map<CloneId, String>) {
+    val raw = labels.entries.map { "${it.key.pkg}|${it.key.userId}|${it.value}" }.toSet()
+    ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .edit().putStringSet(KEY_CUSTOM_LABELS, raw).apply()
+}
+
 class MainActivity : ComponentActivity() {
 
     companion object {
@@ -308,7 +345,7 @@ class MainActivity : ComponentActivity() {
 fun ClonerAppScreen() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var tab by remember { mutableIntStateOf(0) }
+    var tab by remember { mutableIntStateOf(1) } // v1.0.100: প্রথমে ক্লোন হোম (Multiple App-এর মতো); 0 = অ্যাপ বাছাই
     var query by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
     var busyClone by remember { mutableStateOf<CloneId?>(null) }
@@ -331,6 +368,15 @@ fun ClonerAppScreen() {
     var editMode by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<CloneId?>(null) }
     var pendingShortcut by remember { mutableStateOf<CloneId?>(null) }
+    // v1.0.100: স্ক্রিনশটের মতো হোম — হোম-সার্চ, ⋮ মেনু, লং-প্রেস মেনু, নাম বদলান, ডেটা মুছুন।
+    var homeSearch by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var pendingMenu by remember { mutableStateOf<CloneId?>(null) }
+    var pendingRename by remember { mutableStateOf<CloneId?>(null) }
+    var renameText by remember { mutableStateOf("") }
+    var pendingClearData by remember { mutableStateOf<CloneId?>(null) }
+    var customLabels by remember { mutableStateOf<Map<CloneId, String>>(emptyMap()) }
+    var checkupDialogOpen by remember { mutableStateOf(false) }
     // v1.0.97: শর্টকাট থেকে এলে অটো-চেকআপ চালাবে না — ক্লোনটাই চালু হবে।
     // (প্রথম কম্পোজিশনে ধরা হয় — তখনো launchPkg খরচ হয়নি।)
     val wasShortcutLaunch = remember { MainActivity.launchPkg != null }
@@ -385,6 +431,8 @@ fun ClonerAppScreen() {
         apps.addAll(loaded)
         // v1.0.97: ব্যর্থ অ্যাপের তালিকা পড়ে নাও — এরা তালিকায় দেখাবে না
         failedPkgs = withContext(Dispatchers.IO) { readFailedPkgs(ctx) }
+        // v1.0.100: ক্লোনের নিজের নামগুলো পড়ে নাও
+        customLabels = withContext(Dispatchers.IO) { readCustomLabels(ctx) }
         loading = false
     }
 
@@ -559,7 +607,7 @@ fun ClonerAppScreen() {
                             if (!alive) {
                                 android.widget.Toast.makeText(
                                     ctx,
-                                    "${clone.pkg}-এর প্রসেস চালু হয়নি / বন্ধ হয়ে গেছে — নিচের ট্রেসটা কপি করে পাঠাও",
+                                    "${clone.pkg}-এর প্রসেস চালু হয়নি / বন্ধ হয়ে গেছে — ট্রেসটা কপি করে পাঠাও",
                                     android.widget.Toast.LENGTH_SHORT
                                 ).show()
                                 // ট্রেস কার্ড নিজে থেকেই দেখাও — ব্যবহারকারীকে আর বোতাম চাপতে হবে না
@@ -1132,6 +1180,52 @@ fun ClonerAppScreen() {
         }
     }
 
+    // v1.0.100: টাইলে দেখানোর নাম — নিজের নাম থাকলে সেটাই, নইলে
+    // একই অ্যাপের একাধিক ক্লোনে নম্বর (Facebook, Facebook 2, ...)।
+    fun displayTitle(clone: CloneId, app: AppInfo): String {
+        customLabels[clone]?.let { return it }
+        val siblings = clones.filter { it.pkg == clone.pkg }.sortedBy { it.userId }
+        return if (siblings.size > 1) "${app.label} ${siblings.indexOf(clone) + 1}" else app.label
+    }
+
+    // v1.0.100: লং-প্রেস মেনু — জোর করে বন্ধ করুন।
+    fun doForceStop(clone: CloneId) {
+        scope.launch(Dispatchers.IO) {
+            runCatching { BlackBoxCore.get().stopPackage(clone.pkg, clone.userId) }
+            withContext(Dispatchers.Main) { toast("বন্ধ করা হয়েছে") }
+        }
+    }
+
+    // v1.0.100: লং-প্রেস মেনু — ডেটা মুছুন (আনইনস্টল + একই জায়গায় আবার ইনস্টল)।
+    fun doClearData(clone: CloneId) {
+        if (busyClone != null) return
+        busyClone = clone
+        scope.launch(Dispatchers.IO) {
+            runCatching { BlackBoxCore.get().stopPackage(clone.pkg, clone.userId) }
+            Engine.current.uninstallClone(clone.pkg, clone.userId)
+            val result = Engine.current.installClone(clone.pkg, clone.userId)
+            withContext(Dispatchers.Main) {
+                busyClone = null
+                toast(if (result.isSuccess) "ডেটা মুছে ফেলা হয়েছে" else "ডেটা মোছা যায়নি")
+            }
+        }
+    }
+
+    // v1.0.100: লং-প্রেস মেনু — ক্যাশ মুছুন (ভার্চুয়াল ক্যাশ ফোল্ডার খালি করো)।
+    fun doClearCache(clone: CloneId) {
+        scope.launch(Dispatchers.IO) {
+            val ok = runCatching {
+                val dir = BEnvironment.getDataCacheDir(clone.pkg, clone.userId)
+                var done = true
+                dir.listFiles()?.forEach { if (!it.deleteRecursively()) done = false }
+                done
+            }.getOrDefault(false)
+            withContext(Dispatchers.Main) {
+                toast(if (ok) "ক্যাশ মুছে ফেলা হয়েছে" else "ক্যাশ মোছা যায়নি")
+            }
+        }
+    }
+
     // হোম-স্ক্রিন শর্টকাট থেকে এলে তালিকা লোডের পর সরাসরি চালু করো
     // (পুরনো শর্টকাটের জন্য, userId 0 ধরে)
     LaunchedEffect(loading) {
@@ -1163,271 +1257,221 @@ fun ClonerAppScreen() {
             kotlinx.coroutines.delay(1000)
             waited++
         }
-        if (Engine.current.isReady()) runFullCheckup()
+        if (Engine.current.isReady()) {
+            checkupDialogOpen = true
+            runFullCheckup()
+        }
     }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         floatingActionButton = {
-            // v1.0.100: Multiple App-এর "+" — ক্লোন ট্যাব থেকে অ্যাপ বাছাইয়ে যায়।
+            // v1.0.100: Multiple App-এর "+" — গাঢ় নীল গোল-চৌকো বোতাম, অ্যাপ বাছাইয়ে যায়।
             if (tab == 1) {
                 FloatingActionButton(
-                    onClick = { tab = 0 },
-                    containerColor = BrandBlue,
-                    contentColor = Color.White
+                    onClick = { query = ""; tab = 0 },
+                    containerColor = AccentBlue,
+                    contentColor = Color.White,
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier.size(64.dp)
                 ) {
-                    Text("+", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                    Text("+", fontSize = 30.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
     ) { pad ->
-        // পুরো স্ক্রিন স্ক্রলযোগ্য — লম্বা কার্ড (চেকআপের ফলাফল/রিপোর্ট) যাতে
-        // ট্যাব আর অ্যাপের তালিকাকে স্ক্রিনের বাইরে ঠেলে দিতে না পারে।
-        // (আগে বাইরের Column স্ক্রল হতো না, তাই অ্যাপের তালিকা দেখা যেত না।)
         // v1.0.100: Multiple App-এর মতো হালকা নীল-বেগুনি গ্রেডিয়েন্ট ব্যাকগ্রাউন্ড।
         Column(
-            Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState())
+            Modifier.padding(pad).fillMaxSize()
                 .background(Brush.verticalGradient(listOf(Color(0xFFE8F4FE), Color(0xFFF1E9FB))))
         ) {
-            // ব্র্যান্ড হেডার
-            HeaderCard(cloneCount = clones.size)
-
-            // v1.0.100: উপরে শুধু রিপোর্ট — স্মার্ট রিপোর্ট + চেকআপ, এক লাইনে।
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.End
-            ) {
-                TextButton(onClick = { generateReport() }) { Text("🔍 স্মার্ট রিপোর্ট") }
-                TextButton(onClick = { runFullCheckup() }, enabled = !checkupRunning) { Text("চেকআপ") }
-                if (!checkupRunning) {
-                    TextButton(onClick = { runFullCheckup(recheckAll = true) }) { Text("সব আবার চেক করো") }
-                }
-            }
-            traceText?.let { trace ->
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD)),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text(
-                            "📜 স্টার্টআপ ট্রেস (Chrome কতদূর গেলো)",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            trace,
-                            fontSize = 11.sp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 220.dp)
-                                .verticalScroll(rememberScrollState())
-                        )
-                        Row {
-                            TextButton(onClick = {
-                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                cm.setPrimaryClip(ClipData.newPlainText("trace", trace))
-                                toast("ট্রেস কপি হয়েছে")
-                            }) { Text("কপি করুন") }
-                            TextButton(onClick = { traceText = null }) { Text("বন্ধ করুন") }
-                        }
-                    }
-                }
-            }
-            reportText?.let { report ->
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF3E5F5)),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text(
-                            "🔍 স্মার্ট রিপোর্ট (অ্যাপ নিজে যাচাই করেছে)",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            report,
-                            fontSize = 11.sp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 280.dp)
-                                .verticalScroll(rememberScrollState())
-                        )
-                        Row {
-                            TextButton(onClick = {
-                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                cm.setPrimaryClip(ClipData.newPlainText("report", report))
-                                toast("রিপোর্ট কপি হয়েছে")
-                            }) { Text("কপি করুন") }
-                            TextButton(onClick = { reportText = null }) { Text("বন্ধ করুন") }
-                        }
-                    }
-                }
-            }
-            // v1.0.100: চেকআপের ফলাফল শুধু চলাকালীন/শেষে দেখাবে — স্থায়ী কার্ড নেই।
-            if (checkupRunning || checkupLines.isNotEmpty()) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1)),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Column(Modifier.padding(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                "🔍 সব অ্যাপ চেকআপ",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                modifier = Modifier.weight(1f)
-                            )
-                            if (checkupRunning) {
-                                TextButton(onClick = { checkupStop = true }) { Text("থামান") }
-                            }
-                        }
-                        if (checkupProgress.isNotEmpty()) {
-                            Spacer(Modifier.height(6.dp))
-                            Text(checkupProgress, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                        if (checkupLines.isNotEmpty()) {
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                checkupLines.joinToString("\n"),
-                                fontSize = 11.sp,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(max = 200.dp)
-                                    .verticalScroll(rememberScrollState())
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (!Engine.current.isReady()) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+            if (tab == 1) {
+                // হোম টপ বার (স্ক্রিনশটের মতো): শিরোনাম + পেন্সিল + সার্চ + ⋮ মেনু।
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "সতর্কতা: ভার্চুয়ালাইজেশন ইঞ্জিন যুক্ত নেই, তাই ক্লোন কাজ করবে না।",
-                        modifier = Modifier.padding(12.dp),
-                        fontSize = 13.sp
+                        "CloneMe",
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f).padding(start = 8.dp)
+                    )
+                    IconButton(onClick = { editMode = !editMode }) {
+                        Icon(
+                            Icons.Filled.Edit,
+                            contentDescription = "সম্পাদনা",
+                            tint = if (editMode) AccentBlue else Color.Black
+                        )
+                    }
+                    IconButton(onClick = {
+                        homeSearch = !homeSearch
+                        if (!homeSearch) query = ""
+                    }) {
+                        Icon(Icons.Filled.Search, contentDescription = "খুঁজুন", tint = Color.Black)
+                    }
+                    Box {
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "মেনু", tint = Color.Black)
+                        }
+                        DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("🔍 স্মার্ট রিপোর্ট") },
+                                onClick = { menuOpen = false; generateReport() }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("🔍 সব অ্যাপ চেকআপ") },
+                                onClick = { menuOpen = false; checkupDialogOpen = true; runFullCheckup() }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("সব আবার চেক করো") },
+                                onClick = { menuOpen = false; checkupDialogOpen = true; runFullCheckup(recheckAll = true) }
+                            )
+                        }
+                    }
+                }
+                if (homeSearch) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        placeholder = { Text("অ্যাপ খুঁজুন") },
+                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        singleLine = true,
+                        shape = RoundedCornerShape(24.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color.White,
+                            unfocusedContainerColor = Color.White,
+                            focusedBorderColor = Color.Transparent,
+                            unfocusedBorderColor = Color.Transparent
+                        )
                     )
                 }
-                Spacer(Modifier.height(8.dp))
-            }
-
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                label = { Text("অ্যাপ খুঁজুন") },
-                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                singleLine = true,
-                shape = RoundedCornerShape(16.dp)
-            )
-
-            TabRow(
-                selectedTabIndex = tab,
-                containerColor = Color.Transparent,
-                contentColor = BrandBlue,
-                indicator = { tabPositions ->
-                    TabRowDefaults.SecondaryIndicator(
-                        Modifier.tabIndicatorOffset(tabPositions[tab]),
-                        color = BrandBlue
+                if (!Engine.current.isReady()) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            "সতর্কতা: ভার্চুয়ালাইজেশন ইঞ্জিন যুক্ত নেই, তাই ক্লোন কাজ করবে না।",
+                            modifier = Modifier.padding(12.dp),
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            } else {
+                // অ্যাপ বাছাই টপ বার (স্ক্রিনশটের মতো): ব্যাক + শিরোনাম + টগল।
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { query = ""; tab = 1 }) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "ফিরুন", tint = Color.Black)
+                    }
+                    Text(
+                        "CloneMe",
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(
+                        checked = showHidden,
+                        onCheckedChange = { showHidden = it },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = AccentBlue,
+                            checkedBorderColor = Color.Transparent
+                        )
                     )
                 }
-            ) {
-                Tab(
-                    selected = tab == 0,
-                    onClick = { tab = 0 },
-                    text = { Text("সব অ্যাপ", fontWeight = if (tab == 0) FontWeight.Bold else FontWeight.Normal) }
-                )
-                Tab(
-                    selected = tab == 1,
-                    onClick = { tab = 1 },
-                    text = { Text("আমার ক্লোন (${clones.size})", fontWeight = if (tab == 1) FontWeight.Bold else FontWeight.Normal) }
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = { Text("অ্যাপ খুঁজুন") },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    singleLine = true,
+                    shape = RoundedCornerShape(24.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color.White,
+                        unfocusedContainerColor = Color.White,
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent
+                    )
                 )
             }
-
             if (loading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(color = BrandBlue)
                         Text("অ্যাপের তালিকা লোড হচ্ছে…", modifier = Modifier.padding(top = 12.dp))
                     }
                 }
             } else if (tab == 0) {
-                // v1.0.97: শুধু চলবে এমন অ্যাপ দেখাও — ব্যর্থ/অসমর্থিত
-                // অ্যাপ লুকিয়ে রাখো (টগলে দেখানো যায়)।
-                val hiddenCount = apps.count {
-                    it.pkg in failedPkgs || isUnsupportedPackage(it.pkg) || isGmsSystemPackage(it.pkg) || it.isSystemOnly
-                }
+                // v1.0.100: শুধু চলবে এমন অ্যাপ দেখাও — ব্যর্থ/অসমর্থিত
+                // অ্যাপ লুকিয়ে রাখো (উপরের টগলে দেখানো যায়)।
                 val filtered = apps.filter {
                     (query.isBlank() || it.label.contains(query, ignoreCase = true) ||
                         it.pkg.contains(query, ignoreCase = true)) &&
-                    // v1.0.100: "দেখাও" টগলে সিস্টেম অ্যাপও দেখাবে (Multiple App-এর
-                    // টগলের মতো); ডিফল্টে শুধু ইনস্টল করা অ্যাপ।
                     (showHidden || (!it.isSystemOnly && it.pkg !in failedPkgs && !isUnsupportedPackage(it.pkg) && !isGmsSystemPackage(it.pkg)))
                 }
-                if (hiddenCount > 0) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "🚫 ${hiddenCount}টি অ্যাপ লুকানো আছে",
-                            fontSize = 12.sp,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(onClick = { showHidden = !showHidden }) {
-                            Text(if (showHidden) "লুকাও" else "দেখাও")
-                        }
-                    }
-                }
+                // v1.0.100: স্ক্রিনশটের মতো HOT সেকশন — জনপ্রিয় অ্যাপ আগে।
+                val hotPkgs = listOf(
+                    "com.facebook.katana", "com.facebook.orca", "com.android.chrome",
+                    "com.zhiliaoapp.musically", "com.whatsapp", "org.telegram.messenger",
+                    "com.brave.browser", "com.google.android.gm", "com.lemon.lvovideoeditor",
+                    "com.google.android.apps.photos", "com.google.android.apps.maps",
+                    "com.google.android.apps.docs"
+                )
+                val hotApps = hotPkgs.mapNotNull { p -> filtered.find { it.pkg == p } }.take(12)
+                val restApps = filtered.filter { it !in hotApps }
+                val sections = restApps.groupBy { app ->
+                    val c = app.label.firstOrNull()?.uppercaseChar() ?: '#'
+                    if (c in 'A'..'Z') c else '#'
+                }.entries.sortedWith(compareBy({ if (it.key == '#') 1 else 0 }, { it.key }))
+                val selectedApps = apps.filter { it.pkg in selectedPkgs }
                 if (filtered.isEmpty()) {
-                    EmptyHint("কোনো অ্যাপ পাওয়া যায়নি")
+                    EmptyHint("কোনো অ্যাপ পাওয়া যায়নি", Modifier.weight(1f))
                 } else {
-                    // v1.0.100: Multiple App-এর মতো ইন্টারফেস — বর্ণানুক্রমিক
-                    // সেকশন, ৪ কলামের গ্রিড, টিক-বাক্স, আর "ক্লোন করো" বোতাম।
-                    val selectedApps = apps.filter { it.pkg in selectedPkgs }
-                    if (selectedApps.isNotEmpty()) {
-                        Button(
-                            onClick = { doCloneSelected(selectedApps) },
-                            enabled = busyClone == null,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = BrandBlue)
-                        ) {
-                            Text(
-                                "ক্লোন করো (${selectedApps.size}টি)",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                    val sections = filtered.groupBy { app ->
-                        val c = app.label.firstOrNull()?.uppercaseChar() ?: '#'
-                        if (c in 'A'..'Z') c else '#'
-                    }.entries.sortedWith(compareBy({ if (it.key == '#') 1 else 0 }, { it.key }))
-                    // গ্রিড লেজি — নির্দিষ্ট উচ্চতা দেওয়া হয়েছে যাতে বাইরের
-                    // স্ক্রল-করা Column-এর ভেতরে কাজ করতে পারে।
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(4),
-                        modifier = Modifier.padding(vertical = 4.dp).height(600.dp),
+                        modifier = Modifier.weight(1f).padding(vertical = 4.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
+                        if (hotApps.isNotEmpty()) {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                Text(
+                                    "HOT",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp,
+                                    color = Color.Black,
+                                    modifier = Modifier.padding(top = 8.dp)
+                                )
+                            }
+                            items(hotApps.size, key = { hotApps[it].pkg }) { idx ->
+                                val app = hotApps[idx]
+                                AppGridItem(
+                                    app = app,
+                                    selected = app.pkg in selectedPkgs,
+                                    busy = busyClone?.pkg == app.pkg
+                                ) {
+                                    selectedPkgs = if (app.pkg in selectedPkgs)
+                                        selectedPkgs - app.pkg else selectedPkgs + app.pkg
+                                }
+                            }
+                        }
                         for ((letter, sectionApps) in sections) {
                             item(span = { GridItemSpan(maxLineSpan) }) {
                                 Text(
                                     letter.toString(),
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    color = Color.Gray,
+                                    fontSize = 16.sp,
+                                    color = Color.Black,
                                     modifier = Modifier.padding(top = 8.dp)
                                 )
                             }
@@ -1445,10 +1489,28 @@ fun ClonerAppScreen() {
                         }
                     }
                 }
+                // নিচে স্থায়ী "ক্লোন করো" বোতাম (স্ক্রিনশটের Clone Apps-এর মতো)।
+                Button(
+                    onClick = {
+                        if (selectedApps.isEmpty()) toast("ক্লোন করতে অ্যাপ বাছুন")
+                        else doCloneSelected(selectedApps)
+                    },
+                    enabled = busyClone == null,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentBlue)
+                ) {
+                    Text(
+                        if (selectedApps.isEmpty()) "ক্লোন করো"
+                        else "ক্লোন করো (${selectedApps.size}টি)",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             } else {
                 // v1.0.100: Multiple App-এর মতো ক্লোন হোম — অ্যাপ অনুযায়ী
-                // গ্রুপ, ৪ কলামের গ্রিড; চাপলে চালু, চেপে ধরলে শর্টকাট,
-                // এডিট মোডে চাপলে মোছার ডায়ালগ।
+                // গ্রুপ, ৩ কলামের গ্রিড; চাপলে চালু, চেপে ধরলে মেনু,
+                // এডিট মোডে (পেন্সিল) চাপলে মোছার ডায়ালগ।
                 val shownClones = clones.filter { clone ->
                     if (query.isBlank()) true else {
                         val a = apps.find { it.pkg == clone.pkg }
@@ -1457,32 +1519,18 @@ fun ClonerAppScreen() {
                     }
                 }.sortedWith(compareBy({ it.pkg }, { it.userId }))
                 if (clones.isEmpty()) {
-                    EmptyHint("এখনো কোনো ক্লোন নেই।\n\"সব অ্যাপ\" থেকে ক্লোন করুন।")
+                    EmptyHint("এখনো কোনো ক্লোন নেই।\nনিচের + বোতামে চাপ দিয়ে ক্লোন করুন।", Modifier.weight(1f))
                 } else if (shownClones.isEmpty()) {
-                    EmptyHint("কোনো ক্লোন পাওয়া যায়নি")
+                    EmptyHint("কোনো ক্লোন পাওয়া যায়নি", Modifier.weight(1f))
                 } else {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            if (editMode) "মুছতে টাইলে চাপুন" else "চালু করতে চাপুন • শর্টকাটের জন্য চেপে ধরুন",
-                            fontSize = 12.sp,
-                            color = Color.Gray,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(onClick = { editMode = !editMode }) {
-                            Text(if (editMode) "সম্পন্ন" else "✏️ সম্পাদনা")
-                        }
-                    }
                     val groups = shownClones.groupBy { it.pkg }.entries.sortedBy { entry ->
                         apps.find { it.pkg == entry.key }?.label?.lowercase() ?: entry.key
                     }
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(4),
-                        modifier = Modifier.padding(vertical = 4.dp).height(600.dp),
+                        columns = GridCells.Fixed(3),
+                        modifier = Modifier.weight(1f).padding(vertical = 4.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         for ((pkg, groupClones) in groups) {
@@ -1491,25 +1539,66 @@ fun ClonerAppScreen() {
                                 Text(
                                     app.label,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
+                                    fontSize = 16.sp,
                                     modifier = Modifier.padding(top = 8.dp)
                                 )
                             }
                             items(groupClones.size, key = { groupClones[it].toString() }) { idx ->
                                 val clone = groupClones[idx]
-                                val siblings = clones.filter { it.pkg == pkg }.sortedBy { it.userId }
-                                val title = if (siblings.size > 1)
-                                    "${app.label} ${siblings.indexOf(clone) + 1}" else app.label
-                                CloneGridItem(
-                                    app = app,
-                                    title = title,
-                                    editMode = editMode,
-                                    busy = busyClone == clone,
-                                    onClick = {
-                                        if (editMode) pendingDelete = clone else doLaunch(clone)
-                                    },
-                                    onLongClick = { pendingShortcut = clone }
-                                )
+                                val title = displayTitle(clone, app)
+                                Box {
+                                    CloneGridItem(
+                                        app = app,
+                                        title = title,
+                                        editMode = editMode,
+                                        busy = busyClone == clone,
+                                        onClick = {
+                                            if (editMode) pendingDelete = clone else doLaunch(clone)
+                                        },
+                                        onLongClick = { pendingMenu = clone }
+                                    )
+                                    // লং-প্রেস মেনু (স্ক্রিনশটের মতো গাঢ় পপআপ)।
+                                    DropdownMenu(
+                                        expanded = pendingMenu == clone,
+                                        onDismissRequest = { pendingMenu = null },
+                                        modifier = Modifier.background(Color(0xFF616161), RoundedCornerShape(16.dp))
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Image(
+                                                bitmap = app.icon,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(32.dp).clip(RoundedCornerShape(8.dp))
+                                            )
+                                            Spacer(Modifier.width(12.dp))
+                                            Text(title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                        }
+                                        HorizontalDivider(color = Color.White.copy(alpha = 0.25f))
+                                        DarkMenuItem("মুছুন", Icons.Filled.Delete) {
+                                            pendingMenu = null; pendingDelete = clone
+                                        }
+                                        DarkMenuItem("জোর করে বন্ধ করুন", Icons.Filled.Warning) {
+                                            pendingMenu = null; doForceStop(clone)
+                                        }
+                                        DarkMenuItem("শর্টকাট বানান", Icons.Filled.Share) {
+                                            pendingMenu = null; pendingShortcut = clone
+                                        }
+                                        DarkMenuItem("নাম বদলান", Icons.Filled.Edit) {
+                                            pendingMenu = null; renameText = title; pendingRename = clone
+                                        }
+                                        DarkMenuItem("ডেটা মুছুন", Icons.Filled.Delete) {
+                                            pendingMenu = null; pendingClearData = clone
+                                        }
+                                        DarkMenuItem("ক্যাশ মুছুন", Icons.Filled.Delete) {
+                                            pendingMenu = null; doClearCache(clone)
+                                        }
+                                        DarkMenuItem("আরও ক্লোন করুন", Icons.Filled.Add) {
+                                            pendingMenu = null; doClone(app)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -1521,9 +1610,10 @@ fun ClonerAppScreen() {
         val delClone = pendingDelete
         if (delClone != null) {
             val delApp = apps.find { it.pkg == delClone.pkg }
+            val delTitle = if (delApp != null) displayTitle(delClone, delApp) else delClone.pkg
             AlertDialog(
                 onDismissRequest = { pendingDelete = null },
-                title = { Text("${delApp?.label ?: delClone.pkg} মুছবেন?") },
+                title = { Text("$delTitle মুছবেন?") },
                 text = { Text("এই ক্লোনটি মুছে ফেলা হবে। এর সব ডেটা মুছে যাবে এবং ফেরানো যাবে না।") },
                 confirmButton = {
                     TextButton(onClick = {
@@ -1536,13 +1626,11 @@ fun ClonerAppScreen() {
                 }
             )
         }
-        // v1.0.100: চেপে ধরলে শর্টকাট ডায়ালগ।
+        // v1.0.100: শর্টকাট ডায়ালগ (লং-প্রেস মেনু থেকে)।
         val scClone = pendingShortcut
         if (scClone != null) {
             val scApp = apps.find { it.pkg == scClone.pkg }
-            val scSiblings = clones.filter { it.pkg == scClone.pkg }.sortedBy { it.userId }
-            val scTitle = if (scApp != null && scSiblings.size > 1)
-                "${scApp.label} ${scSiblings.indexOf(scClone) + 1}" else scApp?.label ?: scClone.pkg
+            val scTitle = if (scApp != null) displayTitle(scClone, scApp) else scClone.pkg
             AlertDialog(
                 onDismissRequest = { pendingShortcut = null },
                 title = { Text(scTitle) },
@@ -1560,6 +1648,174 @@ fun ClonerAppScreen() {
                     TextButton(onClick = { pendingShortcut = null }) { Text("বাতিল") }
                 }
             )
+        }
+        // v1.0.100: নাম বদলানোর ডায়ালগ (লং-প্রেস মেনু থেকে)।
+        val rnClone = pendingRename
+        if (rnClone != null) {
+            AlertDialog(
+                onDismissRequest = { pendingRename = null },
+                title = { Text("নাম বদলান") },
+                text = {
+                    OutlinedTextField(
+                        value = renameText,
+                        onValueChange = { renameText = it },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val name = renameText.trim()
+                        if (name.isNotEmpty()) {
+                            val updated = customLabels.toMutableMap()
+                            updated[rnClone] = name
+                            customLabels = updated
+                            scope.launch(Dispatchers.IO) { saveCustomLabels(ctx, updated) }
+                        }
+                        pendingRename = null
+                    }) { Text("সংরক্ষণ করুন") }
+                },
+                dismissButton = {
+                    Row {
+                        if (customLabels.containsKey(rnClone)) {
+                            TextButton(onClick = {
+                                val updated = customLabels.toMutableMap()
+                                updated.remove(rnClone)
+                                customLabels = updated
+                                scope.launch(Dispatchers.IO) { saveCustomLabels(ctx, updated) }
+                                pendingRename = null
+                            }) { Text("আগের নাম") }
+                        }
+                        TextButton(onClick = { pendingRename = null }) { Text("বাতিল") }
+                    }
+                }
+            )
+        }
+        // v1.0.100: ডেটা মোছার নিশ্চিতকরণ (লং-প্রেস মেনু থেকে)।
+        val cdClone = pendingClearData
+        if (cdClone != null) {
+            val cdApp = apps.find { it.pkg == cdClone.pkg }
+            val cdTitle = if (cdApp != null) displayTitle(cdClone, cdApp) else cdClone.pkg
+            AlertDialog(
+                onDismissRequest = { pendingClearData = null },
+                title = { Text("$cdTitle-এর ডেটা মুছবেন?") },
+                text = { Text("এই ক্লোনের সব ডেটা (লগইনসহ) মুছে যাবে। ক্লোনটি নতুনের মতো হয়ে যাবে।") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        pendingClearData = null
+                        doClearData(cdClone)
+                    }) { Text("মুছুন") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingClearData = null }) { Text("বাতিল") }
+                }
+            )
+        }
+        // v1.0.100: স্মার্ট রিপোর্ট ডায়ালগ (⋮ মেনু থেকে)।
+        reportText?.let { report ->
+            Dialog(onDismissRequest = { reportText = null }) {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(
+                            "🔍 স্মার্ট রিপোর্ট",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            report,
+                            fontSize = 11.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 420.dp)
+                                .verticalScroll(rememberScrollState())
+                        )
+                        Row {
+                            TextButton(onClick = {
+                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("report", report))
+                                toast("রিপোর্ট কপি হয়েছে")
+                            }) { Text("কপি করুন") }
+                            TextButton(onClick = { reportText = null }) { Text("বন্ধ করুন") }
+                        }
+                    }
+                }
+            }
+        }
+        // v1.0.100: ট্রেস ডায়ালগ (ক্লোন চালু না হলে নিজে থেকে দেখাবে)।
+        traceText?.let { trace ->
+            Dialog(onDismissRequest = { traceText = null }) {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(
+                            "📜 স্টার্টআপ ট্রেস",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            trace,
+                            fontSize = 11.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 420.dp)
+                                .verticalScroll(rememberScrollState())
+                        )
+                        Row {
+                            TextButton(onClick = {
+                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("trace", trace))
+                                toast("ট্রেস কপি হয়েছে")
+                            }) { Text("কপি করুন") }
+                            TextButton(onClick = { traceText = null }) { Text("বন্ধ করুন") }
+                        }
+                    }
+                }
+            }
+        }
+        // v1.0.100: চেকআপ ডায়ালগ (⋮ মেনু / অটো-চেকআপ থেকে)।
+        if (checkupDialogOpen) {
+            Dialog(onDismissRequest = { checkupDialogOpen = false }) {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(
+                            "🔍 সব অ্যাপ চেকআপ",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        if (checkupProgress.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(checkupProgress, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                        if (checkupLines.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                checkupLines.joinToString("\n"),
+                                fontSize = 11.sp,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 320.dp)
+                                    .verticalScroll(rememberScrollState())
+                            )
+                        }
+                        Row {
+                            if (checkupRunning) {
+                                TextButton(onClick = { checkupStop = true }) { Text("থামান") }
+                            }
+                            TextButton(onClick = { checkupDialogOpen = false }) { Text("বন্ধ করুন") }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1610,8 +1866,8 @@ fun HeaderCard(cloneCount: Int) {
 }
 
 @Composable
-fun EmptyHint(text: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+fun EmptyHint(text: String, modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(text, modifier = Modifier.padding(24.dp), color = Color.Gray)
     }
 }
@@ -1688,8 +1944,8 @@ fun AppGridItem(
                 Box(
                     modifier = Modifier.align(Alignment.TopEnd)
                         .size(20.dp)
-                        .background(if (selected) BrandBlue else Color.White, RoundedCornerShape(6.dp))
-                        .border(1.5.dp, if (selected) BrandBlue else Color(0xFFBDBDBD), RoundedCornerShape(6.dp)),
+                        .background(if (selected) AccentBlue else Color.White, RoundedCornerShape(6.dp))
+                        .border(1.5.dp, if (selected) AccentBlue else Color(0xFFBDBDBD), RoundedCornerShape(6.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     if (selected) {
@@ -1709,12 +1965,23 @@ fun AppGridItem(
                 app.label,
                 fontSize = 11.sp,
                 lineHeight = 13.sp,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center
+                textAlign = TextAlign.Center,
+                color = Color(0xFF757575)
             )
         }
     }
+}
+
+@Composable
+fun DarkMenuItem(text: String, icon: ImageVector, onClick: () -> Unit) {
+    // v1.0.100: লং-প্রেস মেনুর আইটেম — সাদা লেখা, ডানে আইকন (স্ক্রিনশটের মতো)।
+    DropdownMenuItem(
+        text = { Text(text, color = Color.White, fontSize = 14.sp) },
+        trailingIcon = { Icon(icon, contentDescription = null, tint = Color.White) },
+        onClick = onClick
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -1728,7 +1995,7 @@ fun CloneGridItem(
     onLongClick: () -> Unit
 ) {
     // v1.0.100: Multiple App-এর মতো ক্লোন টাইল — সাদা কার্ড, আইকন, নাম;
-    // এডিট মোডে লাল "−" ব্যাজ; চেপে ধরলে শর্টকাট ডায়ালগ।
+    // এডিট মোডে লাল "−" ব্যাজ; চেপে ধরলে মেনু।
     Card(
         modifier = Modifier.combinedClickable(
             onClick = onClick,
@@ -1771,9 +2038,10 @@ fun CloneGridItem(
                 title,
                 fontSize = 11.sp,
                 lineHeight = 13.sp,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center
+                textAlign = TextAlign.Center,
+                color = Color(0xFF757575)
             )
         }
     }
