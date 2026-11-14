@@ -400,6 +400,46 @@ fun ClonerAppScreen() {
         }
     }
 
+    // v1.0.98: ক্লোন চালু করার পর ৩০ সেকেন্ড ধরে দেখো — "CloneMe — Chrome
+    // চলছে" ফোরগ্রাউন্ড নোটিফিকেশনটা আসল সিস্টেমে পোস্ট হয়েছে কিনা।
+    // মেইন প্রসেস থেকে আসল NotificationManager-কে জিজ্ঞাসা করা হয়
+    // (KeepAliveService-এর চ্যানেল আসল সিস্টেমে আছে — v1.0.95-এ প্রমাণিত)।
+    // ফলাফল fgs_check.txt-এ লেখা হয়, স্মার্ট রিপোর্টে দেখা যায়।
+    fun startFgsCheck() {
+        scope.launch(Dispatchers.IO) {
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE)
+                as android.app.NotificationManager
+            val wantId = ctx.packageName.hashCode()
+            var seen = false
+            var firstSeenAt = ""
+            val t0 = System.currentTimeMillis()
+            while (System.currentTimeMillis() - t0 < 30_000) {
+                val list = runCatching { nm.activeNotifications }.getOrNull() ?: emptyArray()
+                if (list.any { it.id == wantId }) {
+                    seen = true
+                    firstSeenAt = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+                        .format(java.util.Date())
+                    break
+                }
+                kotlinx.coroutines.delay(2000)
+            }
+            val out = buildString {
+                append("সময়: ${java.util.Date()}\n")
+                append("Chrome ফোরগ্রাউন্ড নোটিফিকেশন দেখা গেছে: ")
+                append(if (seen) "হ্যাঁ ($firstSeenAt)\n" else "না (৩০ সেকেন্ডে একবারও না)\n")
+                val list = runCatching { nm.activeNotifications }.getOrNull() ?: emptyArray()
+                append("সক্রিয় নোটিফিকেশন: ${list.size}টি\n")
+                for (sb in list) {
+                    val title = runCatching {
+                        sb.notification.extras.getString(android.app.Notification.EXTRA_TITLE)
+                    }.getOrDefault("?")
+                    append("- id=${sb.id} channel=${sb.notification.channelId} title=$title\n")
+                }
+            }
+            runCatching { java.io.File(ctx.cacheDir, "fgs_check.txt").writeText(out) }
+        }
+    }
+
     fun doLaunch(clone: CloneId) {
         if (busyClone != null) return
         busyClone = clone
@@ -409,6 +449,8 @@ fun ClonerAppScreen() {
                 busyClone = null
                 result.onFailure { toast(it.message ?: "চালু করা যায়নি") }
                 result.onSuccess {
+                    // v1.0.98: ফোরগ্রাউন্ড নোটিফিকেশন আসলে পোস্ট হলো কিনা যাচাই শুরু করো।
+                    startFgsCheck()
                     // সফল লঞ্চে আর মেসেজ দেখানো হয় না (বিরক্তিকর বলে ব্যবহারকারী জানিয়েছে)।
                     // ৫ সেকেন্ড পর: স্টাব প্রসেস (:p0/:p1...) বেঁচে আছে কিনা
                     scope.launch(Dispatchers.IO) {
@@ -606,6 +648,16 @@ fun ClonerAppScreen() {
                 sb.append("কোনো ক্লোন নেই — প্রথমে একটি অ্যাপ ক্লোন করো।\n")
             } else {
                 sb.append(verdicts.joinToString("\n") + "\n")
+            }
+            // v1.0.98: ফোরগ্রাউন্ড নোটিফিকেশন যাচাই — "CloneMe — Chrome
+            // চলছে" নোটিফিকেশনটা আসল সিস্টেমে পোস্ট হয়েছে কিনা। ফলাফল
+            // fgs_check.txt-এ থাকে (ক্লোন চালু করার পর ৩০ সেকেন্ড পোল করা হয়)।
+            sb.append("\n--- ফোরগ্রাউন্ড নোটিফিকেশন যাচাই ---\n")
+            val fgsFile = java.io.File(ctx.cacheDir, "fgs_check.txt")
+            if (fgsFile.exists()) {
+                sb.append(runCatching { fgsFile.readText() }.getOrDefault("পড়া যায়নি").take(1000) + "\n")
+            } else {
+                sb.append("এখনো যাচাই হয়নি — ক্লোন চালু করার পর ৩০ সেকেন্ডের মধ্যে ফলাফল লেখা হয়।\n")
             }
             // ডায়াগনসিস মার্কার — Chromium renderer-এর মৃত্যু/ফিক্সের লাইন
             // (System linker, child process died, kept alive, RELRO) — ট্রেসের
