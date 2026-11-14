@@ -28,6 +28,9 @@ public class NativeCore {
 
     public static native void init(int apiLevel);
 
+    // v1.0.120: নেটিভ exit ট্রেসার — exit() ডাকলে backtrace লিখবে।
+    public static native void installExitTracer(String path);
+
     public static native void enableIO();
 
     public static native void addIORule(String targetPath, String relocatePath);
