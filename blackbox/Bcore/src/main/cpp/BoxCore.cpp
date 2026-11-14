@@ -15,6 +15,10 @@
 #include <Hook/RuntimeHook.h>
 #include "Utils/HexDump.h"
 #include "hidden_api.h"
+#include <execinfo.h>
+#include <fcntl.h>
+#include <time.h>
+#include <unistd.h>
 
 struct {
     JavaVM *vm;
@@ -131,6 +135,59 @@ bool disableResourceLoading(JNIEnv *env, jclass clazz) {
     return true;
 }
 
+// v1.0.120: native exit tracer. Chromium child processes die with
+// ApplicationExitInfo reason EXIT_SELF while the Java shutdown hook
+// (proven registered) never fires -- so the exit comes from native
+// code (exit() from libchrome or a library). An atexit handler runs
+// on any exit() call: it appends pid + time + cmdline + a native
+// backtrace to exit_trace.txt, showing WHERE the exit was called
+// from. It does NOT run on SIGKILL/_exit()/abort(), which is itself
+// informative (empty file + EXIT_SELF deaths => _exit-style exit).
+// The handler only uses open/write/close + backtrace_symbols_fd
+// (no allocation, no JNI) so it cannot crash the exiting process.
+static char gExitTracePath[512] = {0};
+static bool gExitTracerInstalled = false;
+
+static void exitTraceHandler() {
+    if (gExitTracePath[0] == '\0') return;
+    int fd = open(gExitTracePath, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (fd < 0) return;
+    char cmdline[256] = {0};
+    int cfd = open("/proc/self/cmdline", O_RDONLY);
+    if (cfd >= 0) {
+        ssize_t n = read(cfd, cmdline, sizeof(cmdline) - 1);
+        (void) n;
+        close(cfd);
+    }
+    char header[1024];
+    int len = snprintf(header, sizeof(header),
+                       "=== NATIVE EXIT pid=%d time=%ld cmdline=%s ===\n",
+                       (int) getpid(), (long) time(NULL), cmdline);
+    if (len > 0) {
+        ssize_t w = write(fd, header, (size_t) len);
+        (void) w;
+    }
+    void *frames[32];
+    int count = backtrace(frames, 32);
+    if (count > 0) backtrace_symbols_fd(frames, count, fd);
+    const char *tail = "=== END NATIVE EXIT ===\n";
+    ssize_t w2 = write(fd, tail, strlen(tail));
+    (void) w2;
+    close(fd);
+}
+
+void installExitTracer(JNIEnv *env, jclass clazz, jstring path) {
+    (void) clazz;
+    if (gExitTracerInstalled) return;
+    gExitTracerInstalled = true;
+    const char *p = env->GetStringUTFChars(path, JNI_FALSE);
+    if (p == NULL) return;
+    strncpy(gExitTracePath, p, sizeof(gExitTracePath) - 1);
+    gExitTracePath[sizeof(gExitTracePath) - 1] = '\0';
+    env->ReleaseStringUTFChars(path, p);
+    atexit(exitTraceHandler);
+}
+
 static JNINativeMethod gMethods[] = {
         {"disableHiddenApi", "()Z",                               (void *) disableHiddenApi},
         {"disableResourceLoading", "()Z",                         (void *) disableResourceLoading},
@@ -138,6 +195,7 @@ static JNINativeMethod gMethods[] = {
         {"addIORule",  "(Ljava/lang/String;Ljava/lang/String;)V", (void *) addIORule},
         {"enableIO",   "()V",                                     (void *) enableIO},
         {"init",       "(I)V",                                    (void *) init},
+        {"installExitTracer", "(Ljava/lang/String;)V",              (void *) installExitTracer},
 };
 
 int registerNativeMethods(JNIEnv *env, const char *className,
