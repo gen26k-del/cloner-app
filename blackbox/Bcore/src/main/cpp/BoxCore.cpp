@@ -231,6 +231,22 @@ void installExitTracer(JNIEnv *env, jclass clazz, jstring path) {
     gExitTracePath[sizeof(gExitTracePath) - 1] = '\0';
     env->ReleaseStringUTFChars(path, p);
     atexit(exitTraceHandler);
+    // v1.0.121: prove the native side ran AND the file is writable
+    // from native code (the handler uses this same open path at
+    // exit time). If this line appears but no NATIVE EXIT block
+    // ever does, the deaths bypass exit() entirely.
+    int fd = open(gExitTracePath, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (fd >= 0) {
+        char line[600];
+        int len = snprintf(line, sizeof(line),
+                           "NATIVE TRACER INSTALLED pid=%d path=%s\n",
+                           (int) getpid(), gExitTracePath);
+        if (len > 0) {
+            ssize_t w = write(fd, line, (size_t) len);
+            (void) w;
+        }
+        close(fd);
+    }
 }
 
 static JNINativeMethod gMethods[] = {
