@@ -53,6 +53,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -62,6 +64,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FabPosition
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -1242,6 +1245,7 @@ fun ClonerAppScreen() {
     val bgBrush = remember { Brush.verticalGradient(listOf(Color(0xFFE8F4FE), Color(0xFFF1E9FB))) }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        floatingActionButtonPosition = FabPosition.Center,
         floatingActionButton = {
             // v1.0.100: Multiple App-এর "+" — গাঢ় নীল গোল-চৌকো বোতাম, অ্যাপ বাছাইয়ে যায়।
             if (tab == 1) {
@@ -1252,7 +1256,7 @@ fun ClonerAppScreen() {
                     shape = RoundedCornerShape(18.dp),
                     modifier = Modifier.size(56.dp)
                 ) {
-                    Text("+", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                    Icon(Icons.Filled.Add, contentDescription = "Add", modifier = Modifier.size(32.dp))
                 }
             }
         }
@@ -1276,7 +1280,7 @@ fun ClonerAppScreen() {
                     )
                     IconButton(onClick = { editMode = !editMode }) {
                         Icon(
-                            Icons.Filled.Edit,
+                            Icons.Outlined.Edit,
                             contentDescription = "Edit",
                             tint = if (editMode) AccentBlue else Color.Black
                         )
@@ -1286,12 +1290,9 @@ fun ClonerAppScreen() {
                             homeSearch = !homeSearch
                             if (!homeSearch) query = ""
                         },
-                        modifier = Modifier.background(
-                            if (homeSearch) Color(0xFFE0E0E0) else Color.Transparent,
-                            CircleShape
-                        )
+                        modifier = Modifier.background(Color(0xFFE0E0E0), CircleShape)
                     ) {
-                        Icon(Icons.Filled.Search, contentDescription = "Search", tint = Color.Black)
+                        Icon(Icons.Outlined.Search, contentDescription = "Search", tint = Color.Black)
                     }
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
@@ -1321,7 +1322,7 @@ fun ClonerAppScreen() {
                         value = query,
                         onValueChange = { query = it },
                         placeholder = { Text("Search", fontSize = 15.sp, color = Color(0xFF9E9E9E)) },
-                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, tint = Color(0xFF9E9E9E)) },
+                        leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, tint = Color(0xFF9E9E9E)) },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                         singleLine = true,
                         shape = RoundedCornerShape(16.dp),
@@ -1377,7 +1378,7 @@ fun ClonerAppScreen() {
                     value = query,
                     onValueChange = { query = it },
                     placeholder = { Text("Search", fontSize = 15.sp, color = Color(0xFF9E9E9E)) },
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, tint = Color(0xFF9E9E9E)) },
+                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, tint = Color(0xFF9E9E9E)) },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                     singleLine = true,
                     shape = RoundedCornerShape(16.dp),
@@ -1535,7 +1536,7 @@ fun ClonerAppScreen() {
                                 Text(
                                     app.label,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 15.sp,
+                                    fontSize = 16.sp,
                                     modifier = Modifier.padding(top = 6.dp)
                                 )
                             }
@@ -1582,7 +1583,7 @@ fun ClonerAppScreen() {
                                         DarkMenuItem("Create shortcut", Icons.Filled.Share) {
                                             pendingMenu = null; pendingShortcut = clone
                                         }
-                                        DarkMenuItem("Edit Name/Icon", Icons.Filled.Edit) {
+                                        DarkMenuItem("Edit Name/Icon", Icons.Outlined.Edit) {
                                             pendingMenu = null; renameText = title; pendingRename = clone
                                         }
                                         DarkMenuItem("Clear data", Icons.Filled.Delete) {
@@ -1956,7 +1957,7 @@ fun AppGridItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
-                    color = Color(0xFF616161)
+                    color = Color(0xFF7A7A84)
                 )
             }
             Box(
@@ -2041,7 +2042,7 @@ fun CloneGridItem(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
-                color = Color(0xFF616161)
+                color = Color(0xFF7A7A84)
             )
         }
     }
