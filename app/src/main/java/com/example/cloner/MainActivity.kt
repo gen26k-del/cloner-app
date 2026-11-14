@@ -104,6 +104,7 @@ private const val PREFS = "cloner_prefs"
 private const val KEY_CLONES = "clones"
 private const val KEY_CHECKUP_PASSED = "checkup_passed"
 private const val KEY_CHECKUP_FAILED = "checkup_failed"
+private const val KEY_BATTERY_ASKED = "battery_asked"
 
 /** ব্র্যান্ড রঙ — CloneMe লোগোর সাথে মিলিয়ে */
 private val BrandBlue = Color(0xFF1B9BF5)
@@ -368,6 +369,16 @@ fun ClonerAppScreen() {
                 }
             }.getOrDefault("checking")
         }
+        // v1.0.100: GMS নিজে থেকেই ইনস্টল হবে (Multiple App-এর মতো — আলাদা বোতাম নেই)।
+        if (gmsState == "ready") {
+            scope.launch(Dispatchers.IO) {
+                val ok = runCatching { BlackBoxCore.get().installGms(0).success }
+                    .getOrDefault(false)
+                withContext(Dispatchers.Main) {
+                    gmsState = if (ok) "installed" else "failed"
+                }
+            }
+        }
         val parsed = saved.mapNotNull { CloneId.parse(it) }
             .filter { !isGmsSystemPackage(it.pkg) }
         clones.addAll((parsed + engineClones).distinct())
@@ -378,12 +389,32 @@ fun ClonerAppScreen() {
     }
 
     // ব্যাটারি অপটিমাইজেশন অবস্থা দেখো (নোটিফিকেশনের জন্য)
+    // v1.0.100: ছাড়ের সিস্টেম ডায়ালগ প্রথমবার নিজে থেকেই আসবে — আলাদা কার্ড/বোতাম নেই।
     LaunchedEffect(Unit) {
         batteryIgnored = withContext(Dispatchers.IO) {
             runCatching {
                 val pm = ctx.getSystemService(android.os.PowerManager::class.java)
                 pm.isIgnoringBatteryOptimizations(ctx.packageName)
             }.getOrDefault(true)
+        }
+        val asked = withContext(Dispatchers.IO) {
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_BATTERY_ASKED, false)
+        }
+        if (!batteryIgnored && !asked) {
+            withContext(Dispatchers.IO) {
+                ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().putBoolean(KEY_BATTERY_ASKED, true).apply()
+            }
+            try {
+                val intent = android.content.Intent(
+                    android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    android.net.Uri.parse("package:${ctx.packageName}")
+                )
+                ctx.startActivity(intent)
+            } catch (_: Exception) {
+                toast("Settings → Battery → CloneMe → Unrestricted করুন")
+            }
         }
     }
 
@@ -1161,84 +1192,15 @@ fun ClonerAppScreen() {
             // ব্র্যান্ড হেডার
             HeaderCard(cloneCount = clones.size)
 
-            // Crash রিপোর্ট থাকলে দেখাও — সবগুলো, প্রসেসের নামসহ
-            crashReports.forEach { (fileName, report) ->
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text(
-                            "⚠️ সমস্যা হয়েছিল: $fileName",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            report,
-                            fontSize = 11.sp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 180.dp)
-                                .verticalScroll(rememberScrollState())
-                        )
-                        Row {
-                            TextButton(onClick = {
-                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                cm.setPrimaryClip(ClipData.newPlainText("crash", "$fileName\n$report"))
-                                toast("রিপোর্ট কপি হয়েছে")
-                            }) { Text("কপি করুন") }
-                            TextButton(onClick = {
-                                ctx.cacheDir.listFiles { f ->
-                                    f.name.startsWith("last_crash") && f.name.endsWith(".txt")
-                                }?.forEach { it.delete() }
-                                crashReports = emptyList()
-                            }) { Text("সব মুছে ফেলুন") }
-                        }
-                    }
-                }
-            }
-
-            // লগ দেখুন: Chrome-এর প্রসেস মারা গেলে এখান থেকে কারণ জানা যাবে
+            // v1.0.100: উপরে শুধু রিপোর্ট — স্মার্ট রিপোর্ট + চেকআপ, এক লাইনে।
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.End
             ) {
-                TextButton(onClick = { captureLog() }) { Text("📋 লগ দেখুন") }
-                TextButton(onClick = { captureTrace() }) { Text("📜 ট্রেস দেখুন") }
                 TextButton(onClick = { generateReport() }) { Text("🔍 স্মার্ট রিপোর্ট") }
-            }
-            logText?.let { log ->
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text(
-                            "📋 সিস্টেম লগ (ক্র্যাশের কারণ)",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            log,
-                            fontSize = 11.sp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 220.dp)
-                                .verticalScroll(rememberScrollState())
-                        )
-                        Row {
-                            TextButton(onClick = {
-                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                cm.setPrimaryClip(ClipData.newPlainText("log", log))
-                                toast("লগ কপি হয়েছে")
-                            }) { Text("কপি করুন") }
-                            TextButton(onClick = { logText = null }) { Text("বন্ধ করুন") }
-                        }
-                    }
+                TextButton(onClick = { runFullCheckup() }, enabled = !checkupRunning) { Text("চেকআপ") }
+                if (!checkupRunning) {
+                    TextButton(onClick = { runFullCheckup(recheckAll = true) }) { Text("সব আবার চেক করো") }
                 }
             }
             traceText?.let { trace ->
@@ -1305,54 +1267,40 @@ fun ClonerAppScreen() {
                     }
                 }
             }
-            // সব অ্যাপ চেকআপ: নিজেই সব অ্যাপ ক্লোন করে চালিয়ে দেখে, রিপোর্ট দেয়
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1)),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Text(
-                        "🔍 সব অ্যাপ চেকআপ",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                    Text(
-                        "অ্যাপ নিজেই সব অ্যাপ ক্লোন করে একটা একটা চালিয়ে দেখবে, তারপর রিপোর্ট দেবে। চলাকালীন অ্যাপগুলো একটা একটা করে খুলবে — ফোনটা কিছুক্ষণ ব্যবহার করো না। আগে পাস করা অ্যাপগুলো আর চেক করা হবে না — শুধু সমস্যার অ্যাপ আর নতুন অ্যাপ চেক হবে।",
-                        fontSize = 12.sp
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Row {
-                        Button(
-                            onClick = { runFullCheckup() },
-                            enabled = !checkupRunning
-                        ) { Text("চেকআপ শুরু করো") }
-                        // পাস করা অ্যাপগুলোও আবার চেক করতে চাইলে (ইঞ্জিন বদলের পর)
-                        if (!checkupRunning) {
-                            Spacer(Modifier.width(8.dp))
-                            TextButton(onClick = { runFullCheckup(recheckAll = true) }) {
-                                Text("সব আবার চেক করো")
+            // v1.0.100: চেকআপের ফলাফল শুধু চলাকালীন/শেষে দেখাবে — স্থায়ী কার্ড নেই।
+            if (checkupRunning || checkupLines.isNotEmpty()) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1)),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "🔍 সব অ্যাপ চেকআপ",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (checkupRunning) {
+                                TextButton(onClick = { checkupStop = true }) { Text("থামান") }
                             }
                         }
-                        if (checkupRunning) {
-                            Spacer(Modifier.width(8.dp))
-                            TextButton(onClick = { checkupStop = true }) { Text("থামান") }
+                        if (checkupProgress.isNotEmpty()) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(checkupProgress, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
-                    }
-                    if (checkupRunning || checkupProgress.isNotEmpty()) {
-                        Spacer(Modifier.height(6.dp))
-                        Text(checkupProgress, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                    if (checkupLines.isNotEmpty()) {
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            checkupLines.joinToString("\n"),
-                            fontSize = 11.sp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 200.dp)
-                                .verticalScroll(rememberScrollState())
-                        )
+                        if (checkupLines.isNotEmpty()) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                checkupLines.joinToString("\n"),
+                                fontSize = 11.sp,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 200.dp)
+                                    .verticalScroll(rememberScrollState())
+                            )
+                        }
                     }
                 }
             }
@@ -1367,96 +1315,6 @@ fun ClonerAppScreen() {
                         modifier = Modifier.padding(12.dp),
                         fontSize = 13.sp
                     )
-                }
-                Spacer(Modifier.height(8.dp))
-            }
-
-            // Google Play সার্ভিস — ইনস্টল থাকলে বড় কার্ড নয়, এক লাইনের ছোট স্ট্যাটাস
-            if (gmsState == "installed") {
-                Row(
-                    modifier = Modifier.fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "✓ Google Play সার্ভিস সক্রিয়",
-                        modifier = Modifier.weight(1f),
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    TextButton(onClick = { doUninstallGms() }) {
-                        Text("সরিয়ে ফেলুন", fontSize = 12.sp)
-                    }
-                }
-            }
-            if (gmsState == "ready" || gmsState == "installing" || gmsState == "failed") {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (gmsState == "failed")
-                            MaterialTheme.colorScheme.errorContainer
-                        else MaterialTheme.colorScheme.secondaryContainer
-                    ),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                "Google Play সার্ভিস",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
-                            )
-                            Text(
-                                if (gmsState == "failed")
-                                    "ইনস্টল ব্যর্থ হয়েছে — আবার চেষ্টা করুন"
-                                else "ইন্টারনেট অ্যাপ (Facebook, ব্রাউজার) চালাতে এটা দরকার হতে পারে",
-                                fontSize = 12.sp
-                            )
-                        }
-                        if (gmsState == "installing") {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(28.dp),
-                                strokeWidth = 3.dp
-                            )
-                        } else {
-                            Button(onClick = { doInstallGms() }) {
-                                Text(if (gmsState == "failed") "আবার চেষ্টা" else "ইনস্টল করুন")
-                            }
-                        }
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-            }
-
-            // ব্যাটারি অপটিমাইজেশন কার্ড — নোটিফিকেশন বাঁচিয়ে রাখতে
-            if (!batteryIgnored) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer
-                    ),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                "ব্যাকগ্রাউন্ড চালু রাখুন",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
-                            )
-                            Text(
-                                "মেসেঞ্জারের নোটিফিকেশন ঠিকমতো পেতে ব্যাটারি সেভিং থেকে CloneMe-কে ছাড় দিন",
-                                fontSize = 12.sp
-                            )
-                        }
-                        Button(onClick = { doRequestBatteryExemption() }) {
-                            Text("ছাড় দিন")
-                        }
-                    }
                 }
                 Spacer(Modifier.height(8.dp))
             }
