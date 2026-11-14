@@ -145,6 +145,19 @@ class ClonerApp : Application() {
         }
     }
 
+    // v1.0.119: হুক-যাচাই ফাইলে এক লাইন যোগ করো (৪KB ছাড়ালে পুরনো
+    // অর্ধেক ছেঁটে ফেলো) — diag-এর grouping-এ REGISTERED/FIRED লাইন
+    // চাপা পড়ে যায়, তাই আলাদা ফাইলে প্রমাণ রাখো।
+    private fun appendHookCheck(line: String) {
+        try {
+            val f = java.io.File(cacheDir, "hook_check.txt")
+            if (f.exists() && f.length() > 4000) {
+                f.writeText(f.readText().takeLast(2000))
+            }
+            f.appendText(line + "\n")
+        } catch (_: Exception) { }
+    }
+
     override fun onCreate() {
         super.onCreate()
         // v1.0.115: শাটডাউন হুক — প্রসেস নিজে থেকে clean exit (System.exit)
@@ -158,6 +171,7 @@ class ClonerApp : Application() {
                     java.io.File(cacheDir, "init_trace.txt").appendText(
                         "${java.util.Date()} [$proc] SHUTDOWN HOOK FIRED — clean VM exit, not SIGKILL\n"
                     )
+                    appendHookCheck("${java.util.Date()} [$proc] SHUTDOWN HOOK FIRED")
                 } catch (_: Exception) { }
             })
             // v1.0.118: হুক বসেছে তার প্রমাণ — পরের রিপোর্টে এই লাইন
@@ -167,6 +181,7 @@ class ClonerApp : Application() {
             java.io.File(cacheDir, "init_trace.txt").appendText(
                 "${java.util.Date()} [$proc0] SHUTDOWN HOOK REGISTERED\n"
             )
+            appendHookCheck("${java.util.Date()} [$proc0] SHUTDOWN HOOK REGISTERED")
         } catch (_: Exception) { }
         // Crash রিপোর্টার: virtual অ্যাপ crash করলে stack trace ফাইলে রেখে দেয়,
         // যাতে UI থেকে দেখে কারণ বোঝা যায়। (প্রসেস অনুযায়ী আলাদা ফাইল)
