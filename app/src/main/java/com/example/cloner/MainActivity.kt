@@ -173,7 +173,7 @@ fun loadApps(ctx: Context): List<AppInfo> {
                 AppInfo(
                     label = ri.loadLabel(pm).toString(),
                     pkg = pkgName,
-                    icon = ri.loadIcon(pm).toBitmap(96, 96).asImageBitmap(),
+                    icon = ri.loadIcon(pm).toBitmap(144, 144).asImageBitmap(),
                     isSystemOnly = isSystemOnly
                 )
             }.getOrNull()
@@ -377,9 +377,6 @@ fun ClonerAppScreen() {
     var pendingClearData by remember { mutableStateOf<CloneId?>(null) }
     var customLabels by remember { mutableStateOf<Map<CloneId, String>>(emptyMap()) }
     var checkupDialogOpen by remember { mutableStateOf(false) }
-    // v1.0.97: শর্টকাট থেকে এলে অটো-চেকআপ চালাবে না — ক্লোনটাই চালু হবে।
-    // (প্রথম কম্পোজিশনে ধরা হয় — তখনো launchPkg খরচ হয়নি।)
-    val wasShortcutLaunch = remember { MainActivity.launchPkg != null }
 
     fun toast(msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
 
@@ -1238,30 +1235,9 @@ fun ClonerAppScreen() {
         }
     }
 
-    // v1.0.97: প্রথমবার চালু হলে স্বয়ংক্রিয় চেকআপ — ফোনের সব অ্যাপ
-    // যাচাই করে শুধু চলবে এমনগুলো তালিকায় রাখবে। (ব্যবহারকারীর অনুরোধ:
-    // "অটোমেটিক চেকআপ করে যেগুলো সাপোর্ট করবে সেইগুলোই শুধু দেখাবে।")
-    // আগের রায় থাকলে আর অটো-চালু হবে না — নতুন অ্যাপের জন্য হাতের
-    // "চেকআপ শুরু করো" বোতাম আছে (পাস করাগুলো বাদ দিয়ে শুধু নতুনগুলো চেক হয়)।
-    var autoCheckupDone by remember { mutableStateOf(false) }
-    LaunchedEffect(loading) {
-        if (loading || autoCheckupDone || wasShortcutLaunch) return@LaunchedEffect
-        autoCheckupDone = true
-        val hasVerdicts = withContext(Dispatchers.IO) {
-            readPassedPkgs(ctx).isNotEmpty() || readFailedPkgs(ctx).isNotEmpty()
-        }
-        if (hasVerdicts) return@LaunchedEffect
-        // ইঞ্জিন চালু হওয়া পর্যন্ত একটু অপেক্ষা করো
-        var waited = 0
-        while (!Engine.current.isReady() && waited < 15) {
-            kotlinx.coroutines.delay(1000)
-            waited++
-        }
-        if (Engine.current.isReady()) {
-            checkupDialogOpen = true
-            runFullCheckup()
-        }
-    }
+    // v1.0.100: অটো-চেকআপ বাদ (ব্যবহারকারীর নির্দেশ 2026-11-14 14:56 —
+    // অ্যাপ খুললেই সব অ্যাপ চেকআপ বিরক্তিকর)। চেকআপ শুধু ⋮ মেনু থেকে
+    // হাতে চাপলে চলবে (runFullCheckup)।
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -1272,10 +1248,10 @@ fun ClonerAppScreen() {
                     onClick = { query = ""; tab = 0 },
                     containerColor = AccentBlue,
                     contentColor = Color.White,
-                    shape = RoundedCornerShape(24.dp),
-                    modifier = Modifier.size(64.dp)
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.size(56.dp)
                 ) {
-                    Text("+", fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                    Text("+", fontSize = 28.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -1304,10 +1280,16 @@ fun ClonerAppScreen() {
                             tint = if (editMode) AccentBlue else Color.Black
                         )
                     }
-                    IconButton(onClick = {
-                        homeSearch = !homeSearch
-                        if (!homeSearch) query = ""
-                    }) {
+                    IconButton(
+                        onClick = {
+                            homeSearch = !homeSearch
+                            if (!homeSearch) query = ""
+                        },
+                        modifier = Modifier.background(
+                            if (homeSearch) Color(0xFFE0E0E0) else Color.Transparent,
+                            CircleShape
+                        )
+                    ) {
                         Icon(Icons.Filled.Search, contentDescription = "খুঁজুন", tint = Color.Black)
                     }
                     Box {
@@ -1341,7 +1323,7 @@ fun ClonerAppScreen() {
                         leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                         singleLine = true,
-                        shape = RoundedCornerShape(24.dp),
+                        shape = RoundedCornerShape(16.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedContainerColor = Color.White,
                             unfocusedContainerColor = Color.White,
@@ -1394,7 +1376,7 @@ fun ClonerAppScreen() {
                     leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                     singleLine = true,
-                    shape = RoundedCornerShape(24.dp),
+                    shape = RoundedCornerShape(16.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = Color.White,
                         unfocusedContainerColor = Color.White,
@@ -1496,7 +1478,7 @@ fun ClonerAppScreen() {
                         else doCloneSelected(selectedApps)
                     },
                     enabled = busyClone == null,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 16.dp, vertical = 8.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = AccentBlue)
                 ) {
@@ -1509,7 +1491,7 @@ fun ClonerAppScreen() {
                 }
             } else {
                 // v1.0.100: Multiple App-এর মতো ক্লোন হোম — অ্যাপ অনুযায়ী
-                // গ্রুপ, ৩ কলামের গ্রিড; চাপলে চালু, চেপে ধরলে মেনু,
+                // গ্রুপ, ৪ কলামের গ্রিড; চাপলে চালু, চেপে ধরলে মেনু,
                 // এডিট মোডে (পেন্সিল) চাপলে মোছার ডায়ালগ।
                 val shownClones = clones.filter { clone ->
                     if (query.isBlank()) true else {
@@ -1527,10 +1509,10 @@ fun ClonerAppScreen() {
                         apps.find { it.pkg == entry.key }?.label?.lowercase() ?: entry.key
                     }
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
+                        columns = GridCells.Fixed(4),
                         modifier = Modifier.weight(1f).padding(vertical = 4.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         for ((pkg, groupClones) in groups) {
@@ -1561,7 +1543,7 @@ fun ClonerAppScreen() {
                                     DropdownMenu(
                                         expanded = pendingMenu == clone,
                                         onDismissRequest = { pendingMenu = null },
-                                        modifier = Modifier.background(Color(0xFF616161), RoundedCornerShape(16.dp))
+                                        modifier = Modifier.background(Color(0xFF6B6A70), RoundedCornerShape(16.dp))
                                     ) {
                                         Row(
                                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -1931,45 +1913,48 @@ fun AppGridItem(
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxWidth().padding(8.dp)
-        ) {
-            Box {
-                Image(
-                    bitmap = app.icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(52.dp).clip(RoundedCornerShape(13.dp))
-                )
-                Box(
-                    modifier = Modifier.align(Alignment.TopEnd)
-                        .size(20.dp)
-                        .background(if (selected) AccentBlue else Color.White, RoundedCornerShape(6.dp))
-                        .border(1.5.dp, if (selected) AccentBlue else Color(0xFFBDBDBD), RoundedCornerShape(6.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (selected) {
-                        Text("✓", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        // টিক-বাক্স কার্ডের কোণায় (স্ক্রিনশটের মতো), আইকনের উপরে নয়।
+        Box {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth().padding(8.dp)
+            ) {
+                Box {
+                    Image(
+                        bitmap = app.icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(52.dp).clip(RoundedCornerShape(13.dp))
+                    )
+                    if (busy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.align(Alignment.Center).size(28.dp),
+                            strokeWidth = 3.dp,
+                            color = BrandBlue
+                        )
                     }
                 }
-                if (busy) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.align(Alignment.Center).size(28.dp),
-                        strokeWidth = 3.dp,
-                        color = BrandBlue
-                    )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    app.label,
+                    fontSize = 11.sp,
+                    lineHeight = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    color = Color(0xFF757575)
+                )
+            }
+            Box(
+                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)
+                    .size(20.dp)
+                    .background(if (selected) AccentBlue else Color.White, RoundedCornerShape(6.dp))
+                    .border(1.5.dp, if (selected) AccentBlue else Color(0xFFBDBDBD), RoundedCornerShape(6.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (selected) {
+                    Text("✓", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                app.label,
-                fontSize = 11.sp,
-                lineHeight = 13.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-                color = Color(0xFF757575)
-            )
         }
     }
 }
