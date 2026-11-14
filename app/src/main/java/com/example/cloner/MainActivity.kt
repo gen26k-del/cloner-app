@@ -18,7 +18,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -49,6 +51,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.animateItemPlacement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
@@ -365,7 +368,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ClonerAppScreen() {
     val ctx = LocalContext.current
@@ -1470,17 +1473,33 @@ fun ClonerAppScreen() {
                         modifier = Modifier.weight(1f)
                     )
                     // v1.0.109: Multiple App-এর মতো ছোট টগল (মাপা 54x40px; M3 Switch অনেক বড়)।
-                    // v1.0.112: টগলের গুটি স্লাইড হয়ে সরে (Multiple App-এর মতো)।
+                    // v1.0.113: Multiple App-এর মতো "All" পিল (মাপা 32x18dp) —
+                    // চালু হলে নীল হয় + "All" লেখা ওঠে, গুটি স্লাইড হয়ে সরে।
+                    val pillColor by animateColorAsState(
+                        targetValue = if (showHidden) AccentBlue else Color(0xFFE0E0E0),
+                        animationSpec = tween(durationMillis = 200)
+                    )
+                    val labelAlpha by animateFloatAsState(
+                        targetValue = if (showHidden) 1f else 0f,
+                        animationSpec = tween(durationMillis = 200)
+                    )
                     val thumbX by animateDpAsState(
-                        targetValue = if (showHidden) 12.dp else 2.dp,
+                        targetValue = if (showHidden) 16.dp else 2.dp,
                         animationSpec = tween(durationMillis = 200)
                     )
                     Box(
-                        modifier = Modifier.size(width = 28.dp, height = 18.dp)
-                            .background(if (showHidden) AccentBlue else Color(0xFFE0E0E0), RoundedCornerShape(9.dp))
+                        modifier = Modifier.size(width = 32.dp, height = 18.dp)
+                            .background(pillColor, RoundedCornerShape(9.dp))
                             .clickable { showHidden = !showHidden },
                         contentAlignment = Alignment.CenterStart
                     ) {
+                        Text(
+                            "All",
+                            color = Color.White.copy(alpha = labelAlpha),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(start = 5.dp)
+                        )
                         Box(
                             Modifier.offset(x = thumbX).size(14.dp)
                                 .background(Color.White, CircleShape)
@@ -1542,6 +1561,7 @@ fun ClonerAppScreen() {
                             items(hotApps.size, key = { "hot:" + hotApps[it].pkg }) { idx ->
                                 val app = hotApps[idx]
                                 AppGridItem(
+                                    modifier = Modifier.animateItemPlacement(),
                                     app = app,
                                     selected = app.pkg in selectedPkgs,
                                     busy = busyClone?.pkg == app.pkg
@@ -1564,6 +1584,7 @@ fun ClonerAppScreen() {
                             items(sectionApps.size, key = { letter.toString() + ":" + sectionApps[it].pkg }) { idx ->
                                 val app = sectionApps[idx]
                                 AppGridItem(
+                                    modifier = Modifier.animateItemPlacement(),
                                     app = app,
                                     selected = app.pkg in selectedPkgs,
                                     busy = busyClone?.pkg == app.pkg
@@ -1632,7 +1653,7 @@ fun ClonerAppScreen() {
                             items(groupClones.size, key = { groupClones[it].toString() }) { idx ->
                                 val clone = groupClones[idx]
                                 val title = displayTitle(clone, app)
-                                Box {
+                                Box(Modifier.animateItemPlacement()) {
                                     CloneGridItem(
                                         app = app,
                                         title = title,
@@ -2083,6 +2104,7 @@ fun TileLabel(text: String) {
 
 @Composable
 fun AppGridItem(
+    modifier: Modifier = Modifier,
     app: AppInfo,
     selected: Boolean,
     busy: Boolean,
@@ -2091,7 +2113,7 @@ fun AppGridItem(
     // v1.0.100: Multiple App-এর মতো গ্রিড আইটেম — সাদা টাইল, বড় আইকন,
     // নিচে নাম, কোণায় টিক-বাক্স। চাপলে টিক ওঠে/নামে।
     Card(
-        modifier = Modifier.clickable(onClick = onToggle),
+        modifier = modifier.clickable(onClick = onToggle),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
