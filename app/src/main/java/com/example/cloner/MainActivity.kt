@@ -84,7 +84,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-data class AppInfo(val label: String, val pkg: String, val icon: ImageBitmap)
+data class AppInfo(val label: String, val pkg: String, val icon: ImageBitmap, val isSystemOnly: Boolean = false)
 
 private const val PREFS = "cloner_prefs"
 private const val KEY_CLONES = "clones"
@@ -129,10 +129,21 @@ fun loadApps(ctx: Context): List<AppInfo> {
         // এখন সেই অ্যাপটা শুধু বাদ যাবে, বাকিগুলো দেখাবে।
         .mapNotNull { ri ->
             runCatching {
+                val pkgName = ri.activityInfo.packageName
+                // v1.0.100: শুধু ইনস্টল করা অ্যাপ দেখাবে — ফোনের সিস্টেম অ্যাপ লুকাবে।
+                // সিস্টেম অ্যাপ = FLAG_SYSTEM আছে কিন্তু FLAG_UPDATED_SYSTEM_APP নেই
+                // (কখনো আপডেট হয়নি — কারখানার সংস্করণ)। আপডেট হওয়া সিস্টেম অ্যাপ
+                // (Chrome, Facebook ইত্যাদি) ইনস্টলড হিসেবেই গণ্য হয়, দেখাবে।
+                // Chrome সবসময় দেখাবে — সবচেয়ে জরুরি অ্যাপ।
+                val aiFlags = ri.activityInfo.applicationInfo?.flags ?: 0
+                val isSystemOnly = pkgName != "com.android.chrome" &&
+                    (aiFlags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0 &&
+                    (aiFlags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0
                 AppInfo(
                     label = ri.loadLabel(pm).toString(),
-                    pkg = ri.activityInfo.packageName,
-                    icon = ri.loadIcon(pm).toBitmap(96, 96).asImageBitmap()
+                    pkg = pkgName,
+                    icon = ri.loadIcon(pm).toBitmap(96, 96).asImageBitmap(),
+                    isSystemOnly = isSystemOnly
                 )
             }.getOrNull()
         }
@@ -797,7 +808,7 @@ fun ClonerAppScreen() {
             readFailedPkgs(ctx)
         }
         // v1.0.97: hard-limit অ্যাপ চেকই কোরো না — ওরা চালু হয়েও কাজ করে না।
-        val allTargets = apps.filter { !isGmsSystemPackage(it.pkg) && !isUnsupportedPackage(it.pkg) }
+        val allTargets = apps.filter { !isGmsSystemPackage(it.pkg) && !isUnsupportedPackage(it.pkg) && !it.isSystemOnly }
         val skippedPassed = if (recheckAll) 0 else allTargets.count { it.pkg in passed }
         val targets = if (recheckAll) allTargets
         else allTargets.filter { it.pkg !in passed }
@@ -1427,6 +1438,7 @@ fun ClonerAppScreen() {
                 val filtered = apps.filter {
                     (query.isBlank() || it.label.contains(query, ignoreCase = true) ||
                         it.pkg.contains(query, ignoreCase = true)) &&
+                    !it.isSystemOnly && // v1.0.100: সিস্টেম অ্যাপ কখনোই দেখাবে না
                     (showHidden || (it.pkg !in failedPkgs && !isUnsupportedPackage(it.pkg) && !isGmsSystemPackage(it.pkg)))
                 }
                 if (hiddenCount > 0) {
