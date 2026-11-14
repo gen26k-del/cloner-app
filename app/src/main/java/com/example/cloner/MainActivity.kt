@@ -12,6 +12,14 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -1365,7 +1373,23 @@ fun ClonerAppScreen() {
             Modifier.padding(pad).fillMaxSize()
                 .background(Brush.verticalGradient(listOf(Color(0xFFE8F4FE), Color(0xFFF1E9FB))))
         ) {
-            if (tab == 1) {
+            // v1.0.112: পেজ বদলে Multiple App-এর মতো স্লাইড অ্যানিমেশন —
+            // পিকার ডান থেকে ঢোকে, হোমে ফিরলে বাম থেকে।
+            AnimatedContent(
+                targetState = tab,
+                transitionSpec = {
+                    if (targetState == 0) {
+                        (slideInHorizontally { w -> w } + fadeIn()) togetherWith
+                            (slideOutHorizontally { w -> -w } + fadeOut())
+                    } else {
+                        (slideInHorizontally { w -> -w } + fadeIn()) togetherWith
+                            (slideOutHorizontally { w -> w } + fadeOut())
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            ) { t ->
+            Column(Modifier.fillMaxSize()) {
+            if (t == 1) {
                 // হোম টপ বার (স্ক্রিনশটের মতো): শিরোনাম + পেন্সিল + সার্চ + ⋮ মেনু।
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
@@ -1446,14 +1470,19 @@ fun ClonerAppScreen() {
                         modifier = Modifier.weight(1f)
                     )
                     // v1.0.109: Multiple App-এর মতো ছোট টগল (মাপা 54x40px; M3 Switch অনেক বড়)।
+                    // v1.0.112: টগলের গুটি স্লাইড হয়ে সরে (Multiple App-এর মতো)।
+                    val thumbX by animateDpAsState(
+                        targetValue = if (showHidden) 12.dp else 2.dp,
+                        animationSpec = tween(durationMillis = 200)
+                    )
                     Box(
                         modifier = Modifier.size(width = 28.dp, height = 18.dp)
                             .background(if (showHidden) AccentBlue else Color(0xFFE0E0E0), RoundedCornerShape(9.dp))
                             .clickable { showHidden = !showHidden },
-                        contentAlignment = if (showHidden) Alignment.CenterEnd else Alignment.CenterStart
+                        contentAlignment = Alignment.CenterStart
                     ) {
                         Box(
-                            Modifier.padding(horizontal = 2.dp).size(14.dp)
+                            Modifier.offset(x = thumbX).size(14.dp)
                                 .background(Color.White, CircleShape)
                         )
                     }
@@ -1467,7 +1496,7 @@ fun ClonerAppScreen() {
                         Text("Loading apps…", modifier = Modifier.padding(top = 12.dp))
                     }
                 }
-            } else if (tab == 0) {
+            } else if (t == 0) {
                 // v1.0.100: শুধু চলবে এমন অ্যাপ দেখাও — ব্যর্থ/অসমর্থিত
                 // অ্যাপ লুকিয়ে রাখো (উপরের টগলে দেখানো যায়)।
                 val filtered = apps.filter {
@@ -1661,6 +1690,8 @@ fun ClonerAppScreen() {
                         }
                     }
                 }
+            }
+            }
             }
         }
 
