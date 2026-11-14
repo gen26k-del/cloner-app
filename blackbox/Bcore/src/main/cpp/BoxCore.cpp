@@ -15,10 +15,12 @@
 #include <Hook/RuntimeHook.h>
 #include "Utils/HexDump.h"
 #include "hidden_api.h"
-#include <execinfo.h>
+#include <dlfcn.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include <time.h>
 #include <unistd.h>
+#include <unwind.h>
 
 struct {
     JavaVM *vm;
@@ -143,10 +145,28 @@ bool disableResourceLoading(JNIEnv *env, jclass clazz) {
 // backtrace to exit_trace.txt, showing WHERE the exit was called
 // from. It does NOT run on SIGKILL/_exit()/abort(), which is itself
 // informative (empty file + EXIT_SELF deaths => _exit-style exit).
-// The handler only uses open/write/close + backtrace_symbols_fd
-// (no allocation, no JNI) so it cannot crash the exiting process.
+// Uses _Unwind_Backtrace + dladdr: execinfo.h backtrace() is NOT
+// declared by the NDK 29 headers at this API level (build failure
+// on the first attempt). The handler only uses open/write/close +
+// unwind/dladdr (no allocation, no JNI) so it cannot crash the
+// exiting process.
 static char gExitTracePath[512] = {0};
 static bool gExitTracerInstalled = false;
+
+struct ExitTraceState {
+    void **frames;
+    int max;
+    int count;
+};
+
+static _Unwind_Reason_Code exitTraceUnwind(struct _Unwind_Context *context, void *arg) {
+    ExitTraceState *state = static_cast<ExitTraceState *>(arg);
+    uintptr_t pc = _Unwind_GetIP(context);
+    if (pc != 0 && state->count < state->max) {
+        state->frames[state->count++] = reinterpret_cast<void *>(pc);
+    }
+    return state->count >= state->max ? _URC_END_OF_STACK : _URC_NO_REASON;
+}
 
 static void exitTraceHandler() {
     if (gExitTracePath[0] == '\0') return;
@@ -168,8 +188,33 @@ static void exitTraceHandler() {
         (void) w;
     }
     void *frames[32];
-    int count = backtrace(frames, 32);
-    if (count > 0) backtrace_symbols_fd(frames, count, fd);
+    ExitTraceState state = {frames, 32, 0};
+    _Unwind_Backtrace(exitTraceUnwind, &state);
+    for (int i = 0; i < state.count; i++) {
+        Dl_info info;
+        char line[512];
+        int llen;
+        if (dladdr(frames[i], &info) != 0 && info.dli_fname != NULL) {
+            uintptr_t offset = reinterpret_cast<uintptr_t>(frames[i]) -
+                               reinterpret_cast<uintptr_t>(info.dli_fbase);
+            if (info.dli_sname != NULL) {
+                llen = snprintf(line, sizeof(line), "#%d pc=%p %s +0x%lx (%s +0x%lx)\n",
+                                i, frames[i], info.dli_fname, (unsigned long) offset,
+                                info.dli_sname,
+                                (unsigned long) (reinterpret_cast<uintptr_t>(frames[i]) -
+                                                 reinterpret_cast<uintptr_t>(info.dli_saddr)));
+            } else {
+                llen = snprintf(line, sizeof(line), "#%d pc=%p %s +0x%lx\n",
+                                i, frames[i], info.dli_fname, (unsigned long) offset);
+            }
+        } else {
+            llen = snprintf(line, sizeof(line), "#%d pc=%p <unknown>\n", i, frames[i]);
+        }
+        if (llen > 0) {
+            ssize_t w = write(fd, line, (size_t) llen);
+            (void) w;
+        }
+    }
     const char *tail = "=== END NATIVE EXIT ===\n";
     ssize_t w2 = write(fd, tail, strlen(tail));
     (void) w2;
