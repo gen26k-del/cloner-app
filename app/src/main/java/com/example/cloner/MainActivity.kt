@@ -15,6 +15,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
@@ -95,7 +96,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -1558,6 +1566,7 @@ fun ClonerAppScreen() {
                                     DropdownMenu(
                                         expanded = pendingMenu == clone,
                                         onDismissRequest = { pendingMenu = null },
+                                        modifier = Modifier.width(280.dp),
                                         shape = RoundedCornerShape(16.dp),
                                         containerColor = Color(0xFF6B6A70)
                                     ) {
@@ -1571,28 +1580,27 @@ fun ClonerAppScreen() {
                                                 modifier = Modifier.size(32.dp).clip(RoundedCornerShape(8.dp))
                                             )
                                             Spacer(Modifier.width(12.dp))
-                                            Text(title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                            Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                                         }
-                                        HorizontalDivider(color = Color.White.copy(alpha = 0.25f))
-                                        DarkMenuItem("Delete", Icons.Filled.Delete) {
+                                        DarkMenuItem("Delete", "delete") {
                                             pendingMenu = null; pendingDelete = clone
                                         }
-                                        DarkMenuItem("Force stop", Icons.Filled.Warning) {
+                                        DarkMenuItem("Force stop", "forceStop") {
                                             pendingMenu = null; doForceStop(clone)
                                         }
-                                        DarkMenuItem("Create shortcut", Icons.Filled.Share) {
+                                        DarkMenuItem("Create shortcut", "shortcut") {
                                             pendingMenu = null; pendingShortcut = clone
                                         }
-                                        DarkMenuItem("Edit Name/Icon", Icons.Outlined.Edit) {
+                                        DarkMenuItem("Edit Name/Icon", "edit") {
                                             pendingMenu = null; renameText = title; pendingRename = clone
                                         }
-                                        DarkMenuItem("Clear data", Icons.Filled.Delete) {
+                                        DarkMenuItem("Clear data", "broom") {
                                             pendingMenu = null; pendingClearData = clone
                                         }
-                                        DarkMenuItem("Clear cache", Icons.Filled.Delete) {
+                                        DarkMenuItem("Clear cache", "broom") {
                                             pendingMenu = null; doClearCache(clone)
                                         }
-                                        DarkMenuItem("Clone apps", Icons.Filled.Add) {
+                                        DarkMenuItem("Clone apps", "clone") {
                                             pendingMenu = null; doClone(app)
                                         }
                                     }
@@ -1976,11 +1984,72 @@ fun AppGridItem(
 }
 
 @Composable
-fun DarkMenuItem(text: String, icon: ImageVector, onClick: () -> Unit) {
-    // v1.0.100: লং-প্রেস মেনুর আইটেম — সাদা লেখা, ডানে আইকন (স্ক্রিনশটের মতো)।
+fun MenuGlyph(kind: String) {
+    // v1.0.103: স্ক্রিনশটের মতো পাতলা আউটলাইন চিহ্ন — Material-এ এই চিহ্নগুলো
+    // নেই, তাই হাতে আঁকা (বৃত্ত-বিয়োগ, সতর্ক-ত্রিভুজ, বাঁকা তীর, ঝাঁটা, দুই বর্গ)।
+    if (kind == "edit") {
+        Icon(Icons.Outlined.Edit, contentDescription = null, tint = Color.White)
+        return
+    }
+    Canvas(Modifier.size(24.dp)) {
+        val u = size.width / 24f
+        fun p(x: Float, y: Float) = Offset(x * u, y * u)
+        val white = Color.White
+        val sw = 1.7f * u
+        val stroke = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        when (kind) {
+            "delete" -> {
+                drawCircle(white, radius = 8.5f * u, center = p(12f, 12f), style = stroke)
+                drawLine(white, p(7f, 12f), p(17f, 12f), sw, StrokeCap.Round)
+            }
+            "forceStop" -> {
+                val tri = Path().apply {
+                    moveTo(12f * u, 4.5f * u)
+                    lineTo(20f * u, 19f * u)
+                    lineTo(4f * u, 19f * u)
+                    close()
+                }
+                drawPath(tri, white, style = stroke)
+                drawLine(white, p(12f, 10f), p(12f, 14.2f), sw, StrokeCap.Round)
+                drawCircle(white, radius = 1.1f * u, center = p(12f, 16.8f))
+            }
+            "shortcut" -> {
+                val curve = Path().apply {
+                    moveTo(5f * u, 18f * u)
+                    cubicTo(5f * u, 9f * u, 10f * u, 6f * u, 17f * u, 6f * u)
+                }
+                drawPath(curve, white, style = stroke)
+                drawLine(white, p(17f, 6f), p(13.4f, 2.8f), sw, StrokeCap.Round)
+                drawLine(white, p(17f, 6f), p(13.4f, 9.2f), sw, StrokeCap.Round)
+            }
+            "broom" -> {
+                drawLine(white, p(6f, 4f), p(11.5f, 9.5f), sw, StrokeCap.Round)
+                val head = Path().apply {
+                    moveTo(10f * u, 11f * u)
+                    lineTo(17f * u, 11f * u)
+                    lineTo(19.5f * u, 18f * u)
+                    lineTo(12.5f * u, 18f * u)
+                    close()
+                }
+                drawPath(head, white, style = stroke)
+                drawLine(white, p(13.8f, 12.6f), p(13.8f, 16.6f), sw, StrokeCap.Round)
+                drawLine(white, p(16.2f, 12.6f), p(16.2f, 16.6f), sw, StrokeCap.Round)
+            }
+            "clone" -> {
+                drawRoundRect(white, p(8f, 4f), Size(12f * u, 12f * u), CornerRadius(2f * u), stroke)
+                drawRoundRect(Color(0xFF6B6A70), p(4f, 8f), Size(12f * u, 12f * u), CornerRadius(2f * u))
+                drawRoundRect(white, p(4f, 8f), Size(12f * u, 12f * u), CornerRadius(2f * u), stroke)
+            }
+        }
+    }
+}
+
+@Composable
+fun DarkMenuItem(text: String, glyph: String, onClick: () -> Unit) {
+    // v1.0.100: লং-প্রেস মেনুর আইটেম — সাদা লেখা, ডানে আউটলাইন চিহ্ন (স্ক্রিনশটের মতো)।
     DropdownMenuItem(
-        text = { Text(text, color = Color.White, fontSize = 14.sp) },
-        trailingIcon = { Icon(icon, contentDescription = null, tint = Color.White) },
+        text = { Box(Modifier.padding(horizontal = 8.dp)) { Text(text, color = Color.White, fontSize = 15.sp) } },
+        trailingIcon = { Box(Modifier.padding(horizontal = 8.dp)) { MenuGlyph(glyph) } },
         onClick = onClick
     )
 }
