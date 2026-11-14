@@ -15,6 +15,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,12 +47,14 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -322,6 +326,10 @@ fun ClonerAppScreen() {
     var showHidden by remember { mutableStateOf(false) }
     // v1.0.100: গ্রিডে টিক দেওয়া অ্যাপ — "ক্লোন করো" বোতামে একসাথে ক্লোন হবে।
     var selectedPkgs by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // v1.0.100: ক্লোন ট্যাবের এডিট মোড (Multiple App-এর পেন্সিল) + ডায়ালগ।
+    var editMode by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<CloneId?>(null) }
+    var pendingShortcut by remember { mutableStateOf<CloneId?>(null) }
     // v1.0.97: শর্টকাট থেকে এলে অটো-চেকআপ চালাবে না — ক্লোনটাই চালু হবে।
     // (প্রথম কম্পোজিশনে ধরা হয় — তখনো launchPkg খরচ হয়নি।)
     val wasShortcutLaunch = remember { MainActivity.launchPkg != null }
@@ -1127,11 +1135,29 @@ fun ClonerAppScreen() {
         if (Engine.current.isReady()) runFullCheckup()
     }
 
-    Scaffold(containerColor = MaterialTheme.colorScheme.background) { pad ->
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        floatingActionButton = {
+            // v1.0.100: Multiple App-এর "+" — ক্লোন ট্যাব থেকে অ্যাপ বাছাইয়ে যায়।
+            if (tab == 1) {
+                FloatingActionButton(
+                    onClick = { tab = 0 },
+                    containerColor = BrandBlue,
+                    contentColor = Color.White
+                ) {
+                    Text("+", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    ) { pad ->
         // পুরো স্ক্রিন স্ক্রলযোগ্য — লম্বা কার্ড (চেকআপের ফলাফল/রিপোর্ট) যাতে
         // ট্যাব আর অ্যাপের তালিকাকে স্ক্রিনের বাইরে ঠেলে দিতে না পারে।
         // (আগে বাইরের Column স্ক্রল হতো না, তাই অ্যাপের তালিকা দেখা যেত না।)
-        Column(Modifier.padding(pad).verticalScroll(rememberScrollState())) {
+        // v1.0.100: Multiple App-এর মতো হালকা নীল-বেগুনি গ্রেডিয়েন্ট ব্যাকগ্রাউন্ড।
+        Column(
+            Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState())
+                .background(Brush.verticalGradient(listOf(Color(0xFFE8F4FE), Color(0xFFF1E9FB))))
+        ) {
             // ব্র্যান্ড হেডার
             HeaderCard(cloneCount = clones.size)
 
@@ -1447,7 +1473,7 @@ fun ClonerAppScreen() {
 
             TabRow(
                 selectedTabIndex = tab,
-                containerColor = MaterialTheme.colorScheme.background,
+                containerColor = Color.Transparent,
                 contentColor = BrandBlue,
                 indicator = { tabPositions ->
                     TabRowDefaults.SecondaryIndicator(
@@ -1479,13 +1505,14 @@ fun ClonerAppScreen() {
                 // v1.0.97: শুধু চলবে এমন অ্যাপ দেখাও — ব্যর্থ/অসমর্থিত
                 // অ্যাপ লুকিয়ে রাখো (টগলে দেখানো যায়)।
                 val hiddenCount = apps.count {
-                    it.pkg in failedPkgs || isUnsupportedPackage(it.pkg) || isGmsSystemPackage(it.pkg)
+                    it.pkg in failedPkgs || isUnsupportedPackage(it.pkg) || isGmsSystemPackage(it.pkg) || it.isSystemOnly
                 }
                 val filtered = apps.filter {
                     (query.isBlank() || it.label.contains(query, ignoreCase = true) ||
                         it.pkg.contains(query, ignoreCase = true)) &&
-                    !it.isSystemOnly && // v1.0.100: সিস্টেম অ্যাপ কখনোই দেখাবে না
-                    (showHidden || (it.pkg !in failedPkgs && !isUnsupportedPackage(it.pkg) && !isGmsSystemPackage(it.pkg)))
+                    // v1.0.100: "দেখাও" টগলে সিস্টেম অ্যাপও দেখাবে (Multiple App-এর
+                    // টগলের মতো); ডিফল্টে শুধু ইনস্টল করা অ্যাপ।
+                    (showHidden || (!it.isSystemOnly && it.pkg !in failedPkgs && !isUnsupportedPackage(it.pkg) && !isGmsSystemPackage(it.pkg)))
                 }
                 if (hiddenCount > 0) {
                     Row(
@@ -1493,7 +1520,7 @@ fun ClonerAppScreen() {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "🚫 ${hiddenCount}টি অ্যাপ লুকানো আছে (চলে না)",
+                            "🚫 ${hiddenCount}টি অ্যাপ লুকানো আছে",
                             fontSize = 12.sp,
                             modifier = Modifier.weight(1f)
                         )
@@ -1561,39 +1588,120 @@ fun ClonerAppScreen() {
                     }
                 }
             } else {
+                // v1.0.100: Multiple App-এর মতো ক্লোন হোম — অ্যাপ অনুযায়ী
+                // গ্রুপ, ৪ কলামের গ্রিড; চাপলে চালু, চেপে ধরলে শর্টকাট,
+                // এডিট মোডে চাপলে মোছার ডায়ালগ।
+                val shownClones = clones.filter { clone ->
+                    if (query.isBlank()) true else {
+                        val a = apps.find { it.pkg == clone.pkg }
+                        a != null && (a.label.contains(query, ignoreCase = true) ||
+                            a.pkg.contains(query, ignoreCase = true))
+                    }
+                }.sortedWith(compareBy({ it.pkg }, { it.userId }))
                 if (clones.isEmpty()) {
                     EmptyHint("এখনো কোনো ক্লোন নেই।\n\"সব অ্যাপ\" থেকে ক্লোন করুন।")
+                } else if (shownClones.isEmpty()) {
+                    EmptyHint("কোনো ক্লোন পাওয়া যায়নি")
                 } else {
-                    LazyColumn(
-                        modifier = Modifier.padding(vertical = 4.dp).height(600.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        items(
-                            clones.sortedWith(compareBy({ it.pkg }, { it.userId })),
-                            key = { it.toString() }
-                        ) { clone ->
-                            val app = apps.find { it.pkg == clone.pkg }
-                            if (app != null) {
-                                val siblings = clones.filter { it.pkg == clone.pkg }
-                                    .sortedBy { it.userId }
-                                val idx = siblings.indexOf(clone) + 1
+                        Text(
+                            if (editMode) "মুছতে টাইলে চাপুন" else "চালু করতে চাপুন • শর্টকাটের জন্য চেপে ধরুন",
+                            fontSize = 12.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { editMode = !editMode }) {
+                            Text(if (editMode) "সম্পন্ন" else "✏️ সম্পাদনা")
+                        }
+                    }
+                    val groups = shownClones.groupBy { it.pkg }.entries.sortedBy { entry ->
+                        apps.find { it.pkg == entry.key }?.label?.lowercase() ?: entry.key
+                    }
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(4),
+                        modifier = Modifier.padding(vertical = 4.dp).height(600.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        for ((pkg, groupClones) in groups) {
+                            val app = apps.find { it.pkg == pkg } ?: continue
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                Text(
+                                    app.label,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    modifier = Modifier.padding(top = 8.dp)
+                                )
+                            }
+                            items(groupClones.size, key = { groupClones[it].toString() }) { idx ->
+                                val clone = groupClones[idx]
+                                val siblings = clones.filter { it.pkg == pkg }.sortedBy { it.userId }
                                 val title = if (siblings.size > 1)
-                                    "${app.label} $idx" else app.label
-                                CloneRow(
+                                    "${app.label} ${siblings.indexOf(clone) + 1}" else app.label
+                                CloneGridItem(
                                     app = app,
                                     title = title,
+                                    editMode = editMode,
                                     busy = busyClone == clone,
-                                    onLaunch = { doLaunch(clone) },
-                                    onDelete = { doDelete(clone) },
-                                    onShortcut = {
-                                        (ctx as? MainActivity)?.pinCloneShortcut(clone, app, title)
-                                            ?: toast("শর্টকাট যোগ করা যায়নি")
-                                    }
+                                    onClick = {
+                                        if (editMode) pendingDelete = clone else doLaunch(clone)
+                                    },
+                                    onLongClick = { pendingShortcut = clone }
                                 )
                             }
                         }
                     }
                 }
             }
+        }
+
+        // v1.0.100: মোছার নিশ্চিতকরণ (Multiple App-এর Delete ডায়ালগের মতো)।
+        val delClone = pendingDelete
+        if (delClone != null) {
+            val delApp = apps.find { it.pkg == delClone.pkg }
+            AlertDialog(
+                onDismissRequest = { pendingDelete = null },
+                title = { Text("${delApp?.label ?: delClone.pkg} মুছবেন?") },
+                text = { Text("এই ক্লোনটি মুছে ফেলা হবে। এর সব ডেটা মুছে যাবে এবং ফেরানো যাবে না।") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        pendingDelete = null
+                        doDelete(delClone)
+                    }) { Text("মুছুন") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingDelete = null }) { Text("বাতিল") }
+                }
+            )
+        }
+        // v1.0.100: চেপে ধরলে শর্টকাট ডায়ালগ।
+        val scClone = pendingShortcut
+        if (scClone != null) {
+            val scApp = apps.find { it.pkg == scClone.pkg }
+            val scSiblings = clones.filter { it.pkg == scClone.pkg }.sortedBy { it.userId }
+            val scTitle = if (scApp != null && scSiblings.size > 1)
+                "${scApp.label} ${scSiblings.indexOf(scClone) + 1}" else scApp?.label ?: scClone.pkg
+            AlertDialog(
+                onDismissRequest = { pendingShortcut = null },
+                title = { Text(scTitle) },
+                text = { Text("হোম স্ক্রিনে এই ক্লোনের শর্টকাট যোগ করবেন?") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        pendingShortcut = null
+                        if (scApp != null) {
+                            (ctx as? MainActivity)?.pinCloneShortcut(scClone, scApp, scTitle)
+                                ?: toast("শর্টকাট যোগ করা যায়নি")
+                        }
+                    }) { Text("শর্টকাট যোগ করুন") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingShortcut = null }) { Text("বাতিল") }
+                }
+            )
         }
     }
 }
@@ -1701,47 +1809,115 @@ fun AppGridItem(
     busy: Boolean,
     onToggle: () -> Unit
 ) {
-    // v1.0.100: Multiple App-এর মতো গ্রিড আইটেম — বড় আইকন, নিচে নাম,
-    // কোণায় টিক-বাক্স। চাপলে টিক ওঠে/নামে।
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable(onClick = onToggle).padding(4.dp)
+    // v1.0.100: Multiple App-এর মতো গ্রিড আইটেম — সাদা টাইল, বড় আইকন,
+    // নিচে নাম, কোণায় টিক-বাক্স। চাপলে টিক ওঠে/নামে।
+    Card(
+        modifier = Modifier.clickable(onClick = onToggle),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Box {
-            Image(
-                bitmap = app.icon,
-                contentDescription = null,
-                modifier = Modifier.size(56.dp).clip(RoundedCornerShape(14.dp))
-            )
-            Box(
-                modifier = Modifier.align(Alignment.TopEnd)
-                    .offset(x = 4.dp, y = (-4).dp)
-                    .size(20.dp)
-                    .background(if (selected) BrandBlue else Color.White, CircleShape)
-                    .border(1.5.dp, if (selected) BrandBlue else Color(0xFFBDBDBD), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                if (selected) {
-                    Text("✓", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.fillMaxWidth().padding(8.dp)
+        ) {
+            Box {
+                Image(
+                    bitmap = app.icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(52.dp).clip(RoundedCornerShape(13.dp))
+                )
+                Box(
+                    modifier = Modifier.align(Alignment.TopEnd)
+                        .size(20.dp)
+                        .background(if (selected) BrandBlue else Color.White, RoundedCornerShape(6.dp))
+                        .border(1.5.dp, if (selected) BrandBlue else Color(0xFFBDBDBD), RoundedCornerShape(6.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (selected) {
+                        Text("✓", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                if (busy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.Center).size(28.dp),
+                        strokeWidth = 3.dp,
+                        color = BrandBlue
+                    )
                 }
             }
-            if (busy) {
-                CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center).size(28.dp),
-                    strokeWidth = 3.dp,
-                    color = BrandBlue
-                )
-            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                app.label,
+                fontSize = 11.sp,
+                lineHeight = 13.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center
+            )
         }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            app.label,
-            fontSize = 11.sp,
-            lineHeight = 13.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center
-        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun CloneGridItem(
+    app: AppInfo,
+    title: String,
+    editMode: Boolean,
+    busy: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
+    // v1.0.100: Multiple App-এর মতো ক্লোন টাইল — সাদা কার্ড, আইকন, নাম;
+    // এডিট মোডে লাল "−" ব্যাজ; চেপে ধরলে শর্টকাট ডায়ালগ।
+    Card(
+        modifier = Modifier.combinedClickable(
+            onClick = onClick,
+            onLongClick = onLongClick
+        ),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.fillMaxWidth().padding(8.dp)
+        ) {
+            Box {
+                Image(
+                    bitmap = app.icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(52.dp).clip(RoundedCornerShape(13.dp))
+                )
+                if (editMode) {
+                    Box(
+                        modifier = Modifier.align(Alignment.TopEnd)
+                            .size(20.dp)
+                            .background(Color(0xFFE53935), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("-", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                if (busy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.Center).size(28.dp),
+                        strokeWidth = 3.dp,
+                        color = BrandBlue
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                title,
+                fontSize = 11.sp,
+                lineHeight = 13.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center
+            )
+        }
     }
 }
 
