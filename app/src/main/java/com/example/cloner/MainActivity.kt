@@ -584,6 +584,9 @@ fun ClonerAppScreen() {
                 busyClone = null
                 selectedPkgs = emptySet()
                 toast("${ok} cloned" + if (fail > 0) ", $fail failed" else "")
+                // v1.0.114: ক্লোন শেষে হোমে ফিরে যাও (Multiple App-এর মতো) —
+                // নতুন ক্লোনগুলো সাথে সাথে দেখা যায়; সব ব্যর্থ হলে পিকারে থাকো।
+                if (ok > 0) tab = 1
             }
         }
     }
