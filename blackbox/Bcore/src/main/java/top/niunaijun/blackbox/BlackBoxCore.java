@@ -1840,6 +1840,17 @@ public class BlackBoxCore extends ClientConfiguration {
             } catch (Exception e) {
                 Slog.w(TAG, "NativeCore initialization failed: " + e.getMessage());
             }
+
+            try {
+                // v1.0.120: নেটিভ exit ট্রেসার বসাও — .so ইতিমধ্যে লোড
+                // হয়ে গেছে (NativeCore.init-এর আগেই class init), তাই
+                // JNI রেজিস্ট্রেশন হয়ে গেছে। ব্যর্থ হলে চুপচাপ এগোও।
+                java.io.File cacheDir = sContext.getCacheDir();
+                if (cacheDir != null) {
+                    NativeCore.installExitTracer(new java.io.File(cacheDir, "exit_trace.txt").getAbsolutePath());
+                }
+            } catch (Throwable ignored) {
+            }
             
             
             try {
