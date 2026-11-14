@@ -18,7 +18,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.animateColorAsState
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -51,7 +51,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.animateItemPlacement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
@@ -1561,7 +1560,6 @@ fun ClonerAppScreen() {
                             items(hotApps.size, key = { "hot:" + hotApps[it].pkg }) { idx ->
                                 val app = hotApps[idx]
                                 AppGridItem(
-                                    modifier = Modifier.animateItemPlacement(),
                                     app = app,
                                     selected = app.pkg in selectedPkgs,
                                     busy = busyClone?.pkg == app.pkg
@@ -1584,7 +1582,6 @@ fun ClonerAppScreen() {
                             items(sectionApps.size, key = { letter.toString() + ":" + sectionApps[it].pkg }) { idx ->
                                 val app = sectionApps[idx]
                                 AppGridItem(
-                                    modifier = Modifier.animateItemPlacement(),
                                     app = app,
                                     selected = app.pkg in selectedPkgs,
                                     busy = busyClone?.pkg == app.pkg
@@ -1653,7 +1650,7 @@ fun ClonerAppScreen() {
                             items(groupClones.size, key = { groupClones[it].toString() }) { idx ->
                                 val clone = groupClones[idx]
                                 val title = displayTitle(clone, app)
-                                Box(Modifier.animateItemPlacement()) {
+                                Box {
                                     CloneGridItem(
                                         app = app,
                                         title = title,
@@ -2104,7 +2101,6 @@ fun TileLabel(text: String) {
 
 @Composable
 fun AppGridItem(
-    modifier: Modifier = Modifier,
     app: AppInfo,
     selected: Boolean,
     busy: Boolean,
@@ -2113,7 +2109,7 @@ fun AppGridItem(
     // v1.0.100: Multiple App-এর মতো গ্রিড আইটেম — সাদা টাইল, বড় আইকন,
     // নিচে নাম, কোণায় টিক-বাক্স। চাপলে টিক ওঠে/নামে।
     Card(
-        modifier = modifier.clickable(onClick = onToggle),
+        modifier = Modifier.clickable(onClick = onToggle),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
