@@ -21,6 +21,8 @@
 #include <time.h>
 #include <unistd.h>
 #include <unwind.h>
+#include "xdl.h"
+#include "Dobby/dobby.h"
 
 struct {
     JavaVM *vm;
@@ -140,16 +142,16 @@ bool disableResourceLoading(JNIEnv *env, jclass clazz) {
 // v1.0.120: native exit tracer. Chromium child processes die with
 // ApplicationExitInfo reason EXIT_SELF while the Java shutdown hook
 // (proven registered) never fires -- so the exit comes from native
-// code (exit() from libchrome or a library). An atexit handler runs
-// on any exit() call: it appends pid + time + cmdline + a native
-// backtrace to exit_trace.txt, showing WHERE the exit was called
-// from. It does NOT run on SIGKILL/_exit()/abort(), which is itself
-// informative (empty file + EXIT_SELF deaths => _exit-style exit).
-// Uses _Unwind_Backtrace + dladdr: execinfo.h backtrace() is NOT
-// declared by the NDK 29 headers at this API level (build failure
-// on the first attempt). The handler only uses open/write/close +
-// unwind/dladdr (no allocation, no JNI) so it cannot crash the
-// exiting process.
+// code. An atexit handler runs on any exit() call: it appends pid +
+// time + cmdline + a native backtrace to exit_trace.txt. It does NOT
+// run on SIGKILL/_exit()/abort(). v1.0.121 proved the tracer IS
+// installed in every stub (INSTALLED lines, both sides) yet no
+// atexit block ever appeared -- so the deaths bypass exit().
+// v1.0.122: Dobby hooks on libc exit/_exit/_Exit catch the bypass
+// (Chromium's base::ExitCurrentProcess uses _exit()). The hooks
+// write the same backtrace, then call the original. All writers use
+// only open/write/close + unwind/dladdr (no allocation, no JNI),
+// so they cannot crash the exiting process.
 static char gExitTracePath[512] = {0};
 static bool gExitTracerInstalled = false;
 
@@ -168,7 +170,7 @@ static _Unwind_Reason_Code exitTraceUnwind(struct _Unwind_Context *context, void
     return state->count >= state->max ? _URC_END_OF_STACK : _URC_NO_REASON;
 }
 
-static void exitTraceHandler() {
+static void writeExitTrace(const char *label) {
     if (gExitTracePath[0] == '\0') return;
     int fd = open(gExitTracePath, O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (fd < 0) return;
@@ -181,8 +183,8 @@ static void exitTraceHandler() {
     }
     char header[1024];
     int len = snprintf(header, sizeof(header),
-                       "=== NATIVE EXIT pid=%d time=%ld cmdline=%s ===\n",
-                       (int) getpid(), (long) time(NULL), cmdline);
+                       "=== %s pid=%d time=%ld cmdline=%s ===\n",
+                       label, (int) getpid(), (long) time(NULL), cmdline);
     if (len > 0) {
         ssize_t w = write(fd, header, (size_t) len);
         (void) w;
@@ -215,10 +217,82 @@ static void exitTraceHandler() {
             (void) w;
         }
     }
-    const char *tail = "=== END NATIVE EXIT ===\n";
+    const char *tail = "=== END EXIT TRACE ===\n";
     ssize_t w2 = write(fd, tail, strlen(tail));
     (void) w2;
     close(fd);
+}
+
+static void exitTraceHandler() {
+    writeExitTrace("atexit");
+}
+
+typedef void (*ExitFunc)(int);
+static ExitFunc orig_exit = NULL;
+static ExitFunc orig_underscore_exit = NULL;
+static ExitFunc orig_capital_exit = NULL;
+
+static void exitHook(int status) {
+    writeExitTrace("exit-hook");
+    if (orig_exit != NULL) orig_exit(status);
+}
+
+static void underscoreExitHook(int status) {
+    writeExitTrace("_exit-hook");
+    if (orig_underscore_exit != NULL) orig_underscore_exit(status);
+}
+
+static void capitalExitHook(int status) {
+    writeExitTrace("_Exit-hook");
+    if (orig_capital_exit != NULL) orig_capital_exit(status);
+}
+
+static void installExitHooks() {
+    void *handle = xdl_open("libc.so", XDL_DEFAULT);
+    if (handle == NULL) return;
+    void *exitAddr = xdl_dsym(handle, "exit", nullptr);
+    void *underscoreExitAddr = xdl_dsym(handle, "_exit", nullptr);
+    void *capitalExitAddr = xdl_dsym(handle, "_Exit", nullptr);
+    int hookedExit = 0;
+    int hookedUnderscore = 0;
+    int hookedCapital = 0;
+    if (exitAddr != NULL) {
+        if (DobbyHook(exitAddr, (void *) exitHook, (void **) &orig_exit) == 0) {
+            hookedExit = 1;
+        } else {
+            orig_exit = NULL;
+        }
+    }
+    if (underscoreExitAddr != NULL && underscoreExitAddr != exitAddr) {
+        if (DobbyHook(underscoreExitAddr, (void *) underscoreExitHook,
+                      (void **) &orig_underscore_exit) == 0) {
+            hookedUnderscore = 1;
+        } else {
+            orig_underscore_exit = NULL;
+        }
+    }
+    if (capitalExitAddr != NULL && capitalExitAddr != exitAddr &&
+        capitalExitAddr != underscoreExitAddr) {
+        if (DobbyHook(capitalExitAddr, (void *) capitalExitHook,
+                      (void **) &orig_capital_exit) == 0) {
+            hookedCapital = 1;
+        } else {
+            orig_capital_exit = NULL;
+        }
+    }
+    xdl_close(handle);
+    int fd = open(gExitTracePath, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (fd >= 0) {
+        char line[128];
+        int len = snprintf(line, sizeof(line),
+                           "EXIT HOOKS exit=%d _exit=%d _Exit=%d\n",
+                           hookedExit, hookedUnderscore, hookedCapital);
+        if (len > 0) {
+            ssize_t w = write(fd, line, (size_t) len);
+            (void) w;
+        }
+        close(fd);
+    }
 }
 
 void installExitTracer(JNIEnv *env, jclass clazz, jstring path) {
@@ -233,8 +307,8 @@ void installExitTracer(JNIEnv *env, jclass clazz, jstring path) {
     atexit(exitTraceHandler);
     // v1.0.121: prove the native side ran AND the file is writable
     // from native code (the handler uses this same open path at
-    // exit time). If this line appears but no NATIVE EXIT block
-    // ever does, the deaths bypass exit() entirely.
+    // exit time). If this line appears but no exit block ever
+    // does, the deaths bypass exit() entirely.
     int fd = open(gExitTracePath, O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (fd >= 0) {
         char line[600];
@@ -247,6 +321,10 @@ void installExitTracer(JNIEnv *env, jclass clazz, jstring path) {
         }
         close(fd);
     }
+    // v1.0.122: hook exit/_exit/_Exit so _exit-style deaths leave
+    // a backtrace too. Failures are silent -- the atexit handler
+    // above still covers plain exit() calls.
+    installExitHooks();
 }
 
 static JNINativeMethod gMethods[] = {
