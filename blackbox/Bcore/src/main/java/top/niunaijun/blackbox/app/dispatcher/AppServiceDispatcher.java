@@ -215,6 +215,17 @@ public class AppServiceDispatcher {
             }
             IBinder parentBinder = data.readStrongBinder();
             java.util.ArrayList<IBinder> clientInterfaces = data.createBinderArrayList();
+            // v1.0.126: M140+ setupConnection-এর ৪র্থ আর্গুমেন্ট binderBox
+            // (optional binder box — ভেতরে আরো binder থাকতে পারে)।
+            // v1.0.89 থেকে rewrite এটা পড়ত/লিখত না — আসল Stub ৪র্থ
+            // read-এ null পেত। dataAvail থাকলে পড়ে forward করো; ৩-আর্গ
+            // Stub-এর ক্ষেত্রে বাড়তি null trailing data হিসেবে ignore হয়।
+            IBinder binderBox = null;
+            if (data.dataAvail() > 0) {
+                try { binderBox = data.readStrongBinder(); } catch (Throwable ignored) { }
+            }
+            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                    "v1.0.126 setupConnection binderBox=" + (binderBox != null ? "present" : "null"));
             // relroInfo = null করো।
             // v1.0.89: TYPE দিয়ে field খোঁজো — v1.0.88-তে নাম দিয়ে
             // খুঁজে পাওয়া যায়নি ("relro" নামের অংশও নেই) — Chromium-এর
@@ -327,6 +338,7 @@ public class AppServiceDispatcher {
                 newData.writeTypedObject((Parcelable) args, 0);
                 newData.writeStrongBinder(parentBinder);
                 newData.writeBinderList(clientInterfaces);
+                newData.writeStrongBinder(binderBox);
                 return mReal.transact(TRANSACTION_setupConnection, newData, reply, flags);
             } finally {
                 newData.recycle();
