@@ -2,7 +2,9 @@ package top.niunaijun.blackbox.fake.service;
 
 import android.app.AppOpsManager;
 import android.content.Context;
+import android.os.Build;
 import android.os.IBinder;
+import android.os.Process;
 
 import java.lang.reflect.Method;
 
@@ -47,11 +49,26 @@ public class IAppOpsManagerProxy extends BinderInvocationStub {
         
         
         
-        if (methodName.startsWith("check") || 
-            methodName.startsWith("note") || 
+        if (methodName.startsWith("check") ||
+            methodName.startsWith("note") ||
             methodName.startsWith("start")) {
             Slog.d(TAG, "AppOps invoke: Bypassing system for " + methodName + ", allowing operation");
-            return AppOpsManager.MODE_ALLOWED;
+            // v1.0.135: API 30+ noteOperation/startOp/noteProxyOperation
+            // return SyncNotedAppOp, not int. Returning MODE_ALLOWED
+            // crashed callers with ClassCastException (WhatsApp,
+            // 2026-11-15 19:17:56). Build the object by reflection;
+            // on failure fall through to the real service below.
+            boolean needsNotedOp = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                    && (methodName.equals("noteOperation") || methodName.equals("startOp")
+                    || methodName.equals("noteProxyOperation"));
+            if (!needsNotedOp) {
+                return AppOpsManager.MODE_ALLOWED;
+            }
+            Object noted = methodName.equals("noteProxyOperation")
+                    ? notedOpFromAttributionSourceArg(args) : notedOpFromArgs(args);
+            if (noted != null) {
+                return noted;
+            }
         }
         
         
@@ -66,13 +83,11 @@ public class IAppOpsManagerProxy extends BinderInvocationStub {
             MethodParameterUtils.replaceLastUid(args);
             return super.invoke(proxy, method, args);
         } catch (SecurityException e) {
-            
             Slog.w(TAG, "AppOps invoke: SecurityException caught for " + methodName + ", allowing operation", e);
-            return AppOpsManager.MODE_ALLOWED;
+            return fallbackResult(method);
         } catch (Exception e) {
             Slog.e(TAG, "AppOps invoke: Error in method " + methodName, e);
-            
-            return AppOpsManager.MODE_ALLOWED;
+            return fallbackResult(method);
         }
     }
 
@@ -81,10 +96,83 @@ public class IAppOpsManagerProxy extends BinderInvocationStub {
         return false;
     }
 
+    // v1.0.135 helpers: SyncNotedAppOp is not in the public stubs,
+    // so everything below is reflection. Any failure returns null and
+    // the caller falls back to the real service.
+    private static Object newSyncNotedAppOp(Object attributionSource) {
+        try {
+            Class<?> notedCls = Class.forName("android.app.SyncNotedAppOp");
+            Class<?> attributionSourceCls = Class.forName("android.content.AttributionSource");
+            java.lang.reflect.Constructor<?> ctor;
+            try {
+                ctor = notedCls.getConstructor(int.class, attributionSourceCls, String.class);
+            } catch (NoSuchMethodException e) {
+                ctor = notedCls.getDeclaredConstructor(int.class, attributionSourceCls, String.class);
+                ctor.setAccessible(true);
+            }
+            return ctor.newInstance(AppOpsManager.MODE_ALLOWED, attributionSource, null);
+        } catch (Throwable t) {
+            Slog.d(TAG, "AppOps newSyncNotedAppOp failed: " + t);
+            return null;
+        }
+    }
+
+    private static Object newAttributionSource(int uid, String pkg, String tag) {
+        try {
+            Class<?> builderCls = Class.forName("android.content.AttributionSource$Builder");
+            Object builder = builderCls.getConstructor(int.class).newInstance(uid);
+            if (pkg != null) {
+                builderCls.getMethod("setPackageName", String.class).invoke(builder, pkg);
+            }
+            if (tag != null) {
+                builderCls.getMethod("setAttributionTag", String.class).invoke(builder, tag);
+            }
+            return builderCls.getMethod("build").invoke(builder);
+        } catch (Throwable t) {
+            Slog.d(TAG, "AppOps newAttributionSource failed: " + t);
+            return null;
+        }
+    }
+
+    // noteOperation/startOp args: (code, uid, packageName, attributionTag, ...)
+    private static Object notedOpFromArgs(Object[] args) {
+        int uid = Process.myUid();
+        String pkg = null;
+        String tag = null;
+        if (args != null) {
+            if (args.length > 1 && args[1] instanceof Integer) uid = (Integer) args[1];
+            if (args.length > 2 && args[2] instanceof String) pkg = (String) args[2];
+            if (args.length > 3 && args[3] instanceof String) tag = (String) args[3];
+        }
+        return newSyncNotedAppOp(newAttributionSource(uid, pkg, tag));
+    }
+
+    // noteProxyOperation args: (code, AttributionSource, ...)
+    private static Object notedOpFromAttributionSourceArg(Object[] args) {
+        if (args != null && args.length > 1 && args[1] != null
+                && args[1].getClass().getName().equals("android.content.AttributionSource")) {
+            return newSyncNotedAppOp(args[1]);
+        }
+        return null;
+    }
+
+    private static Object fallbackResult(Method method) {
+        Class<?> returnType = method.getReturnType();
+        if (returnType == int.class || returnType == Integer.class) {
+            return AppOpsManager.MODE_ALLOWED;
+        }
+        return null;
+    }
+
     @ProxyMethod("noteProxyOperation")
     public static class NoteProxyOperation extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Object noted = notedOpFromAttributionSourceArg(args);
+                if (noted != null) return noted;
+                return method.invoke(who, args);
+            }
             return AppOpsManager.MODE_ALLOWED;
         }
     }
@@ -124,8 +212,12 @@ public class IAppOpsManagerProxy extends BinderInvocationStub {
     public static class NoteOperation extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            
             Slog.d(TAG, "AppOps NoteOperation: Bypassing system check, allowing operation");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Object noted = notedOpFromArgs(args);
+                if (noted != null) return noted;
+                return method.invoke(who, args);
+            }
             return AppOpsManager.MODE_ALLOWED;
         }
     }
@@ -145,8 +237,12 @@ public class IAppOpsManagerProxy extends BinderInvocationStub {
     public static class StartOp extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            
             Slog.d(TAG, "AppOps StartOp: Bypassing system check, allowing operation");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Object noted = notedOpFromArgs(args);
+                if (noted != null) return noted;
+                return method.invoke(who, args);
+            }
             return AppOpsManager.MODE_ALLOWED;
         }
     }
