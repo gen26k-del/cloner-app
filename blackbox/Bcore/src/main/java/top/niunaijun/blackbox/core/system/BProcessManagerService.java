@@ -116,9 +116,18 @@ public class BProcessManagerService implements ISystemService {
         ActivityManager manager = (ActivityManager) BlackBoxCore.getContext().getSystemService(Context.ACTIVITY_SERVICE);
         List<ActivityManager.RunningAppProcessInfo> runningAppProcesses = manager.getRunningAppProcesses();
         Set<Integer> usingPs = new HashSet<>();
-        for (ActivityManager.RunningAppProcessInfo runningAppProcess : runningAppProcesses) {
-            int i = parseBPid(runningAppProcess.processName);
-            usingPs.add(i);
+        if (runningAppProcesses != null) {
+            for (ActivityManager.RunningAppProcessInfo runningAppProcess : runningAppProcesses) {
+                int i = parseBPid(runningAppProcess.processName);
+                usingPs.add(i);
+            }
+        }
+        // v1.0.135: also reserve bpids already allocated to records whose
+        // processes have not started yet (closes the double-allocation
+        // window; every mutation of mPidsSelfLocked holds mProcessLock,
+        // which the caller holds here).
+        for (ProcessRecord record : mPidsSelfLocked) {
+            usingPs.add(record.bpid);
         }
         for (int i = 0; i < ProxyManifest.FREE_COUNT; i++) {
             if (usingPs.contains(i)) {
