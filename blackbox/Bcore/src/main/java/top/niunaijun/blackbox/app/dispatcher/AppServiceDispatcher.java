@@ -88,6 +88,30 @@ public class AppServiceDispatcher {
     private static final int TRANSACTION_setupConnection = 3;
     private static final int TRANSACTION_consumeRelroLibInfo = 7;
 
+    // v1.0.132: Chromium child চেনার একটাই নিয়ম — সার্ভিসের ক্লাস
+    // hierarchy-তে ChildProcessService/SandboxedProcessService থাকলেই
+    // Chromium child। আগের নিয়ম (নামে "chromium" বা প্যাকেজে
+    // chrome/brave) Facebook Helium-কে (com.facebook.browser.helium.
+    // content.SandboxedProcessService) চিনতো না — তার onDestroy()
+    // System.exit(0) ডেকে প্রসেস মেরে ফেলতো (17:31:57-এর রিপোর্টে প্রমাণিত)।
+    private static boolean isChromiumChildService(Service svc, String fallbackName) {
+        if (svc != null) {
+            try {
+                Class<?> c = svc.getClass();
+                while (c != null) {
+                    String n = c.getName();
+                    if (n.contains("ChildProcessService") || n.contains("SandboxedProcessService")) {
+                        return true;
+                    }
+                    c = c.getSuperclass();
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return fallbackName != null
+                && (fallbackName.contains("ChildProcessService") || fallbackName.contains("SandboxedProcessService"));
+    }
+
     private static IBinder wrapChromiumChildBinder(IBinder binder, ServiceInfo serviceInfo) {
         if (binder == null || serviceInfo == null || serviceInfo.name == null
                 || serviceInfo.packageName == null) {
@@ -381,8 +405,7 @@ public class AppServiceDispatcher {
                 java.util.Map.Entry<Intent.FilterComparison, ServiceRecord> entry = it.next();
                 Service svc = entry.getValue().getService();
                 String svcName = svc != null ? svc.getClass().getName() : null;
-                boolean isChromiumChild = svcName != null
-                        && svcName.contains("ProcessService") && svcName.contains("chromium");
+                boolean isChromiumChild = isChromiumChildService(svc, svcName);
                 // Chromium child service — onDestroy() ডেকো না (System.exit(0)
                 // করে renderer মেরে দেয়)। cache-এ রেখে দাও, re-bind-এ reuse হবে।
                 if (isChromiumChild) {
@@ -469,10 +492,8 @@ public class AppServiceDispatcher {
             // cache-এ রেখে দাও, re-bind-এ onRebind() দিয়ে একই binder
             // ফেরত যাবে।
             ServiceInfo chromiumInfo = stubRecord.mServiceInfo;
-            boolean isChromiumChild = chromiumInfo != null && chromiumInfo.name != null
-                    && chromiumInfo.name.contains("ProcessService")
-                    && chromiumInfo.packageName != null
-                    && (chromiumInfo.packageName.contains("chrome") || chromiumInfo.packageName.contains("brave"));
+            boolean isChromiumChild = isChromiumChildService(service,
+                    chromiumInfo != null ? chromiumInfo.name : null);
             if (isChromiumChild) {
                 destroy = false;
                 BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
@@ -515,8 +536,7 @@ public class AppServiceDispatcher {
             // গার্ড ছিল না — v1.0.89-এ renderer নিঃশব্দে মরেছে (টম্বস্টোন
             // ছাড়া), এটাই পরের ফাঁক। cache-এ রেখে দাও।
             String svcName = record.getService().getClass().getName();
-            boolean isChromiumChild = svcName.contains("ProcessService")
-                    && svcName.contains("chromium");
+            boolean isChromiumChild = isChromiumChildService(record.getService(), svcName);
             if (isChromiumChild) {
                 BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
                         "stopService chromium child kept alive: " + svcName);
