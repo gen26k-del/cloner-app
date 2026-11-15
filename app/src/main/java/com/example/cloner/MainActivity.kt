@@ -1006,7 +1006,20 @@ fun ClonerAppScreen() {
             sb.append("\n--- নেটিভ exit ট্রেস ---\n")
             val exitFile = java.io.File(ctx.cacheDir, "exit_trace.txt")
             if (exitFile.exists()) {
-                sb.append(runCatching { exitFile.readText() }.getOrDefault("পড়া যায়নি").takeLast(6000) + "\n")
+                // v1.0.125: ব্লক-সচেতন — সব _exit/atexit ব্লক পুরো রাখো,
+                // INSTALLED লাইন শুধু শেষ ৬টি (আগে takeLast-এ ব্লক ছাঁটাই হতো)।
+                val exitRaw = runCatching { exitFile.readText() }.getOrDefault("পড়া যায়নি")
+                val exitLines = exitRaw.lines()
+                val kept = mutableListOf<String>()
+                var inBlock = false
+                for (ln in exitLines) {
+                    if (ln.startsWith("===") && ln.contains("pid=")) inBlock = true
+                    if (inBlock) kept.add(ln)
+                    if (ln.startsWith("=== END EXIT TRACE ===")) inBlock = false
+                }
+                val tailLines = exitLines.filter { it.contains("TRACER INSTALLED") || it.contains("EXIT HOOKS") }.takeLast(6)
+                val exitShown = if (kept.isNotEmpty()) (kept + tailLines).joinToString("\n") else exitRaw.takeLast(2000)
+                sb.append(exitShown.takeLast(8000) + "\n")
             } else {
                 sb.append("নেটিভ exit ট্রেস ফাইল নেই — কোনো প্রসেস exit() ডাকেনি (বা ট্রেসার বসেনি)।\n")
             }
@@ -1073,7 +1086,13 @@ fun ClonerAppScreen() {
                     "Render process", "exited with", "terminated", "crashed",
                     "ChildProcessLauncher", "RenderProcessHost", "Killing",
                     "low memory", "renderer process", "onServiceDisconnected",
-                    "child process died")
+                    "child process died",
+                    "cr_LibraryLoader", "cr_ChildProcess", "cr_Mojo",
+                    "ChildProcessMain", "ContentMain", "FATAL:",
+                    "CHECK failed", "dlopen failed", "Failed to load native",
+                    "OnDisconnected", "setupConnection", "consumeRelroLibInfo",
+                    "SharedRelro", "ActivityManagerStub", "setPriority",
+                    "setProcessImportant", "Linker")
                 // v1.0.96 রিপোর্ট-স্বাস্থ্য: "Creating new ChildProcessService"
                 // লাইনটাই deathKeys-এ ("ChildProcessService") ধরা পড়ে —
                 // v1.0.95-র রিপোর্টে ১৮টি একই লাইন মৃত্যুর লগ ভরে দিয়েছিল,
