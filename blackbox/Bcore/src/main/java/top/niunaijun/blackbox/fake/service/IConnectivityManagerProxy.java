@@ -1519,4 +1519,24 @@ public class IConnectivityManagerProxy extends BinderInvocationStub {
             }
         }
     }
+
+    @ProxyMethod("getNetworkInfoForUid")
+    public static class GetNetworkInfoForUid extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            // v1.0.124: Cronet (HttpEngine) ডাকে getNetworkInfoForUid; আসল
+            // ConnectivityService SecurityException দেয় ("Requires
+            // NETWORK_STACK / MAINLINE_NETWORK_STACK") কারণ ভার্চুয়াল
+            // প্রসেস হোস্ট UID-তে চলে। ফরওয়ার্ড না করে CONNECTED WIFI
+            // NetworkInfo ফেরত দাও — এই ফাইলের getNetworkInfo হুকগুলোর
+            // মতোই নিরীহ মান। না হলে CronetInit থ্রেডে UncaughtException
+            // হয়ে renderer-এর নেটওয়ার্ক মরে (10:29:56-এর ক্র্যাশ ফাইল)।
+            try {
+                return createNetworkInfo(ConnectivityManager.TYPE_WIFI, 0, "WIFI", "");
+            } catch (Exception e) {
+                Slog.w(TAG, "getNetworkInfoForUid fallback failed: " + e.getMessage());
+                return null;
+            }
+        }
+    }
 }
