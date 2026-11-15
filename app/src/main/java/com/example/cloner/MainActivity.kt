@@ -739,7 +739,13 @@ fun ClonerAppScreen() {
         if (busyClone != null) return
         busyClone = clone
         scope.launch(Dispatchers.IO) {
-            val result = Engine.current.launchClone(clone.pkg, clone.userId)
+            // v1.0.131: লঞ্চে সময়সীমা — ইঞ্জিন সাড়া না দিলে ২০ সেকেন্ডে
+            // ছেড়ে দাও। আগে সময়সীমা ছিল না: launchClone আটকে গেলে
+            // busyClone কখনো পরিষ্কার হতো না, আর সব ট্যাপ উপেক্ষিত হতো —
+            // ব্যবহারকারীর চোখে CloneMe পুরো আটকে যেত।
+            val result = kotlinx.coroutines.withTimeoutOrNull(20_000) {
+                Engine.current.launchClone(clone.pkg, clone.userId)
+            } ?: Result.failure(IllegalStateException("Launch timed out — engine didn't respond"))
             withContext(Dispatchers.Main) {
                 busyClone = null
                 result.onFailure { toast(it.message ?: "Couldn't launch") }
@@ -960,10 +966,15 @@ fun ClonerAppScreen() {
             // মেমরি/oom নমুনা (death_watch.txt)।
             sb.append("\n--- মৃত্যুর নজরদারি ---\n")
             val watchFile = java.io.File(ctx.cacheDir, "death_watch.txt")
+            // v1.0.130: এই স্ন্যাপশটটাই কাঁচা লগও ব্যবহার করবে — ফাইল
+            // আবার পড়লে রিপোর্ট বানানোর মাঝখানে মরা নতুন pid ধরা পড়ে,
+            // যার লাইন logcat ডাম্পে থাকে না (v1.0.129-এর ভুল)।
+            var watchTextSnap = ""
             if (watchFile.exists()) {
                 // v1.0.114: GONE লাইন (মৃত্যুর মুহূর্তের শেষ মাপসহ) + শেষ
                 // নমুনাগুলো দেখাও — আগের take(4000) শুধু পুরনো অংশ দেখাতো।
                 val watchText = runCatching { watchFile.readText() }.getOrDefault("পড়া যায়নি")
+                watchTextSnap = watchText
                 val goneLines = watchText.lines().filter { it.contains("GONE") || it.contains("EXIT pid=") }.takeLast(10)
                 if (goneLines.isEmpty()) sb.append("GONE লাইন নেই — নজরদারির সময় কোনো প্রসেস উধাও হয়নি।\n")
                 else sb.append("GONE (মৃত্যু):\n" + goneLines.joinToString("\n") + "\n")
@@ -1119,7 +1130,7 @@ fun ClonerAppScreen() {
                 // যা ধরতে পারে না (যেমন নেটিভ "chromium" ট্যাগের লাইন) তা
                 // দেখতে, শেষ GONE pid-এর সব লাইন ফিল্টার ছাড়াই নাও।
                 rawWindow = runCatching {
-                    val wText = java.io.File(ctx.cacheDir, "death_watch.txt").readText()
+                    val wText = watchTextSnap
                     // v1.0.129: _exit ব্লক আছে এমন শেষ pid-কেই লক্ষ্য করো
                     // (GONE pid অনেক সময় LOW_MEMORY-তে মরা প্রসেস হয়)।
                     val xText = runCatching { java.io.File(ctx.cacheDir, "exit_trace.txt").readText() }.getOrDefault("")
