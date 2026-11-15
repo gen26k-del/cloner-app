@@ -828,6 +828,22 @@ public class IActivityManagerProxy extends ClassInvocationStub {
         }
     }
 
+    @ProxyMethod("setProcessImportant")
+    public static class SetProcessImportant extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            // v1.0.125: Chromium-এর ChildProcessLauncherHelperImpl.setPriority
+            // এই AIDL ডাকে (token, pid, isForeground, reason)। আসল AM
+            // SecurityException দেয় — ভার্চুয়াল pid/token তার চেনা নয়।
+            // ClassInvocationStub.invoke কারণসহ rethrow করে, তাই
+            // এক্সেপশন Chromium-এর launch-flow-এ পৌঁছায়। ফরওয়ার্ড না
+            // করে চুপচাপ সফল ফেরত দাও (void মেথড — null-ই ঠিক)।
+            // আজও কলটি ব্যর্থ হয়, তাই গিলে ফেলা নিরাপদ — শুধু
+            // এক্সেপশনটি আর launch-flow-এ পৌঁছাবে না।
+            return null;
+        }
+    }
+
     @ProxyMethod("getHistoricalProcessExitReasons")
     public static class getHistoricalProcessExitReasons extends MethodHook {
         @Override
