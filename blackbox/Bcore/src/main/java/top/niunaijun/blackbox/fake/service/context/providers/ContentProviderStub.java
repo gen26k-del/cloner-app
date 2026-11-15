@@ -75,6 +75,10 @@ public class ContentProviderStub extends ClassInvocationStub implements BContent
         }
         
         
+        // v1.0.133: ভার্চুয়াল প্রোভাইডারের কাছে caller-পরিচয় হিসেবে ভার্চুয়াল প্যাকেজ পাঠাও।
+        // fixAttributionSourceInArgs সবসময় HOST প্যাকেজ বসায় — Meta-র delegate সেটা পড়ে
+        // "Called by: com.example.cloner" বলে প্রত্যাখ্যান করে (push-dedup ক্র্যাশ)।
+        fixAttributionPackageForVirtualProvider(args, methodName);
         methodName = method.getName();
         if (methodName.equals("query") || methodName.equals("insert") || 
             methodName.equals("update") || methodName.equals("delete") || 
@@ -121,6 +125,67 @@ public class ContentProviderStub extends ClassInvocationStub implements BContent
         }
     }
     
+    // v1.0.133: Uri-ওয়ালা প্রোভাইডার কলে (query/insert/update/delete/bulkInsert),
+    // authority ভার্চুয়াল হলে AttributionSource-এর প্যাকেজ ভার্চুয়াল প্যাকেজে বদলাও।
+    // সিস্টেম/GMS authority-তে host attribution-ই থাকবে (আসল সার্ভিস সেটাই চায়)।
+    private void fixAttributionPackageForVirtualProvider(Object[] args, String methodName) {
+        if (args == null) return;
+        if ("call".equals(methodName)) return;
+        String authority = null;
+        for (Object arg : args) {
+            if (arg instanceof android.net.Uri) {
+                authority = ((android.net.Uri) arg).getAuthority();
+                break;
+            }
+        }
+        if (authority == null || isForwardedAuthority(authority)) return;
+        String virtualPkg = null;
+        if (mAppPkg != null && !mAppPkg.equals(BlackBoxCore.getHostPkg())) {
+            virtualPkg = mAppPkg;
+        } else {
+            try {
+                String callerPkg = BActivityThread.getAppPackageName();
+                if (callerPkg != null && !callerPkg.equals(BlackBoxCore.getHostPkg())) {
+                    virtualPkg = callerPkg;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        if (virtualPkg == null) return;
+        for (Object arg : args) {
+            if (arg != null && arg.getClass().getName().contains("AttributionSource")) {
+                setAttributionPackage(arg, virtualPkg);
+            }
+        }
+    }
+
+    private boolean isForwardedAuthority(String authority) {
+        if (isSystemProviderAuthority(authority)) return true;
+        return authority.contains("com.google.android.gms")
+                || authority.contains("com.android.vending")
+                || authority.contains("com.google.android.gsf")
+                || authority.equals("com.google.android.gms.chimera")
+                || authority.equals("com.huawei.android.launcher.settings")
+                || authority.equals("com.hihonor.android.launcher.settings");
+    }
+
+    private void setAttributionPackage(Object attributionSource, String pkg) {
+        try {
+            Class<?> clazz = attributionSource.getClass();
+            String[] packageFieldNames = {"mPackageName", "packageName", "mSourcePackage", "sourcePackage"};
+            for (String fieldName : packageFieldNames) {
+                try {
+                    java.lang.reflect.Field packageField = clazz.getDeclaredField(fieldName);
+                    packageField.setAccessible(true);
+                    packageField.set(attributionSource, pkg);
+                    Slog.d(TAG, "v1.0.133 AttributionSource package set to: " + pkg);
+                    break;
+                } catch (NoSuchFieldException ignored) {
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+    }
     private Object getSafeDefaultValue(String methodName) {
         switch (methodName) {
             case "query":
