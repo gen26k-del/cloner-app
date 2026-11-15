@@ -1006,20 +1006,25 @@ fun ClonerAppScreen() {
             sb.append("\n--- নেটিভ exit ট্রেস ---\n")
             val exitFile = java.io.File(ctx.cacheDir, "exit_trace.txt")
             if (exitFile.exists()) {
-                // v1.0.125: ব্লক-সচেতন — সব _exit/atexit ব্লক পুরো রাখো,
-                // INSTALLED লাইন শুধু শেষ ৬টি (আগে takeLast-এ ব্লক ছাঁটাই হতো)।
+                // v1.0.125: ব্লক-সচেতন। v1.0.129: শেষ ২টি ব্লকই যথেষ্ট —
+                // সব ব্লকের স্ট্যাক হুবহু এক, আর ৬টি ব্লক রিপোর্ট এত লম্বা
+                // করে যে কাঁচা লগ বিভাগ মেসেজ-সীমায় কাটা পড়ে।
                 val exitRaw = runCatching { exitFile.readText() }.getOrDefault("পড়া যায়নি")
                 val exitLines = exitRaw.lines()
-                val kept = mutableListOf<String>()
-                var inBlock = false
+                val blocks = mutableListOf<MutableList<String>>()
+                var cur: MutableList<String>? = null
                 for (ln in exitLines) {
-                    if (ln.startsWith("===") && ln.contains("pid=")) inBlock = true
-                    if (inBlock) kept.add(ln)
-                    if (ln.startsWith("=== END EXIT TRACE ===")) inBlock = false
+                    val isHead = ln.startsWith("===") && ln.contains("pid=")
+                    if (isHead && (cur == null || cur!!.lastOrNull()?.startsWith("=== END EXIT TRACE ===") == true)) {
+                        cur = mutableListOf(); blocks.add(cur)
+                    }
+                    cur?.add(ln)
+                    if (ln.startsWith("=== END EXIT TRACE ===")) cur = null
                 }
                 val tailLines = exitLines.filter { it.contains("TRACER INSTALLED") || it.contains("EXIT HOOKS") }.takeLast(6)
-                val exitShown = if (kept.isNotEmpty()) (kept + tailLines).joinToString("\n") else exitRaw.takeLast(2000)
-                sb.append(exitShown.takeLast(8000) + "\n")
+                val headLine = if (blocks.size > 2) listOf("মোট ${blocks.size}টি exit ব্লক — শেষ ২টি দেখানো হলো (সবগুলোর স্ট্যাক একই রকম)") else emptyList()
+                val exitShown = if (blocks.isNotEmpty()) (headLine + blocks.takeLast(2).flatten() + tailLines).joinToString("\n") else exitRaw.takeLast(2000)
+                sb.append(exitShown.takeLast(5000) + "\n")
             } else {
                 sb.append("নেটিভ exit ট্রেস ফাইল নেই — কোনো প্রসেস exit() ডাকেনি (বা ট্রেসার বসেনি)।\n")
             }
@@ -1115,7 +1120,11 @@ fun ClonerAppScreen() {
                 // দেখতে, শেষ GONE pid-এর সব লাইন ফিল্টার ছাড়াই নাও।
                 rawWindow = runCatching {
                     val wText = java.io.File(ctx.cacheDir, "death_watch.txt").readText()
-                    val gonePid = Regex("GONE pid=(\\d+)").findAll(wText).lastOrNull()?.groupValues?.get(1)
+                    // v1.0.129: _exit ব্লক আছে এমন শেষ pid-কেই লক্ষ্য করো
+                    // (GONE pid অনেক সময় LOW_MEMORY-তে মরা প্রসেস হয়)।
+                    val xText = runCatching { java.io.File(ctx.cacheDir, "exit_trace.txt").readText() }.getOrDefault("")
+                    val exitPid = Regex("=== .*pid=(\\d+)").findAll(xText).lastOrNull()?.groupValues?.get(1)
+                    val gonePid = exitPid ?: Regex("GONE pid=(\\d+)").findAll(wText).lastOrNull()?.groupValues?.get(1)
                     if (gonePid == null) "" else logOut.lines().filter { line ->
                         val parts = line.split(Regex("\\s+"))
                         parts.size > 3 && parts[2] == gonePid
