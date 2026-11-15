@@ -176,6 +176,12 @@ public class IActivityManagerProxy extends ClassInvocationStub {
                                         providerInfo.packageName,
                                         providerInfo.processName,
                                         BActivityThread.getUserId());
+                        if (appConfig == null) {
+                            // v1.0.134: initProcess প্রসেস চালু করতে না পারলে null দেয় —
+                            // bpid পড়তে গিয়ে NPE হতো। প্রোভাইডার নেই জানিয়ে ফিরে যাও।
+                            Slog.w(TAG, "GetContentProvider: initProcess returned null for " + providerInfo.packageName);
+                            return null;
+                        }
                         if (appConfig.bpid != BActivityThread.getAppPid()) {
                             providerBinder = BlackBoxCore.getBActivityManager()
                                     .acquireContentProviderClient(providerInfo);
