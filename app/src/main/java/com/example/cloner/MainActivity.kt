@@ -164,7 +164,7 @@ private fun exitReasonName(reason: Int): String = when (reason) {
     6 -> "INIT_FAILURE"; 7 -> "PERMISSION_CHANGE"
     8 -> "EXCESSIVE_RESOURCE"; 9 -> "OTHER"
     10 -> "USER_REQUESTED"; 11 -> "USER_STOPPED"
-    12 -> "DEPENDENCY_DIED"; else -> "REASON_$reason"
+    12 -> "DEPENDENCY_DIED"; 13 -> "TOO_MANY_EMPTY"; else -> "REASON_$reason"
 }
 
 private val ClonerLightColors = lightColorScheme(
@@ -1006,7 +1006,7 @@ fun ClonerAppScreen() {
             sb.append("\n--- নেটিভ exit ট্রেস ---\n")
             val exitFile = java.io.File(ctx.cacheDir, "exit_trace.txt")
             if (exitFile.exists()) {
-                sb.append(runCatching { exitFile.readText() }.getOrDefault("পড়া যায়নি").takeLast(4000) + "\n")
+                sb.append(runCatching { exitFile.readText() }.getOrDefault("পড়া যায়নি").takeLast(6000) + "\n")
             } else {
                 sb.append("নেটিভ exit ট্রেস ফাইল নেই — কোনো প্রসেস exit() ডাকেনি (বা ট্রেসার বসেনি)।\n")
             }
