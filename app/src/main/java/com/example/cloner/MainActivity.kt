@@ -1092,7 +1092,9 @@ fun ClonerAppScreen() {
                     "CHECK failed", "dlopen failed", "Failed to load native",
                     "OnDisconnected", "setupConnection", "consumeRelroLibInfo",
                     "SharedRelro", "ActivityManagerStub", "setPriority",
-                    "setProcessImportant", "Linker")
+                    "setProcessImportant", "Linker",
+                    "Mojo", "NodeChannel", "handshake", "BinderBox",
+                    "binderBox", "onConnectionError", "ConnectionError")
                 // v1.0.96 রিপোর্ট-স্বাস্থ্য: "Creating new ChildProcessService"
                 // লাইনটাই deathKeys-এ ("ChildProcessService") ধরা পড়ে —
                 // v1.0.95-র রিপোর্টে ১৮টি একই লাইন মৃত্যুর লগ ভরে দিয়েছিল,
