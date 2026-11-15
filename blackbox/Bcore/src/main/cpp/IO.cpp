@@ -19,7 +19,7 @@ char *replace(const char *str, const char *src, const char *dst) {
 
     size_t result_len = strlen(str) + (strlen(dst) - strlen(src)) * count + 1;
     char *result = (char *) malloc(result_len);
-    memset(result, 0, strlen(result));
+    result[0] = '\0';  // v1.0.135: strlen() on uninitialized malloc is UB
 
     const char *left = str;
     const char *right = nullptr;
