@@ -131,15 +131,10 @@ public class AppServiceDispatcher {
                 return true;
             }
             if (code == TRANSACTION_setupConnection) {
-                // v1.0.127 EXPERIMENT: parcel rewrite পুরো বাদ — আসল parcel
-                // সরাসরি forward করো (relro nulling / --no-sandbox /
-                // binderBox সবই আসল অবস্থায় যাবে)। 1s _exit থামলে rewrite-ই
-                // দোষী; না থামলে rewrite নির্দোষ — পরের রিপোর্টে নিশ্চিত হবে।
-                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
-                        "v1.0.127 setupConnection forwarded UNTOUCHED");
-                return mReal.transact(code, data, reply, flags);
-            }
-            if (false) {
+                // v1.0.128: rewrite ফেরত — v1.0.127-এর পরীক্ষায় rewrite
+                // নির্দোষ প্রমাণিত (untouched forward-এও একই _exit), আর
+                // --no-sandbox ছাড়া SIGNALED মৃত্যু ফিরে এসেছিল। binderBox
+                // forward (v1.0.126) বহাল আছে।
                 try {
                     return forwardSetupConnectionNulled(data, reply, flags);
                 } catch (Throwable t) {
