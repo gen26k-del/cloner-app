@@ -1053,6 +1053,7 @@ fun ClonerAppScreen() {
             // মরলো বোঝার একমাত্র সূত্র। লগ ভিউ ফ্রেমগুলো কেটে ফেলে, তাই
             // রিপোর্টেই ধরো (সংক্ষিপ্ত আকারে: ফ্রেম নম্বর, pc, লাইব্রেরি)।
             var deathLog = ""
+            var rawWindow = ""
             val tombstone = runCatching {
                 // v1.0.92: সময়-সীমা logcat — v1.0.91-তে -t 5000 (লাইন-সীমা)
                 // Chrome-এর verbose লগে মাত্র কয়েক সেকেন্ড ধরে; মৃত্যুর ৫১
@@ -1109,6 +1110,17 @@ fun ClonerAppScreen() {
                     listOf("ChildProcessService নতুন তৈরি: ${creatingCount} বার — renderer বারবার নতুন করে তৈরি হচ্ছে (churn); উপরের লাইনগুলোতেই আসল মৃত্যুর কারণ খুঁজতে হবে")
                 else emptyList()
                 deathLog = (deathSummary + deathLines).joinToString("\n")
+                // v1.0.128: শেষ মৃত প্রসেসের কাঁচা লগ — keyword ফিল্টার
+                // যা ধরতে পারে না (যেমন নেটিভ "chromium" ট্যাগের লাইন) তা
+                // দেখতে, শেষ GONE pid-এর সব লাইন ফিল্টার ছাড়াই নাও।
+                rawWindow = runCatching {
+                    val wText = java.io.File(ctx.cacheDir, "death_watch.txt").readText()
+                    val gonePid = Regex("GONE pid=(\\d+)").findAll(wText).lastOrNull()?.groupValues?.get(1)
+                    if (gonePid == null) "" else logOut.lines().filter { line ->
+                        val parts = line.split(Regex("\\s+"))
+                        parts.size > 3 && parts[2] == gonePid
+                    }.takeLast(40).joinToString("\n")
+                }.getOrDefault("")
                 val frameRe = Regex("#(\\d+) pc ([0-9a-f]+)")
                 val offRe = Regex("\\(offset 0x[0-9a-f]+\\)")
                 val allFrames = logOut.lines().filter { frameRe.containsMatchIn(it) }
@@ -1136,6 +1148,8 @@ fun ClonerAppScreen() {
             sb.append(if (tombstone.isEmpty()) "কোনো টম্বস্টোন ফ্রেম পাওয়া যায়নি\n" else tombstone + "\n")
             sb.append("\n--- মৃত্যুর লগ ---\n")
             sb.append(if (deathLog.isEmpty()) "মৃত্যুর কোনো লগ পাওয়া যায়নি\n" else deathLog + "\n")
+            sb.append("\n--- শেষ মৃত প্রসেসের কাঁচা লগ ---\n")
+            sb.append(if (rawWindow.isEmpty()) "কাঁচা লগ নেই\n" else rawWindow + "\n")
             sb.append("\n--- ট্রেস (শেষাংশ) ---\n")
             sb.append(if (traceTail.isEmpty()) "ট্রেস নেই\n" else traceTail + "\n")
             withContext(Dispatchers.Main) { reportText = sb.toString().take(20000) }
