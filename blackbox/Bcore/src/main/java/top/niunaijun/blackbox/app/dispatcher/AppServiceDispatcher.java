@@ -64,7 +64,7 @@ public class AppServiceDispatcher {
 
         try {
             IBinder iBinder = service.onBind(intent);
-            iBinder = wrapChromiumChildBinder(iBinder, serviceInfo);
+            iBinder = wrapChromiumChildBinder(iBinder, service, serviceInfo);
             record.addBinder(intent, iBinder);
             return iBinder;
         } catch (Throwable e) {
@@ -112,14 +112,19 @@ public class AppServiceDispatcher {
                 && (fallbackName.contains("ChildProcessService") || fallbackName.contains("SandboxedProcessService"));
     }
 
-    private static IBinder wrapChromiumChildBinder(IBinder binder, ServiceInfo serviceInfo) {
+    private static IBinder wrapChromiumChildBinder(IBinder binder, Service service, ServiceInfo serviceInfo) {
         if (binder == null || serviceInfo == null || serviceInfo.name == null
                 || serviceInfo.packageName == null) {
             return binder;
         }
-        boolean isChromiumChild = serviceInfo.name.contains("ProcessService")
+        // v1.0.135: same hierarchy rule as the v1.0.132 lifecycle guards.
+        // The old package rule (chrome/brave) missed other Chromium
+        // embedders (e.g. Facebook Helium), whose children never got
+        // --no-sandbox / RELRO-nulling. Old rule kept as a fallback.
+        boolean isChromiumChild = isChromiumChildService(service, serviceInfo.name)
+                || (serviceInfo.name.contains("ProcessService")
                 && (serviceInfo.packageName.contains("chrome")
-                || serviceInfo.packageName.contains("brave"));
+                || serviceInfo.packageName.contains("brave")));
         if (!isChromiumChild) return binder;
         BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
                 "v1.0.82 binder wrapped for " + serviceInfo.name);
