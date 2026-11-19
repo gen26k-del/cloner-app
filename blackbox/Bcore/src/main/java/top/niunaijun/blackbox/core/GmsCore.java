@@ -1,12 +1,18 @@
 package top.niunaijun.blackbox.core;
 
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 
+import java.io.File;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import top.niunaijun.blackbox.BlackBoxCore;
+import top.niunaijun.blackbox.core.env.BEnvironment;
 import top.niunaijun.blackbox.entity.pm.InstallResult;
+import top.niunaijun.blackbox.utils.NativeUtils;
 
 
 public class GmsCore {
@@ -50,21 +56,61 @@ public class GmsCore {
     private static InstallResult installPackages(Set<String> list, int userId) {
         BlackBoxCore blackBoxCore = BlackBoxCore.get();
         for (String packageName : list) {
-            if (blackBoxCore.isInstalled(packageName, userId)) {
-                continue;
+            boolean alreadyInstalled = blackBoxCore.isInstalled(packageName, userId);
+            if (!alreadyInstalled) {
+                try {
+                    BlackBoxCore.getContext().getPackageManager().getApplicationInfo(packageName, 0);
+                } catch (PackageManager.NameNotFoundException e) {
+
+                    continue;
+                }
+                InstallResult installResult = blackBoxCore.installPackageAsUser(packageName, userId);
+                if (!installResult.success) {
+                    return installResult;
+                }
             }
-            try {
-                BlackBoxCore.getContext().getPackageManager().getApplicationInfo(packageName, 0);
-            } catch (PackageManager.NameNotFoundException e) {
-                
-                continue;
-            }
-            InstallResult installResult = blackBoxCore.installPackageAsUser(packageName, userId);
-            if (!installResult.success) {
-                return installResult;
-            }
+            // v1.0.137: native lib কপি — আগে ইনস্টল করা GMS-এর জন্যও (আগে
+            // কখনো কপি হয়নি)। ক্লোনের installClone এটা করে (v1.0.21), কিন্তু
+            // installGms করতো না; virtual lib dir খালি থাকায় GMS সার্ভিস
+            // native কোড লোড করতে না পেরে চালু হতো না।
+            copyGmsNativeLibs(packageName);
         }
         return new InstallResult();
+    }
+
+    // v1.0.137: হোস্টের আসল base + split APK থেকে .so কপি করো (best-effort)।
+    // lib dir-এ ইতিমধ্যে .so থাকলে আবার কপি কোরো না (প্রতি লঞ্চে IO বাঁচাতে)।
+    private static void copyGmsNativeLibs(String packageName) {
+        try {
+            File libDir = BEnvironment.getAppLibDir(packageName);
+            File[] existing = libDir.listFiles();
+            if (existing != null) {
+                for (File f : existing) {
+                    if (f.getName().endsWith(".so")) {
+                        return;
+                    }
+                }
+            }
+            ApplicationInfo hostAi = BlackBoxCore.getPackageManager().getApplicationInfo(packageName, 0);
+            List<String> apks = new ArrayList<>();
+            if (hostAi.sourceDir != null) {
+                apks.add(hostAi.sourceDir);
+            }
+            if (hostAi.splitSourceDirs != null) {
+                for (String s : hostAi.splitSourceDirs) {
+                    apks.add(s);
+                }
+            }
+            for (String apkPath : apks) {
+                try {
+                    NativeUtils.copyNativeLib(new File(apkPath), libDir);
+                } catch (Throwable ignored) {
+                }
+            }
+            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                    "v1.0.137 GMS native libs copied: " + packageName);
+        } catch (Throwable ignored) {
+        }
     }
 
     private static void uninstallPackages(Set<String> list, int userId) {
