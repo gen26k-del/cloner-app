@@ -145,7 +145,13 @@ public class IActivityManagerProxy extends ClassInvocationStub {
                     args[1] = BlackBoxCore.getHostPkg();
                 }
 
-                if (auth.equals("settings")
+                // v1.0.138: appdoctor প্রোভাইডার forward কোরো না — আসল GMS
+                // INTERNAL_BROADCAST সিগনেচার পারমিশন চেয়ে ভার্চুয়াল কলারকে
+                // ফিরিয়ে দেয় (SecurityException), আর Google app-এর init
+                // সেখানেই আটকায়; ভার্চুয়াল GMS-এর নিজের AppDoctorProvider
+                // আছে, নিচের virtual resolve-ই ঠিক পথ।
+                if (!((String) auth).contains("appdoctor")
+                        && (auth.equals("settings")
                         || auth.equals("media")
                         || auth.equals("telephony")
                         || ((String) auth).contains("com.google.android.gms")
@@ -153,7 +159,7 @@ public class IActivityManagerProxy extends ClassInvocationStub {
                         || ((String) auth).contains("com.google.android.gsf")
                         || auth.equals("com.google.android.gms.chimera")
                         || auth.equals("com.huawei.android.launcher.settings")
-                        || auth.equals("com.hihonor.android.launcher.settings")) {
+                        || auth.equals("com.hihonor.android.launcher.settings"))) {
                     content = method.invoke(who, args);
                     ContentProviderDelegate.update(content, (String) auth);
                     return content;
