@@ -26,6 +26,7 @@ import black.android.content.pm.BRPackageParserSigningDetails;
 import black.android.content.pm.BRSigningInfo;
 import black.android.content.res.BRAssetManager;
 import top.niunaijun.blackbox.BlackBoxCore;
+import top.niunaijun.blackbox.core.GmsCore;
 import top.niunaijun.blackbox.core.env.AppSystemEnv;
 import top.niunaijun.blackbox.core.env.BEnvironment;
 import top.niunaijun.blackbox.entity.pm.InstallOption;
@@ -338,7 +339,16 @@ public class PackageManagerCompat {
         // অন্য সিস্টেম অ্যাপের জন্য আগের আচরণই থাকবে।
         boolean isChromiumPkg = ai.packageName != null
                 && (ai.packageName.contains("chrome") || ai.packageName.contains("brave"));
-        if (!p.installOption.isFlag(InstallOption.FLAG_SYSTEM) || isChromiumPkg) {
+        // v1.0.137: GMS প্যাকেজের nativeLibraryDir-ও ভার্চুয়াল lib dir-এ
+        // পয়েন্ট করো — GMS installBySystem() দিয়ে হয় বলে আগের শর্তে redirect
+        // হতো না, আর installGms native lib কপিও করতো না; ফলে GMS সার্ভিস
+        // native কোড লোড করতে না পেরে চালু হতো না (Discover "Play services
+        // isn't supported", Gemini gateway চুপচাপ থামে)।
+        boolean isGmsPkg = ai.packageName != null
+                && (ai.packageName.equals(GmsCore.GMS_PKG)
+                || ai.packageName.equals(GmsCore.GSF_PKG)
+                || ai.packageName.equals(GmsCore.VENDING_PKG));
+        if (!p.installOption.isFlag(InstallOption.FLAG_SYSTEM) || isChromiumPkg || isGmsPkg) {
             ai.nativeLibraryDir = BEnvironment.getAppLibDir(ai.packageName).getAbsolutePath();
         }
         ai.processName = BPackageManagerService.fixProcessName(p.packageName, ai.packageName);
