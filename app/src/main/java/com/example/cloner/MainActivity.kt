@@ -1162,9 +1162,13 @@ fun ClonerAppScreen() {
                 // logcat-এর শেষ BuildId লাইন অন্য লাইব্রেরির (যেমন libc.so-র) হয়।
                 val buildId = recent.firstOrNull()
                     ?.substringAfter("BuildId:", "")?.trim()?.substringBefore(")")?.take(40).orEmpty()
-                if (frames.isEmpty()) "" else (if (buildId.isEmpty()) "" else "BuildId: $buildId\n") + frames.joinToString("\n")
+                // v1.0.136: SIGTRAP tombstone-এর Abort message লাইন — কোন CHECK
+                // ফেল করেছে, সেটা নাম ধরে বলার একমাত্র সূত্র (সিম্বল ছাড়া)।
+                // logcat-এ tombstone-এর "Abort message: '...'" লাইন থাকে।
+                val abortMsg = logOut.lines().filter { it.contains("Abort message") }.lastOrNull()?.trim().orEmpty()
+                if (frames.isEmpty() && abortMsg.isEmpty()) "" else (if (buildId.isEmpty()) "" else "BuildId: $buildId\n") + (if (abortMsg.isEmpty()) "" else "Abort: $abortMsg\n") + frames.joinToString("\n")
             }.getOrDefault("")
-            sb.append("\n--- টম্বস্টোন ফ্রেম (renderer SIGSEGV) ---\n")
+            sb.append("\n--- টম্বস্টোন ফ্রেম (renderer টম্বস্টোন) ---\n")
             sb.append(if (tombstone.isEmpty()) "কোনো টম্বস্টোন ফ্রেম পাওয়া যায়নি\n" else tombstone + "\n")
             sb.append("\n--- মৃত্যুর লগ ---\n")
             sb.append(if (deathLog.isEmpty()) "মৃত্যুর কোনো লগ পাওয়া যায়নি\n" else deathLog + "\n")
