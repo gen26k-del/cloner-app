@@ -52,18 +52,22 @@ public class BProcessManagerService implements ISystemService {
             return null;
         ProcessRecord app;
         int buid = BUserHandle.getUid(userId, BPackageManagerService.get().getAppId(packageName));
+        // v1.0.136: initAppProcessL (provider call, ৩ retry × ৫ সেকেন্ড
+        // পর্যন্ত) আগে mProcessLock ধরে চলতো — ওই সময় onProcessDie আটকে
+        // থাকতো, মরা রেকর্ড জমতো, আর সব bind সিরিয়াল হতো (bind ব্যর্থ →
+        // Chromium নতুন child বানায় → orphan _exit মৃত্যুর churn)। এখন
+        // লক শুধু রিজার্ভ/যাচাইয়ের জন্য; init লকের বাইরে। bpid রিজার্ভ
+        // নিরাপদ কারণ getUsingBPidL (v1.0.135) ইতিমধ্যে বরাদ্দ রেকর্ডও গোনে।
+        ProcessRecord waitingApp = null;
+        boolean fresh = false;
         synchronized (mProcessLock) {
             Map<String, ProcessRecord> bProcess = mProcessMap.get(buid);
-
             if (bProcess == null) {
                 bProcess = new HashMap<>();
             }
             if (bpid == -1) {
                 app = bProcess.get(processName);
                 if (app != null) {
-                    if (app.initLock != null) {
-                        app.initLock.block();
-                    }
                     if (app.bActivityThread != null) {
                         // প্রসেস মরে গেলেও onProcessDie সময়মতো না চললে পুরনো
                         // রেকর্ড থেকে যেতে পারে — মরা binder ফেরত দিলে bind
@@ -79,37 +83,94 @@ public class BProcessManagerService implements ISystemService {
                         }
                         bProcess.remove(processName);
                         mPidsSelfLocked.remove(app);
+                        app = null;
+                    } else {
+                        // init চলছে — লক ছেড়ে init শেষ হওয়া পর্যন্ত অপেক্ষা করো।
+                        waitingApp = app;
+                        app = null;
                     }
                 }
-                bpid = getUsingBPidL();
-                Slog.d(TAG, "init bUid = " + buid + ", bPid = " + bpid);
-            }
-            if (bpid == -1) {
-                throw new RuntimeException("No processes available");
-            }
-            app = new ProcessRecord(info, processName);
-            app.uid = Process.myUid();
-            app.bpid = bpid;
-            app.buid = BPackageManagerService.get().getAppId(packageName);
-            app.callingBUid = getBUidByPidOrPackageName(callingPid, packageName);
-            app.userId = userId;
-
-            bProcess.put(processName, app);
-            mPidsSelfLocked.add(app);
-
-            synchronized (mProcessMap) {
-                mProcessMap.put(buid, bProcess);
-            }
-            if (!initAppProcessL(app)) {
-                
-                bProcess.remove(processName);
-                mPidsSelfLocked.remove(app);
-                app = null;
+                if (waitingApp == null) {
+                    int freshBpid = getUsingBPidL();
+                    if (freshBpid == -1) {
+                        throw new RuntimeException("No processes available");
+                    }
+                    Slog.d(TAG, "init bUid = " + buid + ", bPid = " + freshBpid);
+                    app = new ProcessRecord(info, processName);
+                    app.uid = Process.myUid();
+                    app.bpid = freshBpid;
+                    app.buid = BPackageManagerService.get().getAppId(packageName);
+                    app.callingBUid = getBUidByPidOrPackageName(callingPid, packageName);
+                    app.userId = userId;
+                    bProcess.put(processName, app);
+                    mPidsSelfLocked.add(app);
+                    synchronized (mProcessMap) {
+                        mProcessMap.put(buid, bProcess);
+                    }
+                    fresh = true;
+                }
             } else {
-                app.pid = getPid(BlackBoxCore.getContext(), ProxyManifest.getProcessName(app.bpid));
+                // restart পথ: নির্দিষ্ট bpid-এর নতুন রেকর্ড।
+                app = new ProcessRecord(info, processName);
+                app.uid = Process.myUid();
+                app.bpid = bpid;
+                app.buid = BPackageManagerService.get().getAppId(packageName);
+                app.callingBUid = getBUidByPidOrPackageName(callingPid, packageName);
+                app.userId = userId;
+                bProcess.put(processName, app);
+                mPidsSelfLocked.add(app);
+                synchronized (mProcessMap) {
+                    mProcessMap.put(buid, bProcess);
+                }
+                fresh = true;
             }
         }
-        return app;
+        // লকের বাইরে: চলমান init-এর জন্য অপেক্ষা, অথবা নতুন init।
+        if (waitingApp != null) {
+            if (waitingApp.initLock != null) {
+                waitingApp.initLock.block();
+            }
+            synchronized (mProcessLock) {
+                Map<String, ProcessRecord> bProcess = mProcessMap.get(buid);
+                ProcessRecord current = bProcess == null ? null : bProcess.get(processName);
+                if (current == waitingApp && waitingApp.bActivityThread != null) {
+                    try {
+                        if (waitingApp.bActivityThread.asBinder().isBinderAlive()) {
+                            return waitingApp;
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+            return null;
+        }
+        if (fresh) {
+            if (!initAppProcessL(app)) {
+                synchronized (mProcessLock) {
+                    // অপেক্ষমাণ thread যাতে initLock-এ চিরকাল আটকে না থাকে।
+                    if (app.initLock != null) {
+                        app.initLock.open();
+                    }
+                    Map<String, ProcessRecord> bProcess = mProcessMap.get(buid);
+                    if (bProcess != null && bProcess.get(processName) == app) {
+                        bProcess.remove(processName);
+                    }
+                    mPidsSelfLocked.remove(app);
+                }
+                return null;
+            }
+            app.pid = getPid(BlackBoxCore.getContext(), ProxyManifest.getProcessName(app.bpid));
+            synchronized (mProcessLock) {
+                // init চলাকালীন প্রসেস মরে গেলে onProcessDie রেকর্ড সরিয়ে
+                // ফেলতে পারে — তখন মরা রেকর্ড ফেরত দিও না।
+                Map<String, ProcessRecord> bProcess = mProcessMap.get(buid);
+                if (bProcess == null || bProcess.get(processName) != app) {
+                    return null;
+                }
+            }
+            return app;
+        }
+        return null;
     }
 
     private int getUsingBPidL() {
@@ -139,15 +200,16 @@ public class BProcessManagerService implements ISystemService {
     }
 
     public void restartAppProcess(String packageName, String processName, int userId) {
-        synchronized (mProcessLock) {
-            int callingUid = Binder.getCallingUid();
-            int callingPid = Binder.getCallingPid();
-            ProcessRecord app = findProcessByPid(callingPid);;
-            if (app == null) {
-                String stubProcessName = getProcessName(BlackBoxCore.getContext(), callingPid);
-                int bpid = parseBPid(stubProcessName);
-                startProcessLocked(packageName, processName, userId, bpid, callingPid);
-            }
+        // v1.0.136: mProcessLock ধরে startProcessLocked ডেকো না — লক এখন
+        // শুধু রিজার্ভ/যাচাইয়ের জন্য, init লকের বাইরে চলে। findProcessByPid
+        // mPidsSelfLocked-এর নিজের লক ব্যবহার করে, mProcessLock লাগে না।
+        int callingUid = Binder.getCallingUid();
+        int callingPid = Binder.getCallingPid();
+        ProcessRecord app = findProcessByPid(callingPid);
+        if (app == null) {
+            String stubProcessName = getProcessName(BlackBoxCore.getContext(), callingPid);
+            int bpid = parseBPid(stubProcessName);
+            startProcessLocked(packageName, processName, userId, bpid, callingPid);
         }
     }
 
@@ -222,6 +284,11 @@ public class BProcessManagerService implements ISystemService {
     }
 
     public void onProcessDie(ProcessRecord record) {
+        // v1.0.136: init চলাকালীন প্রসেস মরলে অপেক্ষমাণ thread যাতে
+        // initLock-এ চিরকাল আটকে না থাকে (ConditionVariable.open idempotent)।
+        if (record.initLock != null) {
+            record.initLock.open();
+        }
         // Chromium child প্রসেস মরলে ট্রেসে লেখো — "Aw, Snap!"-এর সময়
         // renderer কখন মরল, সেটা স্মার্ট রিপোর্টের ট্রেসেই দেখা যাবে
         // (logcat ছাড়া)। মৃত্যুর কারণ (নেটিভ ক্র্যাশ নাকি clean exit)
