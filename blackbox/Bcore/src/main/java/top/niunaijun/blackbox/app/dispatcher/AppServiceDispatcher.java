@@ -362,6 +362,53 @@ public class AppServiceDispatcher {
                 BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
                         "v1.0.84 --no-sandbox append failed: " + t);
             }
+            // v1.0.139: KeepChildProcessAfterIPCReset চালু করো — M157-এ
+            // ডিফল্ট OFF (features.cc: "child process will not terminate
+            // itself when IPC is reset")। Mojo disconnect-এ child নিজে
+            // _exit করে (TerminateSelfOnDisconnect — দ্বিতীয় _exit
+            // পরিবার, pure native thread)। commandLine-এ --enable-features
+            // আগে থেকে থাকলে তার value-তে যোগ করো — নতুন element বসালে
+            // browser-এর নিজের feature list মুছে যেত (CommandLine map-এ
+            // শেষ append জেতে)।
+            try {
+                java.lang.reflect.Field cmdField2 = findFieldByType(argsClass, String[].class);
+                cmdField2.setAccessible(true);
+                String[] cmd2 = (String[]) cmdField2.get(args);
+                if (cmd2 != null) {
+                    String feat = "KeepChildProcessAfterIPCReset";
+                    boolean done = false;
+                    for (int i = 0; i < cmd2.length; i++) {
+                        if (cmd2[i] != null && cmd2[i].startsWith("--enable-features=")) {
+                            String v = cmd2[i].substring("--enable-features=".length());
+                            if (!v.contains(feat)) {
+                                cmd2[i] = "--enable-features=" + v + "," + feat;
+                                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                                        "v1.0.139 KeepChildProcessAfterIPCReset merged into --enable-features");
+                            } else {
+                                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                                        "v1.0.139 KeepChildProcessAfterIPCReset already enabled");
+                            }
+                            done = true;
+                            break;
+                        }
+                        if (cmd2[i] != null && cmd2[i].startsWith("--disable-features=")
+                                && cmd2[i].contains(feat)) {
+                            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                                    "v1.0.139 WARNING KeepChildProcessAfterIPCReset is in --disable-features");
+                        }
+                    }
+                    if (!done) {
+                        String[] newCmd2 = java.util.Arrays.copyOf(cmd2, cmd2.length + 1);
+                        newCmd2[cmd2.length] = "--enable-features=" + feat;
+                        cmdField2.set(args, newCmd2);
+                        BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                                "v1.0.139 --enable-features=KeepChildProcessAfterIPCReset appended to child commandLine");
+                    }
+                }
+            } catch (Throwable t) {
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "v1.0.139 KeepChildProcessAfterIPCReset append failed: " + t);
+            }
             // নতুন parcel বানিয়ে আসল binder-এ পাঠাও।
             Parcel newData = Parcel.obtain();
             try {
