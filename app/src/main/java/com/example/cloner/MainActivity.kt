@@ -1150,6 +1150,7 @@ fun ClonerAppScreen() {
                 // ব্রাউজার pid: death-watch-এর শেষ browserPid; না থাকলে
                 // /proc স্ক্যান (cmdline == "com.android.chrome")।
                 browserWindow = runCatching {
+                    val wText = watchTextSnap
                     val bPid = Regex("browserPid=(\\d+)").findAll(wText).lastOrNull()?.groupValues?.get(1)
                         ?: runCatching {
                             java.io.File("/proc").listFiles()
