@@ -666,6 +666,7 @@ fun ClonerAppScreen() {
             }
             lines.append("সময়: ${java.util.Date()}\n")
             var lastSeen = mapOf<Int, String>()
+            var browserPid = -1
             var sawAny = false
             var emptyStreak = 0
             val t0 = System.currentTimeMillis()
@@ -684,6 +685,7 @@ fun ClonerAppScreen() {
                             val bytes = java.io.File(dir, "cmdline").readBytes()
                             val nul = bytes.indexOf(0)
                             val cmd = bytes.copyOf(if (nul >= 0) nul else bytes.size).toString(Charsets.UTF_8)
+                            if (cmd == "com.android.chrome") { browserPid = pid; return@forEach }
                             if (!cmd.startsWith(ctx.packageName)) return@forEach
                             val adj = runCatching {
                                 java.io.File(dir, "oom_score_adj").readText().trim()
@@ -726,7 +728,7 @@ fun ClonerAppScreen() {
                     sawAny = true
                     emptyStreak = 0
                     val procs = current.entries.joinToString(" | ") { (pid, desc) -> "$pid:$desc" }
-                    lines.append("$now memAvail=${memAvail}kB $procs\n")
+                    lines.append("$now memAvail=${memAvail}kB $procs" + (if (browserPid > 0) " browserPid=$browserPid" else "") + "\n")
                 }
                 runCatching { outFile.writeText(lines.toString().lines().takeLast(300).joinToString("\n")) }
                 kotlinx.coroutines.delay(2000)
@@ -1070,6 +1072,7 @@ fun ClonerAppScreen() {
             // রিপোর্টেই ধরো (সংক্ষিপ্ত আকারে: ফ্রেম নম্বর, pc, লাইব্রেরি)।
             var deathLog = ""
             var rawWindow = ""
+            var browserWindow = ""
             val tombstone = runCatching {
                 // v1.0.92: সময়-সীমা logcat — v1.0.91-তে -t 5000 (লাইন-সীমা)
                 // Chrome-এর verbose লগে মাত্র কয়েক সেকেন্ড ধরে; মৃত্যুর ৫১
@@ -1141,6 +1144,27 @@ fun ClonerAppScreen() {
                         parts.size > 3 && parts[2] == gonePid
                     }.takeLast(40).joinToString("\n")
                 }.getOrDefault("")
+                // v1.0.139: ব্রাউজার প্রসেসের কাঁচা লগ — renderer মরার
+                // মুহূর্তে ব্রাউজার কী বলেছে (RPH teardown? channel error?
+                // কিছুই না?) — J.N.V মৃত্যুর কারণ নামার একমাত্র সূত্র।
+                // ব্রাউজার pid: death-watch-এর শেষ browserPid; না থাকলে
+                // /proc স্ক্যান (cmdline == "com.android.chrome")।
+                browserWindow = runCatching {
+                    val bPid = Regex("browserPid=(\\d+)").findAll(wText).lastOrNull()?.groupValues?.get(1)
+                        ?: runCatching {
+                            java.io.File("/proc").listFiles()
+                                ?.filter { it.name.all { c -> c.isDigit() } }
+                                ?.firstOrNull { dir ->
+                                    val b = java.io.File(dir, "cmdline").readBytes()
+                                    val n = b.indexOf(0)
+                                    b.copyOf(if (n >= 0) n else b.size).toString(Charsets.UTF_8) == "com.android.chrome"
+                                }?.name
+                        }.getOrNull()
+                    if (bPid == null) "" else logOut.lines().filter { line ->
+                        val parts = line.split(Regex("\\s+"))
+                        parts.size > 3 && parts[2] == bPid
+                    }.takeLast(30).joinToString("\n")
+                }.getOrDefault("")
                 val frameRe = Regex("#(\\d+) pc ([0-9a-f]+)")
                 val offRe = Regex("\\(offset 0x[0-9a-f]+\\)")
                 val allFrames = logOut.lines().filter { frameRe.containsMatchIn(it) }
@@ -1174,6 +1198,8 @@ fun ClonerAppScreen() {
             sb.append(if (deathLog.isEmpty()) "মৃত্যুর কোনো লগ পাওয়া যায়নি\n" else deathLog + "\n")
             sb.append("\n--- শেষ মৃত প্রসেসের কাঁচা লগ ---\n")
             sb.append(if (rawWindow.isEmpty()) "কাঁচা লগ নেই\n" else rawWindow + "\n")
+            sb.append("\n--- ব্রাউজার প্রসেসের লগ ---\n")
+            sb.append(if (browserWindow.isEmpty()) "ব্রাউজার প্রসেসের লগ পাওয়া যায়নি\n" else browserWindow + "\n")
             sb.append("\n--- ট্রেস (শেষাংশ) ---\n")
             sb.append(if (traceTail.isEmpty()) "ট্রেস নেই\n" else traceTail + "\n")
             withContext(Dispatchers.Main) { reportText = sb.toString().take(20000) }
