@@ -219,6 +219,12 @@ heavy clones within minutes gets background stubs killed by LMK
 (`LOW_MEMORY`, importance 400) — that is Android behaving normally, not a bug
 to chase.
 
+**Owner-requested, promised for the next release (2026-11-22):** a proper
+CloneMe app icon/logo. The current icon is the upstream project's default
+(blue grid + Android robot head) — the app never had its own logo. Design a
+simple clone-themed icon (e.g. two overlapping app squares), wire it as the
+launcher icon (adaptive icon + manifest), and ship it in the next version.
+
 ## 8. Working rules (learned the hard way)
 
 - **Read the real file before editing.** Paraphrased/summary-based edit
