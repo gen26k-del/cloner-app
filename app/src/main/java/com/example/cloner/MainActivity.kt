@@ -1074,6 +1074,19 @@ fun ClonerAppScreen() {
             }
             sb.append("\n--- ডায়াগনসিস লাইন (renderer) ---\n")
             sb.append(if (diagLines.isEmpty()) "কোনো ডায়াগনসিস লাইন নেই\n" else diagLines.joinToString("\n") + "\n")
+            // v1.0.145: ChromeArgs/CrossClone-এর জন্য আলাদা অংশ — ওপরের
+            // ডায়াগনসিস অংশ শেষ-২০টি গ্রুপ করা বার্তা রাখে বলে এই লাইনগুলো
+            // বারবার চাপা পড়ছিল (v1.0.144-এর তিনটি রিপোর্টের একটিতেও
+            // একটাও ওঠেনি, যদিও setupConnection চলছিল)। এখানে পুরো ট্রেস
+            // থেকে সরাসরি গুনে শেষ ১০টি করে দেখাও — মোট সংখ্যাই বলে দেবে
+            // লাইনটা আদৌ লেখা হয়েছিল কিনা।
+            val chromeArgsAll = trace.lines().filter { it.contains("ChromeArgs:") }
+            val crossCloneAll = trace.lines().filter { it.contains("CrossClone:") }
+            sb.append("\n--- ChromeArgs / CrossClone (আলাদা অংশ) ---\n")
+            sb.append("ChromeArgs: মোট " + chromeArgsAll.size + "টি লাইন\n")
+            if (chromeArgsAll.isNotEmpty()) sb.append(chromeArgsAll.takeLast(10).joinToString("\n") + "\n")
+            sb.append("CrossClone: মোট " + crossCloneAll.size + "টি লাইন\n")
+            if (crossCloneAll.isNotEmpty()) sb.append(crossCloneAll.takeLast(10).joinToString("\n") + "\n")
             // টম্বস্টোন ফ্রেম: renderer SIGSEGV-র কল স্ট্যাক — কোন ফাংশনে
             // মরলো বোঝার একমাত্র সূত্র। লগ ভিউ ফ্রেমগুলো কেটে ফেলে, তাই
             // রিপোর্টেই ধরো (সংক্ষিপ্ত আকারে: ফ্রেম নম্বর, pc, লাইব্রেরি)।

@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-22, at version **1.0.144** (versionCode 129).
+> Last updated: 2026-11-22, at version **1.0.145** (versionCode 130).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -175,7 +175,27 @@ When they disagree, the user is right and the report is lying.
   `AppServiceDispatcher.forwardSetupConnectionNulled`. Both keywords added to
   the report's keyword lists.
 - **v1.0.144** — Fixed signing (§4). First build that updates in place from
-  now on.
+  now on. **Device test (2026-11-22, three smart reports):** installed fine;
+  Facebook/Messenger/WhatsApp clones all reach onResume; the user still
+  experiences WhatsApp as "doesn't open" (opens but not usable/stable — his
+  word stands over the trace). Chrome's tab renderer still died during video
+  (15:15:34, `primaryMainFrameRenderProcessGone` status 0 + VideoPersist
+  dismiss) — the §7.1 problem is unchanged. No `CrossClone:` or `ChromeArgs:`
+  line appeared in ANY of the three reports — root cause found in the report
+  builder itself (see v1.0.145).
+- **v1.0.145** — (a) **Report fix**: the diagnosis section keeps only the
+  last 20 *grouped* messages (`diagGrouped.takeLast(20)` in
+  `MainActivity.kt`), so `ChromeArgs:`/`CrossClone:` lines were crowded out
+  by "foreground promoted"/"child process died" floods even when written.
+  The report now has a dedicated section ("ChromeArgs / CrossClone (আলাদা
+  অংশ)") that counts ALL such lines in the full trace and prints the last
+  10 of each — a count of 0 in the next report PROVES the line was never
+  written; a non-zero count finally shows the values. (b) **App icon**: the
+  owner's requested logo — adaptive icon (vector background: deep-blue
+  grid; foreground: two overlapping white rounded squares), in
+  `res/drawable/ic_launcher_{background,foreground}.xml` +
+  `res/mipmap-anydpi-v26/ic_launcher{,_round}.xml`. Legacy PNG mipmaps are
+  untouched (minSdk 26 ⇒ the adaptive icon is what launchers show).
 
 ## 7. Open problems (start here)
 
@@ -219,11 +239,10 @@ heavy clones within minutes gets background stubs killed by LMK
 (`LOW_MEMORY`, importance 400) — that is Android behaving normally, not a bug
 to chase.
 
-**Owner-requested, promised for the next release (2026-11-22):** a proper
-CloneMe app icon/logo. The current icon is the upstream project's default
-(blue grid + Android robot head) — the app never had its own logo. Design a
-simple clone-themed icon (e.g. two overlapping app squares), wire it as the
-launcher icon (adaptive icon + manifest), and ship it in the next version.
+**App icon — DONE in v1.0.145** (owner-requested 2026-11-22): adaptive
+vector icon, two overlapping rounded squares on a deep-blue grid. If the
+owner dislikes it, adjust the two vector drawables in `res/drawable/` —
+no PNG work needed.
 
 ## 8. Working rules (learned the hard way)
 
