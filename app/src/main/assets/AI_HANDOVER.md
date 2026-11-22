@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-22, at version **1.0.145** (versionCode 130).
+> Last updated: 2026-11-22, at version **1.0.146** (versionCode 131).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -190,12 +190,18 @@ When they disagree, the user is right and the report is lying.
   The report now has a dedicated section ("ChromeArgs / CrossClone (আলাদা
   অংশ)") that counts ALL such lines in the full trace and prints the last
   10 of each — a count of 0 in the next report PROVES the line was never
-  written; a non-zero count finally shows the values. (b) **App icon**: the
-  owner's requested logo — adaptive icon (vector background: deep-blue
-  grid; foreground: two overlapping white rounded squares), in
-  `res/drawable/ic_launcher_{background,foreground}.xml` +
-  `res/mipmap-anydpi-v26/ic_launcher{,_round}.xml`. Legacy PNG mipmaps are
-  untouched (minSdk 26 ⇒ the adaptive icon is what launchers show).
+  written; a non-zero count finally shows the values. (b) **App icon**:
+  an adaptive icon was added — but with a NEW design (white squares on a
+  deep-blue grid) that the owner REJECTED the same day; see v1.0.146.
+- **v1.0.146** — **Original logo restored.** The v1.0.145 redesign was a
+  mistake: the app already HAD a logo (the mipmap PNGs: light-blue back
+  square + blue front square + white glyph on white), and the owner never
+  asked for a redesign — he had only asked why the installer showed no
+  proper logo. The adaptive drawables now recreate the ORIGINAL design as
+  vectors (geometry/colours measured from the xxxhdpi PNG). Also corrects
+  a factual error this guide carried: the blue-grid ANDROID ROBOT image is
+  **HiOS's installer/security-scan placeholder, not the app icon** — it
+  was wrongly described as "the upstream default icon" in earlier entries.
 
 ## 7. Open problems (start here)
 
@@ -239,10 +245,14 @@ heavy clones within minutes gets background stubs killed by LMK
 (`LOW_MEMORY`, importance 400) — that is Android behaving normally, not a bug
 to chase.
 
-**App icon — DONE in v1.0.145** (owner-requested 2026-11-22): adaptive
-vector icon, two overlapping rounded squares on a deep-blue grid. If the
-owner dislikes it, adjust the two vector drawables in `res/drawable/` —
-no PNG work needed.
+**App icon — the ORIGINAL logo stands (restored in v1.0.146).** The app's
+logo is the overlapping-squares design (light-blue back square #AEDCFB,
+blue front square #1B9BF5, white glyph, white canvas) that ships in the
+mipmap PNGs; the adaptive vectors in `res/drawable/` recreate it.
+**Do NOT redesign the logo without showing the owner first** — a redesign
+was shipped in v1.0.145 and rejected. The blue-grid robot seen on HiOS's
+install/security-scan screen is that installer's placeholder graphic,
+never the app icon.
 
 ## 8. Working rules (learned the hard way)
 
