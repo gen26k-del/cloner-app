@@ -93,6 +93,17 @@ public class ContentProviderStub extends ClassInvocationStub implements BContent
                 if (isUidMismatchError(cause)) {
                     Slog.w(TAG, "UID mismatch in ContentProvider call, returning safe default: " + cause.getMessage());
                     return getSafeDefaultValue(methodName, method.getReturnType());
+                } else if (cause instanceof SecurityException) {
+                    // v1.0.141: Meta-র secure-content delegate কলার-পরিচয় যাচাইয়ে ব্যর্থ হলে
+                    // SecurityException ছোড়ে ("Component access not allowed … Called by:
+                    // com.example.cloner") — কলার-UID আসলে হোস্টের UID বলেই। v1.0.133-র
+                    // AttributionSource ফিক্সে এটা ধরা পড়েনি, আর ব্যতিক্রমটা guest-এর
+                    // BgHandler-এ uncaught হয়ে Facebook-এর প্রসেস মেরে ফেলে (katana
+                    // ক্র্যাশ রিপোর্ট, 2026-11-22)। ভার্চুয়াল প্রোভাইডারের কলে এমন
+                    // access-denied এলে propagate না করে safe default ফেরাও — dedup
+                    // cleanup-এর delete 0 ফেরালেও অ্যাপের ক্ষতি নেই।
+                    Slog.w(TAG, "Access denied in ContentProvider call, returning safe default: " + cause.getMessage());
+                    return getSafeDefaultValue(methodName, method.getReturnType());
                 } else if (cause instanceof RuntimeException) {
                     String message = cause.getMessage();
                     if (message != null && (message.contains("uid") || message.contains("permission"))) {
