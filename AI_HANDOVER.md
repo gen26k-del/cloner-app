@@ -11,10 +11,18 @@
 >    proved — and if a fix did NOT work, write that too).
 > 3. Refresh §7 so the open-problems list matches reality (remove solved
 >    items, add new ones, update the "first evidence to check").
+> 4. **Sync the embedded copy** at `app/src/main/assets/AI_HANDOVER.md` —
+>    this guide ships INSIDE every APK (see §3), so whoever is handed just
+>    the APK file can unzip it and read this guide. The two copies must
+>    never drift apart.
 > The file lives in the repo root, so the latest commit always carries the
 > matching guide: whoever receives the newest source (or this file from the
 > newest version) can understand the app as it exists *now* and produce the
 > next update. A release whose handover update is missing is unfinished.
+>
+> **Source code:** https://github.com/gen26k-del/cloner-app (branch `main`).
+> If you received only the APK, the full source is there; this guide is in
+> the repo root and also inside the APK at `assets/AI_HANDOVER.md`.
 
 ## 1. What this app is
 
@@ -48,6 +56,11 @@ Push to `main` → GitHub Actions workflow **"Build APK"** runs `gradle assemble
 → artifact **`app-debug`** (a zip containing `app-debug.apk`) on the run page.
 That is the only supported build path. (Local Gradle builds are possible in
 principle with the same Gradle/JDK/NDK versions, but CI is the reference.)
+
+**This guide is embedded in the APK itself**: the copy at
+`app/src/main/assets/AI_HANDOVER.md` is packaged into every build at
+`assets/AI_HANDOVER.md`. Unzipping any shipped APK yields the guide that
+matches that version. (Verify after building: `unzip -l app-debug.apk | grep AI_HANDOVER`.)
 
 Every build MUST bump `versionCode` (+1) and `versionName` in
 `app/build.gradle.kts`. Version names are Bengali feature labels, e.g.
