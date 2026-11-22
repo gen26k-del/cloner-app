@@ -36,6 +36,22 @@ public class ActivityManagerCommonProxy {
             Intent intent = getIntent(args);
             Slog.d(TAG, "Hook in : " + intent);
             assert intent != null;
+            // v1.0.143: cross-clone trace — intent অন্য প্যাকেজের দিকে গেলে
+            // ট্রেসে লিখে রাখো, যাতে স্মার্ট রিপোর্টে দেখা যায়
+            // Facebook->Messenger হ্যান্ডঅফ ঠিক কোন পথে গেল।
+            try {
+                String callerPkg0 = BActivityThread.getAppPackageName();
+                String targetPkg0 = intent.getPackage() != null ? intent.getPackage()
+                        : (intent.getComponent() != null ? intent.getComponent().getPackageName() : null);
+                if (targetPkg0 != null && !targetPkg0.equals(callerPkg0)) {
+                    BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                            "CrossClone: startActivity from=" + callerPkg0
+                            + " target=" + targetPkg0
+                            + " action=" + intent.getAction()
+                            + " component=" + intent.getComponent()
+                            + " data=" + intent.getDataString());
+                }
+            } catch (Throwable ignored) { }
             
             
             if (intent.getParcelableExtra("_B_|_target_") != null) {
@@ -116,12 +132,28 @@ public class ActivityManagerCommonProxy {
                     }
                 }
                 if (resolveInfo == null) {
+                    try {
+                        String tp = intent.getPackage() != null ? intent.getPackage()
+                                : (intent.getComponent() != null ? intent.getComponent().getPackageName() : null);
+                        if (tp != null && !tp.equals(BActivityThread.getAppPackageName())) {
+                            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                                    "CrossClone: FELL THROUGH to real AMS, target=" + tp);
+                        }
+                    } catch (Throwable ignored) { }
                     intent.setPackage(origPackage);
                     return method.invoke(who, args);
                 }
             }
 
 
+            try {
+                String fp = resolveInfo.activityInfo.packageName;
+                if (fp != null && !fp.equals(BActivityThread.getAppPackageName())) {
+                    BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                            "CrossClone: launching " + resolveInfo.activityInfo.packageName
+                            + "/" + resolveInfo.activityInfo.name);
+                }
+            } catch (Throwable ignored) { }
             intent.setExtrasClassLoader(who.getClass().getClassLoader());
             intent.setComponent(new ComponentName(resolveInfo.activityInfo.packageName, resolveInfo.activityInfo.name));
             BlackBoxCore.getBActivityManager().startActivityAms(BActivityThread.getUserId(),
@@ -165,6 +197,17 @@ public class ActivityManagerCommonProxy {
             Bundle options = (Bundle) args[index];
             
             if (!ComponentUtils.isSelf(intents)) {
+                // v1.0.143: cross-clone trace — startActivities দিয়ে অন্য
+                // ক্লোনে যাওয়ার চেষ্টা হলে সেটাও ট্রেসে থাকুক।
+                try {
+                    StringBuilder sb2 = new StringBuilder("CrossClone: startActivities forwarded to real AMS:");
+                    for (Intent in : intents) {
+                        sb2.append(" [pkg=").append(in.getPackage())
+                           .append(" comp=").append(in.getComponent())
+                           .append(" data=").append(in.getDataString()).append("]");
+                    }
+                    BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(), sb2.toString());
+                } catch (Throwable ignored) { }
                 return method.invoke(who, args);
             }
 

@@ -409,6 +409,27 @@ public class AppServiceDispatcher {
                 BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
                         "v1.0.139 KeepChildProcessAfterIPCReset append failed: " + t);
             }
+            // v1.0.143: চূড়ান্ত commandLine-এর এক-লাইন সারাংশ — child ঠিক
+            // কী পেল, স্মার্ট রিপোর্টে নিশ্চিতভাবে দেখার জন্য।
+            try {
+                java.lang.reflect.Field cmdField3 = findFieldByType(argsClass, String[].class);
+                cmdField3.setAccessible(true);
+                String[] cmd3 = (String[]) cmdField3.get(args);
+                String feats = "NONE";
+                boolean ns = false;
+                if (cmd3 != null) {
+                    for (String s : cmd3) {
+                        if (s == null) continue;
+                        if (s.startsWith("--enable-features=")) feats = s.substring("--enable-features=".length());
+                        if ("--no-sandbox".equals(s)) ns = true;
+                    }
+                }
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "ChromeArgs: final enable-features=" + feats + " noSandbox=" + ns);
+            } catch (Throwable t) {
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "ChromeArgs: summary failed: " + t);
+            }
             // নতুন parcel বানিয়ে আসল binder-এ পাঠাও।
             Parcel newData = Parcel.obtain();
             try {
