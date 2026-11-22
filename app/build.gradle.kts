@@ -23,9 +23,32 @@ run {
     }
 }
 
+// v1.0.148: আসল লোগো হুবহু — v1.0.146/147-এ লোগোটা vector-এ নতুন করে
+// আঁকা হয়েছিল; adaptive icon-এর crop/zoom-এ মাপ মিলছিল না বলে মালিক
+// বাতিল করেছেন। এখন আসল xxxhdpi PNG-টার base64 কপি repo-তে
+// (ci/logo-xxxhdpi.b64) থাকে; এখানে decode করে generated res dir-এ
+// drawable-nodpi/ic_launcher_orig.png হিসেবে বসানো হয়, আর
+// mipmap-anydpi-v26-এর ic_launcher সেই bitmap-কেই point করে — ফলে
+// launcher হুবহু আসল ছবিটাই দেখায়, নতুন করে আঁকা কিছু না।
+val logoResDir: File = layout.buildDirectory.dir("generated/logoRes").get().asFile
+run {
+    val b64 = rootProject.file("ci/logo-xxxhdpi.b64")
+    val out = File(logoResDir, "drawable-nodpi/ic_launcher_orig.png")
+    if (b64.exists() && !out.exists()) {
+        out.parentFile.mkdirs()
+        out.writeBytes(Base64.getDecoder().decode(b64.readText().trim()))
+    }
+}
+
 android {
     namespace = "com.example.cloner"
     compileSdk = 35
+
+    sourceSets {
+        getByName("main") {
+            res.srcDir(logoResDir)
+        }
+    }
 
     signingConfigs {
         getByName("debug") {
@@ -42,8 +65,8 @@ android {
         // BlackBox ফর্ক ইচ্ছা করে targetSdk 28 রাখে — নতুন Android-এর
         // আচরণ পরিবর্তনে hook ভাঙা এড়াতে। ব্যক্তিগত ব্যবহারে ঠিক আছে।
         targetSdk = 28
-        versionCode = 132
-        versionName = "1.0.147 লোগো-সবখানে"
+        versionCode = 133
+        versionName = "1.0.148 আসল-লোগো"
     }
 
     compileOptions {

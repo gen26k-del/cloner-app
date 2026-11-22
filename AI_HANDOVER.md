@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-22, at version **1.0.147** (versionCode 132).
+> Last updated: 2026-11-22, at version **1.0.148** (versionCode 133).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -216,6 +216,20 @@ When they disagree, the user is right and the report is lying.
   (its own placeholder/cache for sideloaded apps) and CANNOT be changed
   from inside the app. The override is still correct hygiene (the APK no
   longer carries the robot), but do not promise the scan screen again.
+- **v1.0.148** — **Exact original logo, no redraw.** The owner rejected
+  the vector recreation too ("আসল লোগো আগেরটা আসেনি" — the recreation
+  looked bigger than the original because adaptive-icon layers are
+  centre-cropped/zoomed by launchers). Final approach: the ORIGINAL
+  xxxhdpi PNG travels as base64 at `ci/logo-xxxhdpi.b64`;
+  `app/build.gradle.kts` decodes it at configuration time into
+  `build/generated/logoRes/drawable-nodpi/ic_launcher_orig.png` and
+  registers that dir as a main res srcDir. `mipmap-anydpi-v26/
+  ic_launcher{,_round}.xml` and `drawable/ic_launcher.xml` are now plain
+  `<bitmap>` aliases to `@drawable/ic_launcher_orig` — no adaptive icon,
+  no vectors, the exact original pixels. The 146/147 vector drawables
+  (`ic_launcher_{background,foreground}.xml`) remain in the tree but are
+  unreferenced. **Lesson: never recreate an existing asset by eye when
+  the original file is available — ship the original.**
 
 ## 7. Open problems (start here)
 
@@ -259,14 +273,17 @@ heavy clones within minutes gets background stubs killed by LMK
 (`LOW_MEMORY`, importance 400) — that is Android behaving normally, not a bug
 to chase.
 
-**App icon — the ORIGINAL logo stands (restored in v1.0.146).** The app's
-logo is the overlapping-squares design (light-blue back square #AEDCFB,
-blue front square #1B9BF5, white glyph, white canvas) that ships in the
-mipmap PNGs; the adaptive vectors in `res/drawable/` recreate it.
-**Do NOT redesign the logo without showing the owner first** — a redesign
-was shipped in v1.0.145 and rejected. The blue-grid robot seen on HiOS's
-install/security-scan screen is that installer's placeholder graphic,
-never the app icon.
+**App icon — the ORIGINAL logo stands (exact pixels since v1.0.148).**
+The app's logo is the overlapping-squares design (light-blue back square
+#AEDCFB, blue front square #1B9BF5, white glyph, white canvas) from the
+mipmap PNGs. Since v1.0.148 the launcher icon is the original PNG itself
+(see the §6 entry for the base64/generated-res mechanism) — **do NOT
+redesign or redraw the logo; if it must change, show the owner the exact
+image first and ship the exact file.** A redesign (v1.0.145) and a vector
+recreation (v1.0.146/147) were both shipped and both rejected. The
+blue-grid robot on HiOS's install/security-scan screen is HiOS-side
+(placeholder/cache) — it persists even with no robot image in the APK,
+so it cannot be fixed from the app.
 
 ## 8. Working rules (learned the hard way)
 

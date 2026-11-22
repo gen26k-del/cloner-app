@@ -1,36 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- v1.0.147: app-module override of the Bcore library's unreferenced
-     res/drawable/ic_launcher.png — the old Android robot-head image.
-     Nothing in the code uses @drawable/ic_launcher, but the library PNG
-     is packaged into the APK and some installer/security-scan screens
-     (HiOS) display it as the app's picture. This vector recreates the
-     app's ORIGINAL logo (same design as ic_launcher_foreground) so every
-     surface shows the real logo. App-module resources override library
-     resources of the same type+name at merge time. -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M0,0h108v108h-108z" />
-    <!-- back square: rect (26,26)-(71,71), r=9 -->
-    <path
-        android:fillColor="#AEDCFB"
-        android:pathData="M35,26h27a9,9 0 0 1 9,9v27a9,9 0 0 1 -9,9h-27a9,9 0 0 1 -9,-9v-27a9,9 0 0 1 9,-9z" />
-    <!-- front square: rect (36,36)-(81,81), r=9 -->
-    <path
-        android:fillColor="#1B9BF5"
-        android:pathData="M45,36h27a9,9 0 0 1 9,9v27a9,9 0 0 1 -9,9h-27a9,9 0 0 1 -9,-9v-27a9,9 0 0 1 9,-9z" />
-    <!-- glyph back square (outline): rect (45,45)-(62,62), r=3 -->
-    <path
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2.5"
-        android:pathData="M48,45h11a3,3 0 0 1 3,3v11a3,3 0 0 1 -3,3h-11a3,3 0 0 1 -3,-3v-11a3,3 0 0 1 3,-3z" />
-    <!-- glyph front square (filled): rect (52,52)-(69,69), r=3 -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M55,52h11a3,3 0 0 1 3,3v11a3,3 0 0 1 -3,3h-11a3,3 0 0 1 -3,-3v-11a3,3 0 0 1 3,-3z" />
-</vector>
+<!-- v1.0.148: app-module override of the Bcore library's unreferenced
+     robot-head PNG (same type+name wins at merge time) — now a bitmap
+     alias to the app's ORIGINAL logo (@drawable/ic_launcher_orig), so
+     any surface that reads @drawable/ic_launcher shows the real logo.
+     (v1.0.147 used a vector recreation here; replaced for exactness.) -->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@drawable/ic_launcher_orig" />
