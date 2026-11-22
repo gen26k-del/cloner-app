@@ -145,7 +145,29 @@ public class HCallbackProxy implements IInjectHook, Handler.Callback {
         ProxyActivityRecord stubRecord = ProxyActivityRecord.create(intent);
         ActivityInfo activityInfo = stubRecord.mActivityInfo;
         if (activityInfo != null) {
-            if (BActivityThread.getAppConfig() == null) {
+            // v1.0.149: launch-assignment trace + package guard. আগে এই
+            // প্রসেস অন্য অ্যাপের জন্য bound+init হয়ে থাকলে (যেমন :black
+            // restart-এর পর server record মুছে গেলেও guest বেঁচে থাকে)
+            // কোনো পরীক্ষা ছাড়াই আগত activity সেই বিদেশি Application-এর
+            // উপর instantiate হতো — 2026-11-22 16:12:34-এ Chrome-bound
+            // প্রসেসে FbMainTabActivity গিয়ে "fbApp has not been
+            // initialized" ক্র্যাশ করেছে। এখন mismatch হলে unbound
+            // recovery পথেই (restartProcess + launch rewrite) পাঠাই।
+            String boundPkg149 = BActivityThread.getAppPackageName();
+            boolean boundInit149 = BActivityThread.currentActivityThread().isInit();
+            boolean launchMismatch149 = BActivityThread.getAppConfig() != null
+                    && boundInit149
+                    && boundPkg149 != null
+                    && !boundPkg149.equals(activityInfo.packageName);
+            try {
+                top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                    top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                    "launch assigned: activity=" + activityInfo.packageName + "/" + activityInfo.name
+                        + " stub=" + BActivityThread.getAppProcessName()
+                        + " boundPkg=" + boundPkg149 + " boundInit=" + boundInit149
+                        + (launchMismatch149 ? " LAUNCH MISMATCH" : ""));
+            } catch (Throwable ignored) { }
+            if (BActivityThread.getAppConfig() == null || launchMismatch149) {
                 BlackBoxCore.getBActivityManager().restartProcess(activityInfo.packageName, activityInfo.processName, stubRecord.mUserId);
 
                 Intent launchIntentForPackage = BlackBoxCore.getBPackageManager().getLaunchIntentForPackage(activityInfo.packageName, stubRecord.mUserId);

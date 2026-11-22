@@ -185,10 +185,16 @@ public class ActiveServices {
                             "bindService reclaim dead stub " + processName);
                     BProcessManagerService.get().onProcessDie(existing);
                 } else {
+                    // v1.0.149: orphan হিসাব — displaced প্রসেসটা মারা হয়
+                    // না (উপরের ইতিহাস দ্রষ্টব্য), কিন্তু এখন থেকে রিপোর্টে
+                    // তার নাম থাকে, যাতে ঝড়ের মেমরি-খরচ মাপা যায়।
+                    String displacedProcess149 = processName;
                     processName = processName + "_r" + sIsolatedBindCounter.incrementAndGet();
                     Log.d(TAG, "bindService isolated rebind, fresh process=" + processName);
                     BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
                             "bindService isolated rebind, fresh process=" + processName);
+                    BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                            "bindService orphan: displaced=" + displacedProcess149 + " fresh=" + processName);
                 }
             }
         }
@@ -249,6 +255,14 @@ public class ActiveServices {
                 runningServiceRecord.mConnectedServiceRecord = connectedService;
             }
         }
+        // v1.0.149: bind↔process correlation — কোন connection কোন child
+        // প্রসেসে গেল, রিপোর্ট থেকে মেলানো যায়।
+        try {
+            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                    "bindService: service=" + serviceInfo.name
+                            + " chosenProcess=" + processRecord.processName
+                            + " bpid=" + processRecord.bpid);
+        } catch (Throwable ignored) { }
         return createStubServiceIntent(intent, serviceInfo, processRecord, runningServiceRecord);
     }
 

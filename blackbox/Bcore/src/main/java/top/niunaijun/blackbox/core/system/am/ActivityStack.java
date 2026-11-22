@@ -273,6 +273,14 @@ public class ActivityStack {
         if (targetApp == null) {
             throw new RuntimeException("Unable to create process, name:" + info.name);
         }
+        // v1.0.149: server-side launch assignment cross-check (guest-side
+        // "launch assigned" লাইনের সাথে মিলিয়ে পড়ার জন্য)।
+        try {
+            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                    "launch assigned(server): activity=" + info.packageName + "/" + info.name
+                            + " recordPkg=" + targetApp.getPackageName()
+                            + " procName=" + targetApp.processName);
+        } catch (Throwable ignored) { }
         return getStartStubActivityIntentInner(intent, targetApp.bpid, userId, stubRecord, info);
     }
 

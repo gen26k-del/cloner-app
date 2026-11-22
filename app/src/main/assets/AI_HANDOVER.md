@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-22, at version **1.0.148** (versionCode 133).
+> Last updated: 2026-11-22, at version **1.0.149** (versionCode 134).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -229,7 +229,43 @@ When they disagree, the user is right and the report is lying.
   no vectors, the exact original pixels. The 146/147 vector drawables
   (`ic_launcher_{background,foreground}.xml`) remain in the tree but are
   unreferenced. **Lesson: never recreate an existing asset by eye when
-  the original file is available — ship the original.**
+  the original file is available — ship the original.** Owner confirmed
+  on device 2026-11-22: "লোগো ঠিক আছে এবার" — icon saga closed.
+- **v1.0.149** — **Handoff fix + launch guard + launcher behaviour**
+  (diagnosis: `cloner-app-diagnosis3.md` in the workspace, code-proven).
+  (a) **FB→Messenger**: `IPackageManagerProxy` had NO
+  `queryIntentActivities` hook — the call fell through to the real
+  system PM, where virtual apps are invisible, so Facebook's Messenger
+  presence check returned empty and it silently gave up (also broke
+  guest `getLaunchIntentForPackage`). Added the hook forwarding to
+  `BPackageManagerService.queryIntentActivities` with the CALLER's own
+  userId (clone pairs stay matched per user slot: FB #1 → Messenger #1;
+  a slot without a Messenger clone correctly finds nothing), falling
+  back to the real PM only when the virtual result is empty. PMCheck
+  traces added (cross-package, virtual targets only) in getPackageInfo /
+  getApplicationInfo / getActivityInfo / resolveIntent /
+  queryIntentActivities. (b) **Wrong-process launch guard**:
+  `HCallbackProxy.handleLaunchActivity` never compared the incoming
+  activity's package with the process's bound package when already
+  initialised — the 2026-11-22 16:12:34 crash (FbMainTabActivity
+  instantiated in a Chrome-bound process, "fbApp has not been
+  initialized"; crash files are named from /proc/self/cmdline, so the
+  Chrome binding is proven). Now a mismatch routes through the unbound
+  recovery (restartProcess + launch rewrite) and every assignment is
+  traced (`launch assigned:` guest-side, `launch assigned(server):` in
+  ActivityStack). (c) **Launcher behaviour (owner's requirement)**:
+  MainActivity is now `singleTask` — the launcher icon always brings
+  CloneMe's home/list forward; per-clone home shortcuts still open the
+  clone directly via ShortcutLaunchActivity (unchanged). (d) Chrome:
+  `bindService orphan:` traces name each process displaced by an
+  isolated rebind (orphans are NOT killed — v1.0.62/67/74 history in
+  ActiveServices.java shows killing live children is worse), plus a
+  `bindService:` correlation line (service → chosenProcess/bpid).
+  Report keywords extended (PMCheck, LAUNCH MISMATCH, launch assigned,
+  bindService orphan). **First evidence to check in the next report:**
+  PMCheck lines with caller=com.facebook.katana target=com.facebook.orca
+  (found=true expected), whether the Messages tap now opens Messenger,
+  any LAUNCH MISMATCH lines, orphan counts during Chrome use.
 
 ## 7. Open problems (start here)
 
@@ -253,12 +289,21 @@ When they disagree, the user is right and the report is lying.
    Messages does not open the Messenger clone. **Already tried — did not
    work:** v1.0.142's `chooseBestActivity` tie→first-match change and the
    StartActivity cross-clone rescue (user-tested, handoff still fails; both
-   kept, harmless). **First evidence to check:** the `CrossClone:` lines in a
-   v1.0.143+ report generated right after such a tap. They distinguish: intent
-   never fired through the hook / fired and fell through / launched but died
-   later / went through `startActivities`. If NO CrossClone line appears at
-   all after a tap, Facebook is not using startActivity for this at all —
-   look at service binding / provider calls / PM presence checks instead.
+   kept, harmless). v1.0.143+ reports proved the tap produces NO CrossClone
+   line at all — Facebook does not reach startActivity; it gives up earlier.
+   **Root cause found (diagnosis3, code-proven):** `queryIntentActivities`
+   had no hook in `IPackageManagerProxy` and fell through to the real PM,
+   where virtual apps are invisible. **v1.0.149 ships the hook** (see §6).
+   **First evidence to check in a v1.0.149 report:** PMCheck lines with
+   caller=com.facebook.katana, target=com.facebook.orca, found=true — and
+   the user's own tap test. If PMCheck shows found=true but the tap still
+   does nothing, the block is later (service binding to Messenger); if no
+   PMCheck line appears, Facebook checks through yet another API (widen
+   PMCheck coverage: getLaunchIntentForPackage path / queryIntentServices).
+   Also new in §7 terms: the **wrong-process launch** behind the
+   2026-11-22 16:12:34 katana crash is guarded in v1.0.149 (HCallbackProxy
+   package guard + `launch assigned` traces); watch for LAUNCH MISMATCH
+   lines and any repeat of the fbApp crash.
 3. **Several other apps don't open properly** (WhatsApp / Gemini / Google-app
    class, per the user). Take them one at a time, evidence first (a report
    from a build whose verdicts can be trusted — v1.0.142+), and remember the

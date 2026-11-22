@@ -88,6 +88,22 @@ public class IPackageManagerProxy extends BinderInvocationStub {
         addMethodHook(new XiaomiSecurityBypass());
     }
 
+    // v1.0.149: cross-clone presence-check trace. শুধু তখনই লগ হয় যখন
+    // caller অন্য একটি VIRTUAL প্যাকেজ খোঁজে (নিজের user slot-এ installed)
+    // — যেমন Facebook clone "Messenger আছে কিনা" যাচাই করলে। ফলাফল
+    // (found=true/false) সহ লেখা থাকে, যাতে রিপোর্টে দেখা যায় যাচাইটা
+    // virtual PM পর্যন্ত পৌঁছেছিল কিনা আর কী উত্তর পেয়েছিল।
+    private static void tracePmCheck(String method, String targetPkg, boolean found) {
+        try {
+            String caller = BActivityThread.getAppPackageName();
+            if (targetPkg == null || caller == null || targetPkg.equals(caller)) return;
+            if (!BlackBoxCore.get().isInstalled(targetPkg, BActivityThread.getUserId())) return;
+            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                    "PMCheck: caller=" + caller + " method=" + method
+                            + " target=" + targetPkg + " found=" + found);
+        } catch (Throwable ignored) { }
+    }
+
     @ProxyMethod("resolveIntent")
     public static class ResolveIntent extends MethodHook {
         @Override
@@ -96,6 +112,7 @@ public class IPackageManagerProxy extends BinderInvocationStub {
             String resolvedType = (String) args[1];
             int flags = MethodParameterUtils.toInt(args[2]);
             ResolveInfo resolveInfo = BlackBoxCore.getBPackageManager().resolveIntent(intent, resolvedType, flags, BlackBoxCore.getUserId());
+            tracePmCheck("resolveIntent", intent == null ? null : intent.getPackage(), resolveInfo != null);
             if (resolveInfo != null) {
                 return resolveInfo;
             }
@@ -139,6 +156,7 @@ public class IPackageManagerProxy extends BinderInvocationStub {
             }
             
             PackageInfo packageInfo = BlackBoxCore.getBPackageManager().getPackageInfo(packageName, flags, BlackBoxCore.getUserId());
+            tracePmCheck("getPackageInfo", packageName, packageInfo != null);
             if (packageInfo != null) {
                 
                 if (packageInfo.requestedPermissions != null && packageInfo.requestedPermissionsFlags != null) {
@@ -226,6 +244,7 @@ public class IPackageManagerProxy extends BinderInvocationStub {
             ComponentName componentName = (ComponentName) args[0];
             int flags = MethodParameterUtils.toInt(args[1]);
             ActivityInfo activityInfo = BlackBoxCore.getBPackageManager().getActivityInfo(componentName, flags, BlackBoxCore.getUserId());
+            tracePmCheck("getActivityInfo", componentName == null ? null : componentName.getPackageName(), activityInfo != null);
             if (activityInfo != null)
                 return activityInfo;
             if (AppSystemEnv.isOpenPackage(componentName)) {
@@ -285,6 +304,7 @@ public class IPackageManagerProxy extends BinderInvocationStub {
 
 
             ApplicationInfo applicationInfo = BlackBoxCore.getBPackageManager().getApplicationInfo(packageName, flags, BlackBoxCore.getUserId());
+            tracePmCheck("getApplicationInfo", packageName, applicationInfo != null);
             if (applicationInfo != null) {
                 return applicationInfo;
             }
@@ -323,6 +343,33 @@ public class IPackageManagerProxy extends BinderInvocationStub {
 
             
             return resolves;
+        }
+    }
+
+    // v1.0.149: queryIntentActivities-এর হুকই ছিল না — কলটা আসল
+    // সিস্টেম PM-এ চলে যেত, যেখানে virtual অ্যাপ দেখা যায় না (খালি
+    // ফলাফল)। Facebook-এর মতো অ্যাপ Messenger আছে কিনা এই কল দিয়েই
+    // যাচাই করে; খালি ফল পেয়ে চুপচাপ থেমে যেত (কোনো startActivity
+    // ট্রেসও আসত না)। এখন virtual PM-এ আগে খোঁজা হয় (caller-এর নিজের
+    // user slot-এ — জোড়া মিলিয়ে), ফল খালি হলে আসল সিস্টেমে ফলব্যাক।
+    // এতে guest-দের getLaunchIntentForPackage-ও virtual প্যাকেজের জন্য
+    // ঠিক হয়, কারণ ওটা এই কলের উপরই বানানো।
+    @ProxyMethod("queryIntentActivities")
+    public static class QueryIntentActivities extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            Intent intent = MethodParameterUtils.getFirstParam(args, Intent.class);
+            String type = MethodParameterUtils.getFirstParam(args, String.class);
+            Integer flags = MethodParameterUtils.getFirstParam(args, Integer.class);
+            List<ResolveInfo> resolves = BlackBoxCore.getBPackageManager().queryIntentActivities(intent, flags, type, BActivityThread.getUserId());
+            tracePmCheck("queryIntentActivities", intent == null ? null : intent.getPackage(), resolves != null && !resolves.isEmpty());
+            if (resolves != null && !resolves.isEmpty()) {
+                if (BuildCompat.isN()) {
+                    return ParceledListSliceCompat.create(resolves);
+                }
+                return resolves;
+            }
+            return method.invoke(who, args);
         }
     }
 
