@@ -91,6 +91,31 @@ public class ActivityManagerCommonProxy {
                         StartActivityCompat.getResolvedType(args),
                         BActivityThread.getUserId());
                 if (resolveInfo == null) {
+                    // v1.0.142: cross-clone rescue — the intent targets ANOTHER
+                    // cloned app (e.g. Facebook clone -> Messenger clone). The
+                    // own-package retry above can never match it, and falling
+                    // through to the real AMS drops it (the clone is not really
+                    // installed). If the target package is a clone, resolve its
+                    // launcher activity and let the normal path below launch it
+                    // with the original intent's data/extras preserved.
+                    String targetPkg = intent.getPackage() != null ? intent.getPackage()
+                            : (intent.getComponent() != null
+                                    ? intent.getComponent().getPackageName() : null);
+                    if (targetPkg != null
+                            && !targetPkg.equals(BActivityThread.getAppPackageName())
+                            && BlackBoxCore.get().isInstalled(targetPkg, BActivityThread.getUserId())) {
+                        Intent launcher = new Intent(Intent.ACTION_MAIN);
+                        launcher.addCategory(Intent.CATEGORY_LAUNCHER);
+                        launcher.setPackage(targetPkg);
+                        ResolveInfo lr = BlackBoxCore.getBPackageManager().resolveActivity(
+                                launcher, GET_META_DATA, null, BActivityThread.getUserId());
+                        if (lr != null && lr.activityInfo != null) {
+                            resolveInfo = lr;
+                            Slog.d(TAG, "Cross-clone rescue: " + targetPkg + " -> " + lr.activityInfo.name);
+                        }
+                    }
+                }
+                if (resolveInfo == null) {
                     intent.setPackage(origPackage);
                     return method.invoke(who, args);
                 }

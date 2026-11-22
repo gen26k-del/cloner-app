@@ -204,6 +204,11 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
                         || r0.isDefault != r1.isDefault) {
                     return query.get(0);
                 }
+                // v1.0.142: tied multi-match (e.g. the Facebook -> Messenger
+                // handoff intent) — AOSP would show a resolver, but this path
+                // has none; returning null dropped the launch entirely.
+                // Take the first match instead.
+                return query.get(0);
             }
         }
         return null;

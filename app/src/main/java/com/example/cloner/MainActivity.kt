@@ -271,7 +271,8 @@ private fun resolveTraceActivityClass(
     if (intentClass != null) {
         return runCatching {
             ctx.packageManager.getActivityInfo(
-                android.content.ComponentName(pkg, intentClass), 0
+                android.content.ComponentName(pkg, intentClass),
+                android.content.pm.PackageManager.MATCH_DISABLED_COMPONENTS
             ).targetActivity ?: intentClass
         }.getOrElse { intentClass }
     }
@@ -923,12 +924,16 @@ fun ClonerAppScreen() {
                         trace.contains("callActivityOnCreate done: $clsName")
                     val hasResume = clsName != null &&
                         trace.contains("callActivityOnResume: $clsName")
+                    // v1.0.142: প্যাকেজ-স্তরের প্রমাণ — alias-এর আসল ক্লাস নাম
+                    // মিলাতে না পারলেও ওই প্যাকেজের কোনো অ্যাক্টিভিটি resume
+                    // হলেই অ্যাপ চলেছে (Meta অ্যাপে ভুল রায় এড়াতে)।
+                    val hasResumePkg = trace.contains("callActivityOnResume: $pkg.")
                     val t = when {
                         !hasBind && !hasBindStart -> "ট্রেস: এই বিল্ডে bind শুরুই হয়নি — অ্যাপটা এই বিল্ডে চালু করা হয়নি"
                         !hasBind -> "ট্রেস: bind শুরু হয়েছিল কিন্তু শেষ হয়নি — bind-এর মাঝখানে প্রসেস মারা গেছে"
                         hasCreateStart && !hasCreateDone -> "ট্রেস: onCreate শুরু হয়েছে কিন্তু শেষ হয়নি — onCreate-এ আটকে/ক্র্যাশ"
-                        hasCreateDone && !hasResume -> "ট্রেস: onCreate শেষ হয়েছে কিন্তু onResume হয়নি — অ্যাক্টিভিটি বন্ধ হয়ে গেছে"
-                        hasResume -> "ট্রেস: onResume হয়েছে — অ্যাক্টিভিটি চালু হয়েছিল"
+                        hasCreateDone && !hasResume && !hasResumePkg -> "ট্রেস: onCreate শেষ হয়েছে কিন্তু onResume হয়নি — অ্যাক্টিভিটি বন্ধ হয়ে গেছে"
+                        hasResume || hasResumePkg -> "ট্রেস: onResume হয়েছে — অ্যাক্টিভিটি চালু হয়েছিল"
                         else -> "ট্রেস: bind হয়েছে, কিন্তু অ্যাক্টিভিটি শুরু হয়নি"
                     }
                     sb.append("$t\n")
@@ -1049,8 +1054,8 @@ fun ClonerAppScreen() {
             // ফিক্স চলেছিল কিনা আর renderer কখন মরল। বিরল লাইনগুলো (setup/
             // transact) পুরো ট্রেস থেকে নাও — শেষ ২০-এ চাপা পড়ে যায় বলে
             // v1.0.82-84-তে "relroInfo nulled"/"transact code=" কখনো দেখা যায়নি।
-            val diagKeywords = listOf("SHUTDOWN HOOK", "System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed", "transact code=", "no-sandbox", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu")
-            val rareKeywords = listOf("transact code=", "relroInfo nulled", "RELRO blocked", "no-sandbox", "setupConnection rewrite failed", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu")
+            val diagKeywords = listOf("SHUTDOWN HOOK", "System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed", "transact code=", "no-sandbox", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset")
+            val rareKeywords = listOf("transact code=", "relroInfo nulled", "RELRO blocked", "no-sandbox", "setupConnection rewrite failed", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset")
             val rareLines = trace.lines().filter { line -> rareKeywords.any { k -> line.contains(k) } }.takeLast(30)
             // v1.0.96 রিপোর্ট-স্বাস্থ্য: একই লাইন বারবার আসে (যেমন
             // "foreground promoted" ২২ বার, শুধু সময়/PID আলাদা) — distinct()
@@ -1334,8 +1339,9 @@ fun ClonerAppScreen() {
                         as android.app.ActivityManager
                     val alive = am.runningAppProcesses
                         ?.any { it.processName.startsWith("${ctx.packageName}:p") } == true
-                    val hasResume = clsName != null &&
-                        newTrace.contains("callActivityOnResume: $clsName")
+                    val hasResume = (clsName != null &&
+                        newTrace.contains("callActivityOnResume: $clsName")) ||
+                        newTrace.contains("callActivityOnResume: $pkg.")
                     val hasDone = clsName != null &&
                         newTrace.contains("callActivityOnCreate done: $clsName")
                     val hasStart = clsName != null &&

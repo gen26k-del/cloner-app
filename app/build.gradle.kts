@@ -14,8 +14,8 @@ android {
         // BlackBox ফর্ক ইচ্ছা করে targetSdk 28 রাখে — নতুন Android-এর
         // আচরণ পরিবর্তনে hook ভাঙা এড়াতে। ব্যক্তিগত ব্যবহারে ঠিক আছে।
         targetSdk = 28
-        versionCode = 126
-        versionName = "1.0.141 ফেসবুক-প্রোভাইডার"
+        versionCode = 127
+        versionName = "1.0.142 মেসেঞ্জার-কানেকশন"
     }
 
     compileOptions {
