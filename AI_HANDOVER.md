@@ -3,6 +3,19 @@
 > For any AI assistant or developer picking up this project cold. Read this first.
 > Last updated: 2026-11-22, at version **1.0.144** (versionCode 129).
 
+> ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
+> This document is the project's memory. **Every release MUST update it in the
+> same round of work**, before the build is delivered:
+> 1. Update the "Last updated / version" line above.
+> 2. Add the new version's entry to §6 (what changed, what the device test
+>    proved — and if a fix did NOT work, write that too).
+> 3. Refresh §7 so the open-problems list matches reality (remove solved
+>    items, add new ones, update the "first evidence to check").
+> The file lives in the repo root, so the latest commit always carries the
+> matching guide: whoever receives the newest source (or this file from the
+> newest version) can understand the app as it exists *now* and produce the
+> next update. A release whose handover update is missing is unfinished.
+
 ## 1. What this app is
 
 **CloneMe** (package `com.example.cloner`) is an Android **app cloner**: it runs
