@@ -171,16 +171,27 @@ When they disagree, the user is right and the report is lying.
    termination status 0; native `_exit(0)` traces from `ChildProcessMain`).
    Long-standing across many versions; mitigations exist (RELRO nulling,
    `--no-sandbox`, keep-alive on unbind/destroy) but the churn persists.
+   **Already tried — do not repeat blindly:** RELRO blocking/nulling
+   (v1.0.80s), `--no-sandbox` append (v1.0.84), child keep-alive on
+   unbind/destroy (v1.0.132), `KeepChildProcessAfterIPCReset` enable-features
+   merge (v1.0.139 — whether the flag truly reaches the child was unverifiable
+   until the v1.0.143 `ChromeArgs:` line). A v1.0.127 experiment proved the
+   parcel rewrite itself is NOT the cause (untouched forward dies identically).
    **First evidence to check in a v1.0.143+ report:** the `ChromeArgs:` line —
    does the child actually receive `KeepChildProcessAfterIPCReset` in
    `--enable-features`? If yes and renderers still die, that flag does not
    cover this exit family; say so plainly and weigh effort vs. a work-profile
    second Chrome for this one app.
 2. **Facebook → Messenger handoff.** Inside the Facebook clone, tapping
-   Messages does not open the Messenger clone. **First evidence to check:**
-   the `CrossClone:` lines in a v1.0.143+ report generated right after such a
-   tap. They distinguish: intent never fired through the hook / fired and fell
-   through / launched but died later / went through `startActivities`.
+   Messages does not open the Messenger clone. **Already tried — did not
+   work:** v1.0.142's `chooseBestActivity` tie→first-match change and the
+   StartActivity cross-clone rescue (user-tested, handoff still fails; both
+   kept, harmless). **First evidence to check:** the `CrossClone:` lines in a
+   v1.0.143+ report generated right after such a tap. They distinguish: intent
+   never fired through the hook / fired and fell through / launched but died
+   later / went through `startActivities`. If NO CrossClone line appears at
+   all after a tap, Facebook is not using startActivity for this at all —
+   look at service binding / provider calls / PM presence checks instead.
 3. **Several other apps don't open properly** (WhatsApp / Gemini / Google-app
    class, per the user). Take them one at a time, evidence first (a report
    from a build whose verdicts can be trusted — v1.0.142+), and remember the
