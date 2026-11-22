@@ -1,3 +1,6 @@
+import java.io.File
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -9,13 +12,13 @@ plugins {
 // আপডেট ইনস্টল হতো না (আনইনস্টল = সব লগইন মোছা)। এখন keystore-এর
 // base64 কপি repo-তে (ci/debug.keystore.b64) থাকে; এখানে decode করে
 // সেই একই keystore দিয়ে সব বিল্ড সাইন হয় — আপডেট সরাসরি ইনস্টল হবে।
-val fixedDebugKeystore: java.io.File = rootProject.file("build/fixed-debug.keystore")
+val fixedDebugKeystore: File = rootProject.file("build/fixed-debug.keystore")
 run {
     val b64 = rootProject.file("ci/debug.keystore.b64")
     if (b64.exists() && !fixedDebugKeystore.exists()) {
         fixedDebugKeystore.parentFile.mkdirs()
         fixedDebugKeystore.writeBytes(
-            java.util.Base64.getDecoder().decode(b64.readText().trim())
+            Base64.getDecoder().decode(b64.readText().trim())
         )
     }
 }
