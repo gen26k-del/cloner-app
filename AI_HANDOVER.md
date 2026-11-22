@@ -209,8 +209,13 @@ When they disagree, the user is right and the report is lying.
   `@drawable/ic_launcher`. Fix: an app-module vector drawable of the same
   type+name (`app/src/main/res/drawable/ic_launcher.xml`, original-logo
   design) — app resources override library resources at merge time, so
-  the APK's `res/drawable/ic_launcher` is now the real logo everywhere,
-  including that scan screen.
+  the APK's `res/drawable/ic_launcher` is now the real logo.
+  **Device verdict (2026-11-22): the HiOS scan screen STILL shows the
+  robot** even though the shipped APK contains no robot image anywhere
+  (full listing checked) — so that screen's picture is HiOS-side
+  (its own placeholder/cache for sideloaded apps) and CANNOT be changed
+  from inside the app. The override is still correct hygiene (the APK no
+  longer carries the robot), but do not promise the scan screen again.
 
 ## 7. Open problems (start here)
 
