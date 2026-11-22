@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-22, at version **1.0.146** (versionCode 131).
+> Last updated: 2026-11-22, at version **1.0.147** (versionCode 132).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -193,15 +193,24 @@ When they disagree, the user is right and the report is lying.
   written; a non-zero count finally shows the values. (b) **App icon**:
   an adaptive icon was added — but with a NEW design (white squares on a
   deep-blue grid) that the owner REJECTED the same day; see v1.0.146.
-- **v1.0.146** — **Original logo restored.** The v1.0.145 redesign was a
+- **v1.0.146** — **Original logo restored** (built but NOT shipped —
+  superseded by v1.0.147 before delivery). The v1.0.145 redesign was a
   mistake: the app already HAD a logo (the mipmap PNGs: light-blue back
   square + blue front square + white glyph on white), and the owner never
   asked for a redesign — he had only asked why the installer showed no
   proper logo. The adaptive drawables now recreate the ORIGINAL design as
-  vectors (geometry/colours measured from the xxxhdpi PNG). Also corrects
-  a factual error this guide carried: the blue-grid ANDROID ROBOT image is
-  **HiOS's installer/security-scan placeholder, not the app icon** — it
-  was wrongly described as "the upstream default icon" in earlier entries.
+  vectors (geometry/colours measured from the xxxhdpi PNG).
+- **v1.0.147** — **The robot image traced and replaced.** The blue-grid
+  ANDROID ROBOT picture on HiOS's install/security-scan screen is NOT a
+  HiOS placeholder after all: it is an unreferenced PNG inside the Bcore
+  library (`blackbox/Bcore/src/main/res/drawable/ic_launcher.png`, the
+  old Android Studio default) that gets packaged into the APK, and the
+  HiOS scan screen displays it. Nothing in the code references
+  `@drawable/ic_launcher`. Fix: an app-module vector drawable of the same
+  type+name (`app/src/main/res/drawable/ic_launcher.xml`, original-logo
+  design) — app resources override library resources at merge time, so
+  the APK's `res/drawable/ic_launcher` is now the real logo everywhere,
+  including that scan screen.
 
 ## 7. Open problems (start here)
 
