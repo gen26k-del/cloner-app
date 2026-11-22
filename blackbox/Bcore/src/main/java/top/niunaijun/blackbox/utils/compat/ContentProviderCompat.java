@@ -25,12 +25,39 @@ public class ContentProviderCompat {
     // দ্রুত সিদ্ধান্ত নিতে পারে।
     private static final ExecutorService sCallExecutor = Executors.newCachedThreadPool();
     private static final long CALL_TIMEOUT_MS = 5000;
+    // v1.0.140: acquire-ও একইভাবে বাঁধো। acquireUnstableContentProviderClient
+    // provider প্রসেস publish না হওয়া পর্যন্ত ActivityThread.acquireProvider-এ
+    // Object.wait-এ আটকে থাকে — ধীর ডিভাইসে :black প্রসেস চালু হতে দেরি হলে
+    // main thread-ই সেখানে পার্ক হয়ে যায়, ফলে BlackBoxCore.doCreate-এর
+    // isBlackProcessRunning চেকেই অ্যাপ ANR-লুপে পড়ে (স্প্ল্যাশ থেকে আগায়
+    // না)। ৫ সেকেন্ডে client না এলে ব্যর্থ ধরো — caller (retry/fallback)
+    // সিদ্ধান্ত নিক।
+    private static final long ACQUIRE_TIMEOUT_MS = 5000;
 
     public static Bundle call(Context context, Uri uri, String method, String arg, Bundle extras, int retryCount) throws IllegalAccessException {
         if (VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1) {
             return context.getContentResolver().call(uri, method, arg, extras);
         }
-        ContentProviderClient client = acquireContentProviderClientRetry(context, uri, retryCount);
+        ContentProviderClient client;
+        try {
+            Future<ContentProviderClient> acquireFuture =
+                    sCallExecutor.submit(() -> acquireContentProviderClientRetry(context, uri, retryCount));
+            try {
+                client = acquireFuture.get(ACQUIRE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException e) {
+                acquireFuture.cancel(true);
+                throw new IllegalAccessException("provider acquire timeout: " + method);
+            } catch (java.util.concurrent.ExecutionException e) {
+                throw new IllegalAccessException(String.valueOf(e.getCause()));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalAccessException("interrupted");
+            }
+        } catch (IllegalAccessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalAccessException(String.valueOf(e));
+        }
         try {
             if (client == null) {
                 throw new IllegalAccessException();

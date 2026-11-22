@@ -916,6 +916,7 @@ fun ClonerAppScreen() {
                 // নইলে আগের অ্যাপগুলোকে ভুল করে "bind হয়নি" বলা হয়।
                 if (trace.isNotEmpty()) {
                     val hasBind = trace.contains("handleBindApplication done: $pkg")
+                    val hasBindStart = trace.contains("handleBindApplication start: $pkg")
                     val hasCreateStart = clsName != null &&
                         trace.contains("callActivityOnCreate start: $clsName")
                     val hasCreateDone = clsName != null &&
@@ -923,7 +924,8 @@ fun ClonerAppScreen() {
                     val hasResume = clsName != null &&
                         trace.contains("callActivityOnResume: $clsName")
                     val t = when {
-                        !hasBind -> "ট্রেস: bind হয়নি — bind-এর আগেই প্রসেস মারা গেছে"
+                        !hasBind && !hasBindStart -> "ট্রেস: এই বিল্ডে bind শুরুই হয়নি — অ্যাপটা এই বিল্ডে চালু করা হয়নি"
+                        !hasBind -> "ট্রেস: bind শুরু হয়েছিল কিন্তু শেষ হয়নি — bind-এর মাঝখানে প্রসেস মারা গেছে"
                         hasCreateStart && !hasCreateDone -> "ট্রেস: onCreate শুরু হয়েছে কিন্তু শেষ হয়নি — onCreate-এ আটকে/ক্র্যাশ"
                         hasCreateDone && !hasResume -> "ট্রেস: onCreate শেষ হয়েছে কিন্তু onResume হয়নি — অ্যাক্টিভিটি বন্ধ হয়ে গেছে"
                         hasResume -> "ট্রেস: onResume হয়েছে — অ্যাক্টিভিটি চালু হয়েছিল"
@@ -1339,13 +1341,15 @@ fun ClonerAppScreen() {
                     val hasStart = clsName != null &&
                         newTrace.contains("callActivityOnCreate start: $clsName")
                     val hasBind = newTrace.contains("handleBindApplication done: $pkg")
+                    val hasBindStart = newTrace.contains("handleBindApplication start: $pkg")
                     return when {
                         hasResume -> "✅ ${app.label}: launched"
                         hasDone -> "⚠️ ${app.label}: onCreate done, no onResume"
                         hasStart -> "❌ ${app.label}: stuck/crashed in onCreate"
                         hasBind -> "❌ ${app.label}: bind done, activity didn't start"
+                        hasBindStart -> "❌ ${app.label}: died during bind (bind started, never finished)"
                         alive -> "⚠️ ${app.label}: process alive but no activity seen"
-                        else -> "❌ ${app.label}: didn't launch (process died)"
+                        else -> "❌ ${app.label}: didn't launch (no bind attempt in trace)"
                     }
                 }
                 val verdict: String

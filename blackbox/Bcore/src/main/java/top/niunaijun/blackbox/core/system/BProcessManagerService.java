@@ -47,6 +47,10 @@ public class BProcessManagerService implements ISystemService {
     }
 
     public ProcessRecord startProcessLocked(String packageName, String processName, int userId, int bpid, int callingPid) {
+        return startProcessLocked(packageName, processName, userId, bpid, callingPid, false);
+    }
+
+    private ProcessRecord startProcessLocked(String packageName, String processName, int userId, int bpid, int callingPid, boolean waiterRetryUsed) {
         ApplicationInfo info = BPackageManagerService.get().getApplicationInfo(packageName, 0, userId);
         if (info == null)
             return null;
@@ -142,10 +146,30 @@ public class BProcessManagerService implements ISystemService {
                     }
                 }
             }
+            // v1.0.140: অপেক্ষা করা init ব্যর্থ/মরা — v1.0.136-এর পর এখানে
+            // সরাসরি null ফিরত, ফলে একবারের ব্যর্থতা ওই প্রসেসের জন্য
+            // স্থায়ী হয়ে যেত। একবার নতুন করে শুরু করার চেষ্টা করো
+            // (waiterRetryUsed পতাকা দিয়ে একবারেই সীমাবদ্ধ — অসীম চক্র নয়)।
+            if (!waiterRetryUsed) {
+                return startProcessLocked(packageName, processName, userId, -1, callingPid, true);
+            }
             return null;
         }
         if (fresh) {
-            if (!initAppProcessL(app)) {
+            boolean initOk;
+            try {
+                initOk = initAppProcessL(app);
+            } catch (Throwable t) {
+                // v1.0.140: initAppProcessL exception ছুড়লে আগের কোডে
+                // exception-টা সোজা বেরিয়ে যেত — রেকর্ডটা initLock বন্ধ
+                // অবস্থায় map-এ থেকে যেত (poisoned record), ফলে ওই
+                // প্রসেসের পরের সব launch initLock-এ চিরকাল আটকে থাকত।
+                // ব্যর্থতা হিসেবে ধরে নিচের পরিষ্কার-পথে পাঠাও (initLock
+                // খোলা + রেকর্ড সরানো)।
+                Log.e(TAG, "initAppProcessL threw for " + processName, t);
+                initOk = false;
+            }
+            if (!initOk) {
                 synchronized (mProcessLock) {
                     // অপেক্ষমাণ thread যাতে initLock-এ চিরকাল আটকে না থাকে।
                     if (app.initLock != null) {
