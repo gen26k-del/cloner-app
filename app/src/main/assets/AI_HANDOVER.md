@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-23, at version **1.0.154** (versionCode 139).
+> Last updated: 2026-11-24, at version **1.0.155** (versionCode 140).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -568,6 +568,71 @@ When they disagree, the user is right and the report is lying.
   lines name the bind failure), and the death records
   (INIT_FAILURE on SCREEN_ON/OFF wakes should drop if the
   receiver guard is the operative fix).
+- **v1.0.155** — **Guest stall capture + launch timing
+  (tracing only — NO ANR cure claimed)** (device evidence:
+  the v1.0.154 smart report, 2026-11-24 01:38, plus the
+  owner's verdict 01:45–01:51). What that round proved:
+  (A) The v1.0.154 unbind fix worked exactly as designed —
+  `UnbindSvc: cached=true` ×14, zero `cached=false`, and
+  the old ~6 s unbind stack is GONE from MainStallStack.
+  (B) But the owner still got "CloneMe isn't responding"
+  MANY times on .154, returning after Wait — **his verdict
+  outranks the trace** (§5 rule), so the ANR is NOT cured;
+  the remaining stalls live somewhere the old watchdog
+  could not see. The whole .154 window produced ONE
+  captured stall: a guest process (:p3) blocked 4,938 ms
+  in `ZipFile.<init>`/initCEN — just over the 4 s
+  threshold. (C) The owner's refined symptom: after
+  tapping a shared-post link in the Messenger clone, the
+  Facebook clone opened and then HEAVY actions stalled —
+  feed/photo posts scrolled fine, but tapping Reels
+  videos did nothing and other heavy actions failed to
+  respond (partial responsiveness). The trace shows a
+  4-activity deep-link launch burst inside katana at
+  01:37:08–09 (IntentUriHandler →
+  StoryDeepLinkLoadingActivity →
+  NotificationsLandToFeedDeepLinkLoadingActivity ×2 →
+  TopOfFeedHighlightLaunchActivity ×2). Prime suspect
+  now: guest-process main-thread stalls of ~2–4 s on
+  heavy launches — under the old 4 s capture threshold,
+  and invisible after the single first sample. Changes
+  (tracing only): (1) **Watchdog** (ClonerApp, runs in
+  every host process): in guest stub processes (:pN) the
+  stall threshold drops to 2 s (ticker 500 ms, watchdog
+  1 s; host main/:black unchanged at 4 s/2 s/3 s), each
+  stall episode now records up to SIX stack samples
+  (first = the `MainStall:` line, repeats =
+  `MainStallStack: == sample N ==` headers), and every
+  sample is tagged `fg=<pkg>/<class>` (last resumed
+  activity in that process) or `launching=<class>` (a
+  launch is pending) from new BActivityThread statics.
+  The 8 s ANR crash-file logic is unchanged. (2)
+  **Launch timing**: `HCallbackProxy.handleLaunchActivity`
+  records the launch start
+  (`BActivityThread.noteLaunchStart155`);
+  `AppInstrumentation.callActivityOnResume` computes
+  start→resume elapsed and writes `LaunchTime: pkg=…
+  activity=… elapsed=…ms`, plus `SlowLaunch:` when
+  elapsed > 2,500 ms. The report gains a dedicated
+  "LaunchTime / SlowLaunch" section right after MainStall
+  (totals + last 10 each), both keywords join the
+  diagnosis/rare lists, the MainStallStack print window
+  widens to the last 30 lines so repeat samples survive,
+  and everything flows into smart_report.txt as before.
+  (3) The launch path was re-read for another .154-class
+  block (a synchronous binder/provider wait on a main
+  thread): the only synchronous wait there is
+  `bindApplication` itself — the framework-mandated bind
+  the launch cannot proceed without, NOT a tolerated-null
+  path like onServiceUnbind — so no fix was attempted;
+  tracing only, per the one-hypothesis rule. No
+  BActivityManagerService changes. **First evidence to
+  check in the next report:** guest (:pN) MainStall
+  episodes with repeat samples + fg tags (do the stacks
+  sit in launch/video paths?), SlowLaunch lines naming
+  the Reels/video activities and their elapsed times,
+  and whether the owner's popup count changes at all —
+  his count is the verdict, not the trace totals.
 
 ## 7. Open problems (start here)
 
@@ -606,6 +671,12 @@ When they disagree, the user is right and the report is lying.
    class, per the user). Take them one at a time, evidence first (a report
    from a build whose verdicts can be trusted — v1.0.142+), and remember the
    rule in §5: the user's experience outranks the trace.
+   **WhatsApp corroborated (v1.0.154 report, 2026-11-24):** its trace
+   verdict reads "bind হয়েছে, কিন্তু অ্যাক্টিভিটি শুরু হয়নি" — bind
+   completes but no activity ever starts, matching the owner's
+   "খোলে না". (For Meta apps that same verdict text was once a report
+   artifact — §6 v1.0.142 — but for WhatsApp no onResume marker exists
+   either, so treat it as real until a device test says otherwise.)
 4. **Google Photos clone** opens but crashed on a tap with
    `SecurityException: Package ... does not belong to <uid>` from
    `ICrossProfileApps.getTargetUserProfiles` (same calling-UID family as the
@@ -648,6 +719,20 @@ When they disagree, the user is right and the report is lying.
    the ~6 s / ~10-min MainStall cadence is gone; if a stall
    remains, its MainStallStack names the NEXT blocking path —
    do not assume unbind was the only one.
+   **Update (v1.0.154 report + owner verdict, 2026-11-24):**
+   the unbind fix is proven (UnbindSvc cached=true ×14, zero
+   cached=false, old stack gone) — and the popup STILL came
+   many times on .154 (owner, 01:45). Do not call the ANR
+   fixed. The symptom has also sharpened: it strikes at
+   LAUNCH time, not idle mid-use — after a Messenger→Facebook
+   shared-link handoff the FB clone stayed partially
+   responsive (feed scrolled) while heavy launches (Reels/
+   video open) stalled. v1.0.155 instruments exactly that:
+   2 s guest-process stall capture with repeat samples + fg
+   tags, and LaunchTime/SlowLaunch per-activity timing (see
+   §6). **First evidence to check:** :pN MainStall samples
+   and SlowLaunch lines in the next report, read against the
+   owner's own popup count.
 6. **Per-clone notifications unreliable — pinned symptom: the Facebook
    clone (com.facebook.katana) receives NO notifications at all, while
    the ORIGINAL Facebook app (outside CloneMe) notifies normally**
@@ -715,6 +800,16 @@ When they disagree, the user is right and the report is lying.
    MqttTrace create→destroy lifetimes — long lifetimes with
    NotifyPost still 0 would move suspicion to the MQTT
    connection itself.
+   **Update (v1.0.154 report, 2026-11-24 01:38):** deaths in
+   that window were one synchronised SIGNALED wave (app
+   restart-like), LOW_MEMORY on :p3/:p7, and ONE INIT_FAILURE
+   (:black, SCREEN_ON, 00:47:49) whose build attribution is
+   uncertain (the owner was mid-Y17-flash until 00:33; .154's
+   install time is unconfirmed, and the pasted report was
+   truncated before any BlackInitFail section). NotifyPost
+   still 0, NotifyCancel 51. Unresolved: whether the receiver
+   guard changed wake deaths at all — needs a clean .154+
+   window with the smart_report.txt file, not a paste.
 
 **Fixed in v1.0.150 — do not chase again:** the com.facebook.aura
 "Missing ComponentInfo!" crash (malformed ResolveInfo from the virtual

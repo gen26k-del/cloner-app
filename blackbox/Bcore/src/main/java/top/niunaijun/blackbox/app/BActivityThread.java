@@ -28,6 +28,7 @@ import android.os.IInterface;
 import android.os.Looper;
 import android.os.RemoteException;
 import android.os.StrictMode;
+import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.Log;
 import android.webkit.WebView;
@@ -146,6 +147,49 @@ public class BActivityThread extends IBActivityThread.Stub {
         } else {
             return null;
         }
+    }
+
+    // v1.0.155: launch-timing + foreground tracking (tracing only).
+    // HCallbackProxy.handleLaunchActivity প্রতিটি launch transaction-এ
+    // noteLaunchStart ডাকে; AppInstrumentation.callActivityOnResume সেই
+    // launch-এর elapsed বের করে (takeLaunchElapsed) আর foreground activity
+    // নোট করে (noteForegroundActivity)। ClonerApp-এর watchdog stall
+    // স্যাম্পলে fg=<...> ট্যাগ হিসেবে getForegroundActivity() পড়ে।
+    // একটাই pending launch রাখা হয় — guest প্রসেসে launch main thread-এ
+    // serial, আর burst chain-এ সর্বশেষ launch-টাই অর্থবহ।
+    private static volatile long sLaunchStartUptime155 = 0L;
+    private static volatile String sLaunchClass155 = null;
+    private static volatile String sForeground155 = null;
+
+    public static void noteLaunchStart155(String className) {
+        sLaunchClass155 = className;
+        sLaunchStartUptime155 = SystemClock.uptimeMillis();
+    }
+
+    /** Resume হওয়া class-এর জন্য pending launch থাকলে elapsed (ms) ফেরত
+     *  দিয়ে pending মুছে দেয়; না মিললে -1। */
+    public static long takeLaunchElapsed155(String className) {
+        String pending = sLaunchClass155;
+        if (pending == null || className == null || !pending.equals(className)) {
+            return -1L;
+        }
+        long start = sLaunchStartUptime155;
+        sLaunchClass155 = null;
+        sLaunchStartUptime155 = 0L;
+        if (start <= 0L) return -1L;
+        return SystemClock.uptimeMillis() - start;
+    }
+
+    public static String getPendingLaunch155() {
+        return sLaunchClass155;
+    }
+
+    public static void noteForegroundActivity155(String pkgClass) {
+        sForeground155 = pkgClass;
+    }
+
+    public static String getForegroundActivity155() {
+        return sForeground155;
     }
 
     public static Application getApplication() {

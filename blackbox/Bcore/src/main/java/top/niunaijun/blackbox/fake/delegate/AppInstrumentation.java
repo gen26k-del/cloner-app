@@ -146,10 +146,33 @@ public final class AppInstrumentation extends BaseInstrumentationDelegate implem
 
     @Override
     public void callActivityOnResume(Activity activity) {
+        String cls155 = activity.getClass().getName();
         try {
             top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
                 top.niunaijun.blackbox.BlackBoxCore.getContext(),
-                "AppInstrumentation.callActivityOnResume: " + activity.getClass().getName());
+                "AppInstrumentation.callActivityOnResume: " + cls155);
+        } catch (Throwable ignored) { }
+        // v1.0.155: launch timing — HCallbackProxy-তে লেখা launch start
+        // থেকে এই resume পর্যন্ত কতক্ষণ লাগল। 2.5s পেরোলে আলাদা
+        // SlowLaunch লাইন (রিপোর্টে নিজের অংশে ওঠে)। foreground
+        // activity-ও নোট হয় — watchdog-এর stall ট্যাগের জন্য।
+        try {
+            String pkg155 = BActivityThread.getAppPackageName();
+            BActivityThread.noteForegroundActivity155(
+                    (pkg155 == null ? "?" : pkg155) + "/" + cls155);
+            long elapsed155 = BActivityThread.takeLaunchElapsed155(cls155);
+            if (elapsed155 >= 0) {
+                top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                    top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                    "LaunchTime: pkg=" + pkg155 + " activity=" + cls155
+                        + " elapsed=" + elapsed155 + "ms");
+                if (elapsed155 > 2500) {
+                    top.niunaijun.blackbox.BlackBoxCore.traceInitPublic(
+                        top.niunaijun.blackbox.BlackBoxCore.getContext(),
+                        "SlowLaunch: pkg=" + pkg155 + " activity=" + cls155
+                            + " elapsed=" + elapsed155 + "ms");
+                }
+            }
         } catch (Throwable ignored) { }
         super.callActivityOnResume(activity);
     }

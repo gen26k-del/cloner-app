@@ -46,7 +46,18 @@ class ClonerApp : Application() {
             val mainHandler = Handler(Looper.getMainLooper())
             val state = longArrayOf(SystemClock.uptimeMillis())
             // v1.0.150: প্রতি stall episode-এ MainStall লাইন একবারই লিখো
-            var stallTraced = false
+            // v1.0.155: guest (clone) প্রসেস = :pN stub — সেখানে threshold
+            // কম (2s) আর স্যাম্পলিং ঘন। .154-এর রিপোর্টে 4s threshold
+            // guest-এর stall প্রায় ধরতেই পারেনি (পুরো window-তে মাত্র
+            // একটা 4938ms), অথচ ব্যবহারকারীর অভিজ্ঞতায় "isn't
+            // responding" বারবার এসেছে — হালকা কাজ চলে, ভারী launch
+            // আটকায় এমন প্যাটার্ন 2–4s-এর block-এ লুকিয়ে থাকে।
+            val isGuestProc155 = procName.startsWith("$packageName:p")
+            val stallThreshold155 = if (isGuestProc155) 2000L else 4000L
+            val tickerInterval155 = if (isGuestProc155) 500L else 2000L
+            val watchdogSleep155 = if (isGuestProc155) 1000L else 3000L
+            // প্রতি episode-এ নেওয়া stack স্যাম্পলের সংখ্যা (সর্বোচ্চ ৬)
+            var stallSamples155 = 0
             // main thread আটকানোর আগের অবস্থান — watchdog thread থেকে স্যাম্পল
             val recentStacks = ArrayDeque<String>()
             // আসল main thread: যার stack-এ ActivityThread.main আছে
@@ -64,7 +75,7 @@ class ClonerApp : Application() {
             val ticker = object : Runnable {
                 override fun run() {
                     state[0] = SystemClock.uptimeMillis()
-                    mainHandler.postDelayed(this, 2000)
+                    mainHandler.postDelayed(this, tickerInterval155)
                 }
             }
             mainHandler.post(ticker)
@@ -73,7 +84,7 @@ class ClonerApp : Application() {
                     try {
                         // স্যাম্পলিং বন্ধ — getAllStackTraces() thread suspend করে hang ডেকে আনতে পারে
                         // শুধু ticker-এর মাধ্যমে blockage detect করো
-                        Thread.sleep(3000)
+                        Thread.sleep(watchdogSleep155)
                         val blockedFor = SystemClock.uptimeMillis() - state[0]
                         // v1.0.150: ANR প্রমাণ — main thread ৪ সেকেন্ডের
                         // বেশি আটকে থাকলেই init trace-এ এক লাইন (প্রতি
@@ -86,22 +97,43 @@ class ClonerApp : Application() {
                         // লাইনটা স্মার্ট রিপোর্টের ডায়াগনসিস অংশে
                         // MainStall keyword-এ ওঠে। এটি শুধু ট্রেস —
                         // ANR-এর চিকিৎসা নয়।
-                        if (blockedFor > 4000 && !stallTraced) {
-                            stallTraced = true
+                        // v1.0.155: episode চলাকালীন বারবার স্যাম্পল —
+                        // প্রথম স্যাম্পল MainStall লাইন + stack, পরেরগুলো
+                        // "== sample N ==" হেডার + stack (সর্বোচ্চ ৬টা)।
+                        // প্রতিটি স্যাম্পলে fg ট্যাগ: এই প্রসেসে সর্বশেষ
+                        // resume হওয়া activity (BActivityThread-তে নোট
+                        // করা), না থাকলে launch-রত activity। .152-এর
+                        // একবারের স্যাম্পল stall-এর শুরুটা দেখাত, কিন্তু
+                        // দীর্ঘ/বারবার stall-এ main thread কোথায় ঘোরে
+                        // তা ধরা যেত না।
+                        if (blockedFor > stallThreshold155 && stallSamples155 < 6) {
+                            val firstSample155 = stallSamples155 == 0
+                            stallSamples155++
                             runCatching {
-                                val line = StringBuilder(
-                                    "${Date()} [$procName] MainStall: main thread blocked for ${blockedFor}ms\n"
-                                )
+                                val fg155 = runCatching {
+                                    top.niunaijun.blackbox.app.BActivityThread.getForegroundActivity155()
+                                }.getOrNull()
+                                val launching155 = if (fg155 == null) runCatching {
+                                    top.niunaijun.blackbox.app.BActivityThread.getPendingLaunch155()
+                                }.getOrNull() else null
+                                val tag155 = when {
+                                    fg155 != null -> " fg=$fg155"
+                                    launching155 != null -> " launching=$launching155"
+                                    else -> ""
+                                }
+                                val line = StringBuilder()
+                                if (firstSample155) {
+                                    line.append("${Date()} [$procName] MainStall: main thread blocked for ${blockedFor}ms$tag155\n")
+                                } else {
+                                    line.append("MainStallStack: == sample $stallSamples155 blocked ${blockedFor}ms$tag155 ==\n")
+                                }
                                 // v1.0.152: stall-এর মুহূর্তে main thread
                                 // ঠিক কোন কোডে আটকে আছে — তার stack-এর
                                 // প্রথম কয়েকটি ফ্রেম একই সঙ্গে লিখো।
-                                // 2026-11-23-র রিপোর্টে ~৬s-এর stall প্রতি
-                                // ~১০ মিনিটে ফিরেছে (17:07/17:17/17:28/
-                                // 17:38), কিন্তু কোন কাজে আটকায় তা জানা
-                                // ছিল না। শুধু stall episode-এ একবারই
-                                // স্যাম্পল হয় (Looper-এর main thread
-                                // সরাসরি — getAllStackTraces নয়), তাই
-                                // stall না থাকলে overhead শূন্য।
+                                // শুধু stall episode-এই স্যাম্পল হয়
+                                // (Looper-এর main thread সরাসরি —
+                                // getAllStackTraces নয়), তাই stall না
+                                // থাকলে overhead শূন্য।
                                 try {
                                     val st = Looper.getMainLooper().thread.stackTrace
                                     for (el in st.take(12)) {
@@ -111,7 +143,7 @@ class ClonerApp : Application() {
                                 java.io.File(cacheDir, "init_trace.txt").appendText(line.toString())
                             }
                         }
-                        if (blockedFor <= 4000) stallTraced = false
+                        if (blockedFor <= stallThreshold155) stallSamples155 = 0
                         if (blockedFor > 8000) {
                             // ANR লিখো শুধু যখন নিশ্চিত যে main thread আসলেই আটকে আছে:
                             // main thread পাওয়া গেছে, stack খালি নয়, আর উপরের ফ্রেম

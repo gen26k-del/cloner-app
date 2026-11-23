@@ -145,6 +145,11 @@ public class HCallbackProxy implements IInjectHook, Handler.Callback {
         ProxyActivityRecord stubRecord = ProxyActivityRecord.create(intent);
         ActivityInfo activityInfo = stubRecord.mActivityInfo;
         if (activityInfo != null) {
+            // v1.0.155: launch-timing শুরু — এই transaction-এর activity-র
+            // onResume পর্যন্ত সময় AppInstrumentation মাপবে (LaunchTime /
+            // SlowLaunch ট্রেস)। recovery পথে re-dispatch হলে start আবার
+            // লেখা হয় — bind+create-এর মূল খরচটাই তখন থেকে মাপা হয়।
+            BActivityThread.noteLaunchStart155(activityInfo.name);
             // v1.0.149: launch-assignment trace + package guard. আগে এই
             // প্রসেস অন্য অ্যাপের জন্য bound+init হয়ে থাকলে (যেমন :black
             // restart-এর পর server record মুছে গেলেও guest বেঁচে থাকে)
