@@ -1054,8 +1054,8 @@ fun ClonerAppScreen() {
             // ফিক্স চলেছিল কিনা আর renderer কখন মরল। বিরল লাইনগুলো (setup/
             // transact) পুরো ট্রেস থেকে নাও — শেষ ২০-এ চাপা পড়ে যায় বলে
             // v1.0.82-84-তে "relroInfo nulled"/"transact code=" কখনো দেখা যায়নি।
-            val diagKeywords = listOf("SHUTDOWN HOOK", "System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed", "transact code=", "no-sandbox", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan")
-            val rareKeywords = listOf("transact code=", "relroInfo nulled", "RELRO blocked", "no-sandbox", "setupConnection rewrite failed", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan")
+            val diagKeywords = listOf("SHUTDOWN HOOK", "System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed", "transact code=", "no-sandbox", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan", "NotifyPost", "NotifyCancel", "MainStall")
+            val rareKeywords = listOf("transact code=", "relroInfo nulled", "RELRO blocked", "no-sandbox", "setupConnection rewrite failed", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan", "NotifyPost", "NotifyCancel", "MainStall")
             val rareLines = trace.lines().filter { line -> rareKeywords.any { k -> line.contains(k) } }.takeLast(30)
             // v1.0.96 রিপোর্ট-স্বাস্থ্য: একই লাইন বারবার আসে (যেমন
             // "foreground promoted" ২২ বার, শুধু সময়/PID আলাদা) — distinct()
@@ -1087,6 +1087,18 @@ fun ClonerAppScreen() {
             if (chromeArgsAll.isNotEmpty()) sb.append(chromeArgsAll.takeLast(10).joinToString("\n") + "\n")
             sb.append("CrossClone: মোট " + crossCloneAll.size + "টি লাইন\n")
             if (crossCloneAll.isNotEmpty()) sb.append(crossCloneAll.takeLast(10).joinToString("\n") + "\n")
+            // v1.0.150: নোটিফিকেশন ট্রেসের আলাদা অংশ — কোন clone আদৌ
+            // notify() ডেকেছে কিনা তার প্রমাণ (বিশেষ করে katana:
+            // মালিকের ভাষ্যে Facebook clone-এ নোটিফিকেশন একদমই আসে
+            // না)। NotifyPost মোট ০ মানে ওই clone-এর প্রসেস post-ই
+            // করেনি; লাইন থাকলে post হয়েছে কিন্তু surface হয়নি।
+            val notifyPostAll = trace.lines().filter { it.contains("NotifyPost:") }
+            val notifyCancelAll = trace.lines().filter { it.contains("NotifyCancel:") }
+            sb.append("\n--- NotifyPost / NotifyCancel (আলাদা অংশ) ---\n")
+            sb.append("NotifyPost: মোট " + notifyPostAll.size + "টি লাইন\n")
+            if (notifyPostAll.isNotEmpty()) sb.append(notifyPostAll.takeLast(10).joinToString("\n") + "\n")
+            sb.append("NotifyCancel: মোট " + notifyCancelAll.size + "টি লাইন\n")
+            if (notifyCancelAll.isNotEmpty()) sb.append(notifyCancelAll.takeLast(10).joinToString("\n") + "\n")
             // টম্বস্টোন ফ্রেম: renderer SIGSEGV-র কল স্ট্যাক — কোন ফাংশনে
             // মরলো বোঝার একমাত্র সূত্র। লগ ভিউ ফ্রেমগুলো কেটে ফেলে, তাই
             // রিপোর্টেই ধরো (সংক্ষিপ্ত আকারে: ফ্রেম নম্বর, pc, লাইব্রেরি)।

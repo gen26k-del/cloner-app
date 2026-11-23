@@ -13,6 +13,7 @@ import java.util.List;
 
 import black.android.app.BRNotificationManager;
 import black.android.content.pm.BRParceledListSlice;
+import top.niunaijun.blackbox.BlackBoxCore;
 import top.niunaijun.blackbox.app.BActivityThread;
 import top.niunaijun.blackbox.fake.frameworks.BNotificationManager;
 import top.niunaijun.blackbox.fake.hook.BinderInvocationStub;
@@ -53,6 +54,26 @@ public class INotificationManagerProxy extends BinderInvocationStub {
         return false;
     }
 
+    // v1.0.150: নোটিফিকেশন ট্রেস (শুধু প্রমাণ সংগ্রহ — আচরণে কোনো
+    // বদল নয়)। মালিক জানিয়েছেন (2026-11-23) Facebook clone-এ
+    // নোটিফিকেশন একদমই আসে না। কোন clone কখন notify()/cancel()
+    // ডাকল তা init trace-এ NotifyPost:/NotifyCancel: লাইন হিসেবে
+    // লেখা থাকে; স্মার্ট রিপোর্টের আলাদা অংশে গোনা হয়। পরের
+    // রিপোর্টেই বোঝা যাবে katana আদৌ post করে কিনা (কোনো লাইন না
+    // থাকলে Facebook clone-এর ভেতর থেকে post-ই হয় না), নাকি post
+    // হয়েও surface হয় না। প্যাকেজ নাম নেওয়া হয় guest-এর নিজের
+    // bound package থেকে — invoke()-তে args-এর প্যাকেজ আগেই host
+    // প্যাকেজে বদলে যায় বলে args থেকে নিলে ভুল নাম আসত।
+    private static void traceNotify(String action, int id, String tag) {
+        try {
+            String pkg = BActivityThread.getAppPackageName();
+            if (pkg == null) return;
+            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                    action + ": pkg=" + pkg + " user=" + BActivityThread.getUserId()
+                            + " id=" + id + " tag=" + tag);
+        } catch (Throwable ignored) { }
+    }
+
     @ProxyMethod("getNotificationChannel")
     public static class GetNotificationChannel extends MethodHook {
 
@@ -81,6 +102,7 @@ public class INotificationManagerProxy extends BinderInvocationStub {
             String tag = (String) args[getTagIndex()];
             int id = (int) args[getIdIndex()];
             BNotificationManager.get().cancelNotificationWithTag(id, tag);
+            traceNotify("NotifyCancel", id, tag);
             return 0;
         }
 
@@ -106,6 +128,7 @@ public class INotificationManagerProxy extends BinderInvocationStub {
             int id = (int) args[getIdIndex()];
             Notification notification = MethodParameterUtils.getFirstParam(args, Notification.class);
             BNotificationManager.get().enqueueNotificationWithTag(id, tag, notification);
+            traceNotify("NotifyPost", id, tag);
             return 0;
         }
 

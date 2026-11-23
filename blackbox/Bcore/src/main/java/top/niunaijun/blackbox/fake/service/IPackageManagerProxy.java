@@ -4,6 +4,7 @@ import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.ComponentInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ProviderInfo;
@@ -104,6 +105,40 @@ public class IPackageManagerProxy extends BinderInvocationStub {
         } catch (Throwable ignored) { }
     }
 
+    // v1.0.150: ResolveInfo স্যানিটাইজ। ComponentResolver-এর newResult
+    // PackageManagerCompat.generate*Info() থেকে পাওয়া info বসায় —
+    // প্যাকেজটি ওই user-এর জন্য installed/visible না হলে ওই helper
+    // null ফেরত দেয়, ফলে activityInfo/serviceInfo/providerInfo
+    // তিনটাই null এমন ResolveInfo তৈরি হয়। সেরকম এন্ট্রিতে
+    // ResolveInfo.toString() → getComponentInfo()
+    // IllegalStateException("Missing ComponentInfo!") ছোড়ে —
+    // com.facebook.aura-র firebase-iid থ্রেড ঠিক এভাবেই মরেছিল
+    // (ক্র্যাশ স্ট্যাক: QueryBroadcastReceivers.hook, 2026-11-23)।
+    // guest-কে ফেরত দেওয়ার আগে অসম্পূর্ণ এন্ট্রি বাদ দাও।
+    private static boolean isWellFormedResolve(ResolveInfo ri) {
+        if (ri == null) return false;
+        ComponentInfo ci = ri.activityInfo != null ? ri.activityInfo
+                : ri.serviceInfo != null ? ri.serviceInfo : ri.providerInfo;
+        return ci != null && ci.packageName != null && ci.name != null;
+    }
+
+    private static List<ResolveInfo> sanitizeResolveList(List<ResolveInfo> resolves) {
+        if (resolves == null) return null;
+        List<ResolveInfo> out = null;
+        for (int i = 0; i < resolves.size(); i++) {
+            ResolveInfo ri = resolves.get(i);
+            if (isWellFormedResolve(ri)) {
+                if (out != null) out.add(ri);
+            } else {
+                if (out == null) {
+                    out = new ArrayList<>(resolves.subList(0, i));
+                }
+                Slog.w(TAG, "dropping malformed ResolveInfo (no component info)");
+            }
+        }
+        return out != null ? out : resolves;
+    }
+
     @ProxyMethod("resolveIntent")
     public static class ResolveIntent extends MethodHook {
         @Override
@@ -112,6 +147,9 @@ public class IPackageManagerProxy extends BinderInvocationStub {
             String resolvedType = (String) args[1];
             int flags = MethodParameterUtils.toInt(args[2]);
             ResolveInfo resolveInfo = BlackBoxCore.getBPackageManager().resolveIntent(intent, resolvedType, flags, BlackBoxCore.getUserId());
+            if (resolveInfo != null && !isWellFormedResolve(resolveInfo)) {
+                resolveInfo = null;
+            }
             tracePmCheck("resolveIntent", intent == null ? null : intent.getPackage(), resolveInfo != null);
             if (resolveInfo != null) {
                 return resolveInfo;
@@ -128,6 +166,9 @@ public class IPackageManagerProxy extends BinderInvocationStub {
             String resolvedType = (String) args[1];
             int flags = MethodParameterUtils.toInt(args[2]);
             ResolveInfo resolveInfo = BlackBoxCore.getBPackageManager().resolveService(intent, flags, resolvedType, BlackBoxCore.getUserId());
+            if (resolveInfo != null && !isWellFormedResolve(resolveInfo)) {
+                resolveInfo = null;
+            }
             if (resolveInfo != null) {
                 return resolveInfo;
             }
@@ -333,8 +374,8 @@ public class IPackageManagerProxy extends BinderInvocationStub {
             Intent intent = MethodParameterUtils.getFirstParam(args, Intent.class);
             String type = MethodParameterUtils.getFirstParam(args, String.class);
             Integer flags = MethodParameterUtils.getFirstParam(args, Integer.class);
-            List<ResolveInfo> resolves = BlackBoxCore.getBPackageManager().queryBroadcastReceivers(intent, flags, type, BActivityThread.getUserId());
-            Slog.d(TAG, "queryIntentReceivers: " + resolves);
+            List<ResolveInfo> resolves = sanitizeResolveList(BlackBoxCore.getBPackageManager().queryBroadcastReceivers(intent, flags, type, BActivityThread.getUserId()));
+            Slog.d(TAG, "queryIntentReceivers: " + (resolves == null ? 0 : resolves.size()) + " result(s)");
 
             
             if (BuildCompat.isN()) {
@@ -361,7 +402,7 @@ public class IPackageManagerProxy extends BinderInvocationStub {
             Intent intent = MethodParameterUtils.getFirstParam(args, Intent.class);
             String type = MethodParameterUtils.getFirstParam(args, String.class);
             Integer flags = MethodParameterUtils.getFirstParam(args, Integer.class);
-            List<ResolveInfo> resolves = BlackBoxCore.getBPackageManager().queryIntentActivities(intent, flags, type, BActivityThread.getUserId());
+            List<ResolveInfo> resolves = sanitizeResolveList(BlackBoxCore.getBPackageManager().queryIntentActivities(intent, flags, type, BActivityThread.getUserId()));
             tracePmCheck("queryIntentActivities", intent == null ? null : intent.getPackage(), resolves != null && !resolves.isEmpty());
             if (resolves != null && !resolves.isEmpty()) {
                 if (BuildCompat.isN()) {

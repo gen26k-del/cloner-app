@@ -856,6 +856,23 @@ public class IActivityManagerProxy extends ClassInvocationStub {
         }
     }
 
+    @ProxyMethod("updateServiceGroup")
+    public static class UpdateServiceGroup extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            // v1.0.150: উপরের SetProcessImportant-এর যমজ কেস। Chromium-এর
+            // ChildProcessLauncher service-group আপডেটে এই AIDL ডাকে
+            // (connection, group, processState)। connectionটি guest-এর
+            // proxy connection — আসল AM তা কখনো দেখেনি, তাই ফরওয়ার্ড
+            // করলেই IllegalArgumentException ("Could not find connection
+            // for BinderProxy") ফেরত আসে, আর সেটা ঘটে ঠিক Chrome child
+            // মরার মুহূর্তে (2026-11-23 04:08 রিপোর্ট)। v1.0.125-এ
+            // setProcessImportant গেলা হয়েছিল, এটি আচ্ছাদিত ছিল না।
+            // ফরওয়ার্ড না করে চুপচাপ সফল ফেরত দাও (void মেথড — null)।
+            return null;
+        }
+    }
+
     @ProxyMethod("getHistoricalProcessExitReasons")
     public static class getHistoricalProcessExitReasons extends MethodHook {
         @Override

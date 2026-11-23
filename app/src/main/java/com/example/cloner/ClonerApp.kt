@@ -45,6 +45,8 @@ class ClonerApp : Application() {
             val reportFile = File(cacheDir, "last_crash_$safeProc.txt")
             val mainHandler = Handler(Looper.getMainLooper())
             val state = longArrayOf(SystemClock.uptimeMillis())
+            // v1.0.150: প্রতি stall episode-এ MainStall লাইন একবারই লিখো
+            var stallTraced = false
             // main thread আটকানোর আগের অবস্থান — watchdog thread থেকে স্যাম্পল
             val recentStacks = ArrayDeque<String>()
             // আসল main thread: যার stack-এ ActivityThread.main আছে
@@ -73,6 +75,26 @@ class ClonerApp : Application() {
                         // শুধু ticker-এর মাধ্যমে blockage detect করো
                         Thread.sleep(3000)
                         val blockedFor = SystemClock.uptimeMillis() - state[0]
+                        // v1.0.150: ANR প্রমাণ — main thread ৪ সেকেন্ডের
+                        // বেশি আটকে থাকলেই init trace-এ এক লাইন (প্রতি
+                        // stall episode-এ একবার)। সিস্টেমের ANR ডায়ালগ
+                        // (~৫s input timeout) অনেক সময় watchdog-এর ৮s
+                        // crash-file লেখার আগেই আসে, বা প্রসেস তার আগেই
+                        // মরে যায় — তখন রিপোর্টে কোনো প্রমাণই থাকে না
+                        // (2026-11-23 13:12-র "CloneMe isn't responding"
+                        // ANR-এ ঠিক এটাই হয়েছিল: কোনো crash file ওঠেনি)।
+                        // লাইনটা স্মার্ট রিপোর্টের ডায়াগনসিস অংশে
+                        // MainStall keyword-এ ওঠে। এটি শুধু ট্রেস —
+                        // ANR-এর চিকিৎসা নয়।
+                        if (blockedFor > 4000 && !stallTraced) {
+                            stallTraced = true
+                            runCatching {
+                                java.io.File(cacheDir, "init_trace.txt").appendText(
+                                    "${Date()} [$procName] MainStall: main thread blocked for ${blockedFor}ms\n"
+                                )
+                            }
+                        }
+                        if (blockedFor <= 4000) stallTraced = false
                         if (blockedFor > 8000) {
                             // ANR লিখো শুধু যখন নিশ্চিত যে main thread আসলেই আটকে আছে:
                             // main thread পাওয়া গেছে, stack খালি নয়, আর উপরের ফ্রেম

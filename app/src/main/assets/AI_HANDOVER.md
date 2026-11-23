@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-22, at version **1.0.149** (versionCode 134).
+> Last updated: 2026-11-23, at version **1.0.150** (versionCode 135).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -266,6 +266,58 @@ When they disagree, the user is right and the report is lying.
   PMCheck lines with caller=com.facebook.katana target=com.facebook.orca
   (found=true expected), whether the Messages tap now opens Messenger,
   any LAUNCH MISMATCH lines, orphan counts during Chrome use.
+  **Device verdict (2026-11-23): the handoff WORKS** — PMCheck found=true
+  in both directions, `CrossClone:` fired on the Messages tap (13:09:59,
+  fb-messenger://threads → IntentHandlerActivity), and the owner confirms
+  Messenger opens. It opens SLOWLY on a cold start (the Messenger process
+  had just been through a LOW_MEMORY kill wave); warm taps are the
+  remaining check. See §7.2 — this item is closed.
+- **v1.0.150** — **Crash guard + diagnostics** (device evidence:
+  2026-11-23 smart reports). (a) **Aura "Missing ComponentInfo!" crash
+  FIXED.** Root cause: `ComponentResolver.newResult` copies
+  `PackageManagerCompat.generate*Info()` output into a ResolveInfo, and
+  those helpers return null when the package is not installed/visible
+  for that user — leaving a ResolveInfo with activityInfo, serviceInfo
+  AND providerInfo all null, whose `toString()` → `getComponentInfo()`
+  throws `IllegalStateException`. It killed com.facebook.aura's
+  firebase-iid thread through `IPackageManagerProxy`'s
+  QueryBroadcastReceivers hook (the hook's own log line stringified the
+  poisoned list). The PM proxy now drops malformed ResolveInfo entries
+  before returning lists (`queryBroadcastReceivers`,
+  `queryIntentActivities`) and treats a malformed single result
+  (`resolveIntent`/`resolveService`) as no result; the hook logs a count
+  instead of the raw list. (There is NO `queryIntentServices` hook in
+  the proxy — that call falls through to the real PM — so nothing to
+  fix there.) (b) **updateServiceGroup swallowed.**
+  `IActivityManagerProxy` had no `updateServiceGroup` hook, so
+  Chromium's service-group updates hit the real AM, which rejects the
+  guest's proxy connection ("Could not find connection for
+  BinderProxy") — logged at exactly the moment a Chrome child dies
+  (2026-11-23 04:08 report). Now a quiet no-op, mirroring the v1.0.125
+  `setProcessImportant` guard. This removes an error path; it is NOT
+  claimed to stop renderer deaths. (c) **ANR evidence — tracing only,
+  NOT a cure.** The host main process ANRs ("CloneMe isn't
+  responding") during mass clone restarts under memory pressure
+  (device: 2026-11-23 03:47 and ~13:12), but the 13:12 ANR left NO
+  crash file: the system dialog (~5 s input timeout) can fire before
+  the watchdog's 8 s threshold writes one. The watchdog now also writes
+  a `MainStall:` line into the init trace, once per stall episode,
+  when the main thread is blocked >4 s. The launch path itself already
+  runs off the main thread (Dispatchers.IO + 20 s timeout, v1.0.131) —
+  no speculative rewrite was attempted, and the LOW_MEMORY stub deaths
+  behind the pressure are Android-normal (see §7 note), not promised
+  fixable. (d) **Notification trace — diagnosis only, no behaviour
+  change.** The owner reports the **Facebook clone receives NO
+  notifications at all** (2026-11-23; total absence, not delay or
+  misattribution). `INotificationManagerProxy` now writes
+  `NotifyPost:`/`NotifyCancel:` trace lines (clone package from the
+  guest's bound package, userId, id, tag) at the enqueue/cancel hooks,
+  and the smart report gained a dedicated "NotifyPost / NotifyCancel"
+  section with totals + last 10. **First evidence to check in the next
+  report:** NotifyPost lines for com.facebook.katana (zero lines =
+  katana's process never posts inside the clone; lines present = posts
+  happen but never surface — the two cases need different fixes),
+  MainStall lines around any ANR, and the aura crash file staying gone.
 
 ## 7. Open problems (start here)
 
@@ -285,25 +337,21 @@ When they disagree, the user is right and the report is lying.
    `--enable-features`? If yes and renderers still die, that flag does not
    cover this exit family; say so plainly and weigh effort vs. a work-profile
    second Chrome for this one app.
-2. **Facebook → Messenger handoff.** Inside the Facebook clone, tapping
-   Messages does not open the Messenger clone. **Already tried — did not
-   work:** v1.0.142's `chooseBestActivity` tie→first-match change and the
-   StartActivity cross-clone rescue (user-tested, handoff still fails; both
-   kept, harmless). v1.0.143+ reports proved the tap produces NO CrossClone
-   line at all — Facebook does not reach startActivity; it gives up earlier.
-   **Root cause found (diagnosis3, code-proven):** `queryIntentActivities`
-   had no hook in `IPackageManagerProxy` and fell through to the real PM,
-   where virtual apps are invisible. **v1.0.149 ships the hook** (see §6).
-   **First evidence to check in a v1.0.149 report:** PMCheck lines with
-   caller=com.facebook.katana, target=com.facebook.orca, found=true — and
-   the user's own tap test. If PMCheck shows found=true but the tap still
-   does nothing, the block is later (service binding to Messenger); if no
-   PMCheck line appears, Facebook checks through yet another API (widen
-   PMCheck coverage: getLaunchIntentForPackage path / queryIntentServices).
-   Also new in §7 terms: the **wrong-process launch** behind the
-   2026-11-22 16:12:34 katana crash is guarded in v1.0.149 (HCallbackProxy
-   package guard + `launch assigned` traces); watch for LAUNCH MISMATCH
-   lines and any repeat of the fbApp crash.
+2. **Facebook → Messenger handoff — FIXED in v1.0.149, verified
+   2026-11-23.** Root cause was the missing `queryIntentActivities`
+   hook (fell through to the real PM, where virtual apps are invisible).
+   Device proof: PMCheck found=true in both directions (katana→orca
+   13:06:31, orca→katana 13:05:46), `CrossClone:` fired on the owner's
+   Messages tap (13:09:59), and the owner confirms Messenger opens.
+   Remaining nuance: the first open after a LOW_MEMORY kill wave is
+   slow (full cold start of the Messenger process); that is the
+   memory-pressure problem in item 5's family, not a handoff defect.
+   The **wrong-process launch** behind the 2026-11-22 16:12:34 katana
+   crash is likewise guarded in v1.0.149 (HCallbackProxy package guard
+   + `launch assigned` traces); no LAUNCH MISMATCH lines and no fbApp
+   crash repeat in the 2026-11-23 reports. (v1.0.142's
+   chooseBestActivity tie→first-match change and StartActivity
+   cross-clone rescue remain in place, harmless.)
 3. **Several other apps don't open properly** (WhatsApp / Gemini / Google-app
    class, per the user). Take them one at a time, evidence first (a report
    from a build whose verdicts can be trusted — v1.0.142+), and remember the
@@ -312,6 +360,36 @@ When they disagree, the user is right and the report is lying.
    `SecurityException: Package ... does not belong to <uid>` from
    `ICrossProfileApps.getTargetUserProfiles` (same calling-UID family as the
    v1.0.141 provider issue; there is no cross-profile proxy yet).
+5. **CloneMe main-process ANR** ("CloneMe isn't responding"; the owner
+   taps Wait and it later returns). Seen 2026-11-23 03:47 (crash file)
+   and ~13:12 (owner-confirmed dialog, NO crash file) — both times while
+   many heavy clones were restarting at once under memory pressure
+   (INIT_FAILURE restarts on SCREEN_ON/OFF broadcast deliveries +
+   LOW_MEMORY kills across the stub pool). v1.0.150 added `MainStall:`
+   tracing only (watchdog writes one trace line per stall episode at
+   >4 s blocked) — **no cure is claimed**. The launch path already runs
+   off the main thread (v1.0.131). **First evidence to check:**
+   MainStall lines in the next report and what trace activity surrounds
+   them. Do not promise to fix the LOW_MEMORY deaths themselves — with
+   ~150 MB per stub and many heavy clones resident, LMK reaping cached
+   stubs is Android behaving normally.
+6. **Per-clone notifications unreliable — pinned symptom: the Facebook
+   clone (com.facebook.katana) receives NO notifications at all**
+   (owner, 2026-11-23; total absence — not delay, not misattribution).
+   Diagnosis first: v1.0.150 adds `NotifyPost:`/`NotifyCancel:` traces
+   at the INotificationManagerProxy enqueue/cancel hooks plus a
+   dedicated report section; **no notification behaviour was changed**.
+   **First evidence to check:** whether ANY NotifyPost line with
+   pkg=com.facebook.katana exists in the next report. Zero lines =
+   katana never posts inside the clone (look at push/provider wakeup
+   and process liveness); lines present = posts happen but never
+   surface (look at BNotificationManager forwarding and channel
+   handling). A fix belongs to a later build, once the trace decides
+   which case it is.
+
+**Fixed in v1.0.150 — do not chase again:** the com.facebook.aura
+"Missing ComponentInfo!" crash (malformed ResolveInfo from the virtual
+PM; root cause and fix in the §6 v1.0.150 entry).
 
 Also known: the guest processes are heavy (~150 MB per stub). Launching many
 heavy clones within minutes gets background stubs killed by LMK
