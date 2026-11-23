@@ -126,6 +126,34 @@ public abstract class BlackManager<Service extends IInterface> {
         }
     }
 
+    // v1.0.154: non-blocking সংস্করণ — শুধু এই class-এর নিজের cache আর
+    // BlackBoxCore-এর service cache দেখে; কোনো provider call হয় না,
+    // তাই main thread কখনো আটকায় না। unbind পথে ব্যবহার হয় (v1.0.153
+    // MainStallStack: onUnbind → getService() → FutureTask.get ~6s)।
+    // cache-এ জীবিত binder না থাকলে null — getService()-এর semantics
+    // অন্য সব caller-এর জন্য অপরিবর্তিত।
+    public Service getServiceCachedOnly() {
+        if (mService != null && mService.asBinder().pingBinder() && mService.asBinder().isBinderAlive()) {
+            return mService;
+        }
+        try {
+            IBinder binder = BlackBoxCore.get().getServiceCachedOnly(getServiceName());
+            if (binder == null) {
+                return null;
+            }
+            String stubClassName = getTClass().getName() + "$Stub";
+            Service created = Reflector.on(stubClassName).method("asInterface", IBinder.class)
+                    .call(binder);
+            if (created != null) {
+                mService = created;
+            }
+            return mService;
+        } catch (Throwable e) {
+            Log.w(TAG, "getServiceCachedOnly failed for " + getServiceName(), e);
+            return null;
+        }
+    }
+
     private void markServiceCreationFailed() {
         mServiceCreationFailed.set(true);
         mLastRetryTime = System.currentTimeMillis();

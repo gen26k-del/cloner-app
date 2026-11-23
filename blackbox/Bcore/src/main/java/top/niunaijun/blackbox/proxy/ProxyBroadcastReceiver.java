@@ -56,6 +56,15 @@ public class ProxyBroadcastReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
+        // v1.0.154: পুরো body একটা Throwable guard-এর ভেতরে (শেষের
+        // catch দেখো) — wake broadcast-এ কোনো Error/Exception ছিটকে
+        // গেলে আগে প্রসেসটাই মরে যেত (INIT_FAILURE; 2026-11-23
+        // 20:25-এর SCREEN_OFF মৃত্যুগুলো এই পরিবারের)। এখন
+        // BlackInitFail ট্রেস রেখে swallow হয় — একটা broadcast
+        // হারানো recoverable, প্রসেস বেঁচে থাকে।
+        ProxyBroadcastRecord record = null;
+        PendingResult pendingResult = null;
+        try {
         intent.setExtrasClassLoader(context.getClassLoader());
         // v1.0.152: :black প্রসেস মৃত থাকলে SCREEN_ON/OFF broadcast-ই
         // তাকে জাগায় — আর 2026-11-23-র রিপোর্টে ঠিক এই দুই wake-এই
@@ -70,8 +79,8 @@ public class ProxyBroadcastReceiver extends BroadcastReceiver {
                 BlackBoxCore.traceInitPublic(context, "BlackWake: action=" + action);
             }
         } catch (Throwable ignored) { }
-        ProxyBroadcastRecord record = ProxyBroadcastRecord.create(intent);
-        PendingResult pendingResult = goAsync();
+        record = ProxyBroadcastRecord.create(intent);
+        pendingResult = goAsync();
         if (record.mIntent == null) {
             // v1.0.151 FIX: stub extra ছাড়া broadcast = আসল সিস্টেম
             // (বা অন্য অ্যাপ) থেকে আসা raw broadcast, যা
@@ -141,6 +150,20 @@ public class ProxyBroadcastReceiver extends BroadcastReceiver {
             BlackBoxCore.getBActivityManager().scheduleBroadcastReceiver(record.mIntent, new PendingResultData(pendingResult), record.mUserId);
         } catch (RemoteException e) {
             pendingResult.finish();
+        }
+        } catch (Throwable e) {
+            // v1.0.154: BlackInitFail — ঠিক কোন throwable, কোন
+            // action-এ, তা ট্রেসে থাকল; প্রসেস মরল না। goAsync নেওয়া
+            // হয়ে থাকলে pendingResult শেষ করে দাও, নইলে broadcast
+            // timeout হবে।
+            try {
+                BlackBoxCore.traceInitPublic(context,
+                        "BlackInitFail: receiver wake action=" + intent.getAction()
+                                + " -> " + e.getClass().getName() + ": " + e.getMessage());
+            } catch (Throwable ignored) { }
+            if (pendingResult != null) {
+                try { pendingResult.finish(); } catch (Throwable ignored) { }
+            }
         }
     }
 }

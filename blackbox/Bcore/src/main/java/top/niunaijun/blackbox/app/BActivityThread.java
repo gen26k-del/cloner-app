@@ -621,15 +621,40 @@ public class BActivityThread extends IBActivityThread.Stub {
             BlackBoxCore.get().getHandler().post(() -> {
                 
                 Object bindData = createBindApplicationData(packageName, processName);
-                handleBindApplication(packageName, processName);
+                try {
+                    handleBindApplication(packageName, processName);
+                } catch (Throwable e) {
+                    traceBindFail(packageName, e);
+                    throw e;
+                }
                 conditionVariable.open();
             });
             conditionVariable.block();
         } else {
             
             Object bindData = createBindApplicationData(packageName, processName);
-            handleBindApplication(packageName, processName);
+            try {
+                handleBindApplication(packageName, processName);
+            } catch (Throwable e) {
+                traceBindFail(packageName, e);
+                throw e;
+            }
         }
+    }
+
+    // v1.0.154: guest bind ব্যর্থ হলে ঠিক কোন throwable তা BlackInitFail
+    // লাইনে ট্রেসে রাখো — আচরণ বদল নয়: throwable আগের মতোই propagate
+    // হয়। swallow করা নিরাপদ নয়: handleBindApplication মাঝপথে
+    // mBoundApplication বসিয়ে দেয় (isInit() তখন true হয়ে যায়), তাই
+    // অর্ধেক-bind হওয়া প্রসেস বাঁচিয়ে রাখলে তা poisoned থেকে যেত।
+    // ব্যর্থতার stage বোঝা যাবে "handleBindApplication start / got
+    // packageInfo / done" marker গুলোর সঙ্গে মিলিয়ে।
+    private static void traceBindFail(String packageName, Throwable e) {
+        try {
+            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                    "BlackInitFail: guest bind " + packageName
+                            + " -> " + e.getClass().getName() + ": " + e.getMessage());
+        } catch (Throwable ignored) { }
     }
     
     

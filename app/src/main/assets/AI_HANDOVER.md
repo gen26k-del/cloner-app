@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-23, at version **1.0.153** (versionCode 138).
+> Last updated: 2026-11-23, at version **1.0.154** (versionCode 139).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -484,6 +484,90 @@ When they disagree, the user is right and the report is lying.
   PushTrace/MqttTrace and MainStallStack sections present —
   that report finally carries the v1.0.152 evidence §7 items
   5 and 6 are waiting on.
+- **v1.0.154** — **ANR fix (root-caused) + broadcast-wake failure
+  capture** (device evidence: the v1.0.153 smart report,
+  2026-11-23 20:47 — the first complete report since the
+  take(20000) fix). What that report proved: (A) **ANR root
+  cause, stack-proven.** MainStallStack under the ~6 s stalls
+  (6,003–6,009 ms at the usual ~10-min cadence, plus 6,546 ms
+  in :p3): `FutureTask.awaitDone → FutureTask.get →
+  ContentProviderCompat.call → ProviderCall.callSafely →
+  BlackBoxCore.getServiceInternal (BlackBoxCore.java:393) →
+  BlackBoxCore.getService → BlackManager.getService →
+  BActivityManager.onServiceUnbind (BActivityManager.java:270)
+  → AppServiceDispatcher.onUnbind`. On a guest service unbind,
+  the main thread made a SYNCHRONOUS provider call to :black
+  and parked on FutureTask.get until timeout whenever :black
+  was slow/dead/restarting. (B) **Broadcast-wake INIT_FAILURE
+  deaths are broader than the v1.0.152 guard:** 20:25:48
+  :black via ProxyBroadcastReceiver (SCREEN_OFF), 20:25:56
+  :p0 via guest receiver X.1Dt (SCREEN_OFF), 20:26:05 :p1 via
+  com.google.android.gms.scheduler.DeviceStateReceiver
+  (SCREEN_OFF), 20:25:28 :p2 via X.0Agj (SCREEN_OFF),
+  20:36:34 :p0 via com.google.android.gms.gcm.
+  DozeChangeReceiver (LIGHT_DEVICE_IDLE_MODE_CHANGED) — all
+  "user request after error". The .152 Throwable catches
+  cover ClonerApp attachBaseContext/onCreate and
+  BlackBoxCore.doCreate — and ClonerApp IS the Application
+  class for every host process (main, :black and the :p0…:pN
+  stubs all run it), so Application-stage init was already
+  guarded; the fatal stage sits AFTER that: in receiver
+  dispatch (ProxyBroadcastReceiver.onReceive's stub path
+  caught only RemoteException, and ProxyBroadcastRecord.
+  create was unguarded) or in guest bind (BActivityThread.
+  bindApplication's call sites were unguarded). (C) **MQTT:**
+  MqttTrace shows katana + orca MqttServiceV2 create/
+  startCommand firing in bursts (19:24–19:28; PushSvc=48
+  cumulative), but PushRx/PushBcast still 0 and NotifyPost
+  still 0 (owner confirms: no clone notifications) — the
+  services start, but the host processes keep dying per (B),
+  so no connection survives. No MQTT code changes this
+  build; (B) is the lever. Changes: (1) **ANR fix** — new
+  `BlackBoxCore.getServiceCachedOnly(name)` (service-map hit
+  + isBinderAlive only; no provider call, no wait) and
+  `BlackManager.getServiceCachedOnly()` (own live cache
+  first, then the core cache; builds the AIDL interface from
+  the cached binder). `BActivityManager.onServiceUnbind`
+  (client-side fake.frameworks — NOT the server-side
+  BActivityManagerService) now uses the cached-only lookup
+  and traces `UnbindSvc: cached=true/false`. Null was
+  already tolerated on this exact path (onServiceUnbind
+  returned null and AppServiceDispatcher.onUnbind returned
+  false early — the same end state the old code reached
+  after its ~6 s block when :black was dead), and when the
+  binder IS cached (the common case) the remote unbind
+  proceeds exactly as before. `getService()` semantics for
+  all other callers are UNCHANGED. No BActivityManagerService
+  changes anywhere. (2) **Wake-death capture + one safe
+  swallow** — `ProxyBroadcastReceiver.onReceive`'s whole
+  body now sits inside a Throwable guard: any throwable is
+  written to the init trace as `BlackInitFail: receiver
+  wake action=<action> -> <class>: <message>` and SWALLOWED
+  (a broadcast receiver must never crash its host process;
+  dropping one wake broadcast is recoverable — the next
+  broadcast or launch re-triggers delivery — and a taken
+  PendingResult is finished in the catch so the broadcast
+  cannot time out either). `BActivityThread.bindApplication`
+  (both the handler-posted and the direct call site) now
+  traces `BlackInitFail: guest bind <pkg> -> <class>:
+  <message>` and RETHROWS — swallowing there is NOT safe:
+  handleBindApplication sets mBoundApplication mid-way
+  (isInit() flips true), so a half-bound process kept alive
+  would be poisoned; the failure stage can be read off the
+  existing start / got packageInfo / done markers beside
+  the BlackInitFail line. (3) Report: `UnbindSvc` and
+  `BlackInitFail` added to the diagnosis + rare keyword
+  lists in MainActivity.kt. **First evidence to check in
+  the next report:** UnbindSvc lines (cached=true expected
+  in normal use; cached=false lines are the former ANR
+  moments, now free), the MainStall/MainStallStack totals
+  (the ~6 s / ~10-min cadence should be gone or sharply
+  reduced — any remaining stall's stack names the next
+  path), BlackInitFail lines (receiver-wake lines name the
+  exact throwable that used to kill :black; guest-bind
+  lines name the bind failure), and the death records
+  (INIT_FAILURE on SCREEN_ON/OFF wakes should drop if the
+  receiver guard is the operative fix).
 
 ## 7. Open problems (start here)
 
@@ -553,6 +637,17 @@ When they disagree, the user is right and the report is lying.
    MainStallStack line (see §6 v1.0.153) — the stack evidence is
    still outstanding; read it from the first v1.0.153 report or its
    smart_report.txt, where the MainStall section now sits early.
+   **Update (v1.0.154):** that report arrived (2026-11-23 20:47)
+   and the stack names the culprit exactly: the guest-service
+   UNBIND path making a synchronous provider call to :black on
+   the main thread (FutureTask.get, ~6 s timeout — full chain in
+   the §6 v1.0.154 entry). v1.0.154 fixes that path with a
+   cached-only binder lookup (`UnbindSvc:` trace) and leaves
+   getService() untouched for all other callers. **First evidence
+   to check:** UnbindSvc lines in the next report, and whether
+   the ~6 s / ~10-min MainStall cadence is gone; if a stall
+   remains, its MainStallStack names the NEXT blocking path —
+   do not assume unbind was the only one.
 6. **Per-clone notifications unreliable — pinned symptom: the Facebook
    clone (com.facebook.katana) receives NO notifications at all, while
    the ORIGINAL Facebook app (outside CloneMe) notifies normally**
@@ -602,7 +697,24 @@ When they disagree, the user is right and the report is lying.
    MqttTrace block (see §6 v1.0.153) — create→destroy lifetimes
    are still unmeasured and this evidence is still outstanding;
    read it from the first v1.0.153 report's early PushTrace
-   section or its smart_report.txt.
+   section or its smart_report.txt. **Update (v1.0.153 report,
+   2026-11-23 20:47):** MqttTrace now measures the service:
+   katana + orca MqttServiceV2 create/startCommand fire in
+   bursts (PushSvc=48 cumulative) — the MQTT services DO
+   start — but the processes hosting them keep dying in
+   broadcast-wake INIT_FAILUREs (SCREEN_OFF and idle-mode
+   wakes hitting :black and the stub processes, 20:25–20:36),
+   so no MQTT connection survives long enough to deliver.
+   Notifications are now a PROCESS-SURVIVAL problem, not a
+   notification-path problem. v1.0.154 attacks the wake
+   deaths (ProxyBroadcastReceiver Throwable guard +
+   BlackInitFail capture on the receiver and guest-bind
+   paths; see §6). **First evidence to check:** BlackInitFail
+   lines and whether INIT_FAILURE wake deaths drop in the
+   next report; if the processes survive, re-read the
+   MqttTrace create→destroy lifetimes — long lifetimes with
+   NotifyPost still 0 would move suspicion to the MQTT
+   connection itself.
 
 **Fixed in v1.0.150 — do not chase again:** the com.facebook.aura
 "Missing ComponentInfo!" crash (malformed ResolveInfo from the virtual

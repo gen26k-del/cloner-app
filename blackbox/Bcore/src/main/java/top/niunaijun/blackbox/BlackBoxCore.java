@@ -356,8 +356,23 @@ public class BlackBoxCore extends ClientConfiguration {
             Slog.w(TAG, "Services not available, skipping service request: " + name);
             return null;
         }
-        
+
         return getServiceInternal(name);
+    }
+
+    // v1.0.154: শুধু cache থেকে সার্ভিস — কোনো provider call নয়, কোনো
+    // অপেক্ষা নয়। unbind-এর মতো main-thread পথে ব্যবহার হয়, যেখানে
+    // getService()-এর synchronous provider call :black ধীর/মৃত হলে
+    // ~6s আটকে ANR ডেকে আনত (v1.0.153 MainStallStack প্রমাণ)। cache-এ
+    // জীবিত binder থাকলে সেটাই, না থাকলে null — caller null আগেই
+    // tolerate করে। getService()-এর semantics অন্য caller-দের জন্য
+    // অপরিবর্তিত।
+    public IBinder getServiceCachedOnly(String name) {
+        IBinder binder = mServices.get(name);
+        if (binder != null && binder.isBinderAlive()) {
+            return binder;
+        }
+        return null;
     }
     
     private IBinder getServiceInternal(String name) {

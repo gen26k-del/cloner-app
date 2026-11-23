@@ -9,6 +9,7 @@ import android.os.DeadObjectException;
 import android.os.IBinder;
 import android.os.RemoteException;
 
+import top.niunaijun.blackbox.BlackBoxCore;
 import top.niunaijun.blackbox.app.BActivityThread;
 import top.niunaijun.blackbox.core.system.ServiceManager;
 import top.niunaijun.blackbox.core.system.am.IBActivityManagerService;
@@ -267,7 +268,21 @@ public class BActivityManager extends BlackManager<IBActivityManagerService> {
 
     public UnbindRecord onServiceUnbind(Intent proxyIntent, int userId) {
         try {
-            IBActivityManagerService service = getService();
+            // v1.0.154: ANR ফিক্স — আগে getService() এখানে main thread-এ
+            // synchronous provider call করে :black ধীর/মৃত হলে ~6s আটকে
+            // থাকত (v1.0.153 MainStallStack: AppServiceDispatcher.onUnbind
+            // → onServiceUnbind → BlackManager.getService →
+            // BlackBoxCore.getServiceInternal → FutureTask.get)। এখন
+            // cached-only lookup: binder cache-এ থাকলে (সাধারণ ঘটনা)
+            // আগের মতোই remote unbind হয়; না থাকলে null — যেটা এই
+            // মেথড এমনিতেই tolerate করে (নিচে return null, caller-ও
+            // null পেলে আগেভাগে ফিরে যায়)। UnbindSvc লাইন পরের
+            // রিপোর্টে প্রমাণ দেবে কোন পথ চলল।
+            IBActivityManagerService service = getServiceCachedOnly();
+            try {
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "UnbindSvc: cached=" + (service != null));
+            } catch (Throwable ignored) { }
             if (service != null) {
                 return service.onServiceUnbind(proxyIntent, userId);
             }
