@@ -374,11 +374,15 @@ When they disagree, the user is right and the report is lying.
    ~150 MB per stub and many heavy clones resident, LMK reaping cached
    stubs is Android behaving normally.
 6. **Per-clone notifications unreliable — pinned symptom: the Facebook
-   clone (com.facebook.katana) receives NO notifications at all**
-   (owner, 2026-11-23; total absence — not delay, not misattribution).
-   Diagnosis first: v1.0.150 adds `NotifyPost:`/`NotifyCancel:` traces
-   at the INotificationManagerProxy enqueue/cancel hooks plus a
-   dedicated report section; **no notification behaviour was changed**.
+   clone (com.facebook.katana) receives NO notifications at all, while
+   the ORIGINAL Facebook app (outside CloneMe) notifies normally**
+   (owner, 2026-11-23; total absence — not delay, not misattribution —
+   and the fault is clone-side only). Diagnosis first: v1.0.150 adds
+   `NotifyPost:`/`NotifyCancel:` traces at the
+   INotificationManagerProxy enqueue/cancel hooks plus a dedicated
+   report section; **no notification behaviour was changed**. The
+   v1.0.150 trace distinguishes never-posts vs
+   posts-but-never-surfaces.
    **First evidence to check:** whether ANY NotifyPost line with
    pkg=com.facebook.katana exists in the next report. Zero lines =
    katana never posts inside the clone (look at push/provider wakeup
