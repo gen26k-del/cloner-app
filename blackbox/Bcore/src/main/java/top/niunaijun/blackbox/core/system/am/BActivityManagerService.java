@@ -11,7 +11,6 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.os.RemoteException;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -196,10 +195,6 @@ public class BActivityManagerService extends IBActivityManagerService.Stub imple
             return;
         }
         mBroadcastManager.sendBroadcast(pendingResultData);
-        deliverBroadcastToResolves(intent, pendingResultData, resolves, userId);
-    }
-
-    private void deliverBroadcastToResolves(Intent intent, PendingResultData pendingResultData, List<ResolveInfo> resolves, int userId) {
         for (ResolveInfo resolve : resolves) {
             ProcessRecord processRecord = BProcessManagerService.get().findProcessRecord(resolve.activityInfo.packageName, resolve.activityInfo.processName, userId);
             // bActivityThread null হতে পারে — প্রসেস চালু হয়েছে কিন্তু
