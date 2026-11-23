@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-23, at version **1.0.151** (versionCode 136).
+> Last updated: 2026-11-23, at version **1.0.152** (versionCode 137).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -402,6 +402,54 @@ When they disagree, the user is right and the report is lying.
   katana (did its notification subsystem ever initialize?); and
   whether system broadcasts now reach guest manifest receivers of
   running clones (the (c) fix).
+- **v1.0.152** — **Trace depth + one init guard** (device evidence:
+  the v1.0.151 smart report, 2026-11-23 18:58). What that report
+  proved: PushRx=0 and PushBcast=0 (guest GMS never dispatches FCM
+  inside the env — the v1.0.151 structural verdict stands),
+  NotifyPost still 0, NotifyCancel=19, NotifyChannel=21 (katana's
+  notification subsystem IS initialized), PushSvc=14 — katana's
+  `MqttServiceV2` resolves and starts repeatedly (15:26–15:57) but
+  nothing showed whether the connection lives. Host main-process
+  MainStall: ~6,004–6,009 ms blocks at 17:07 / 17:17 / 17:28 /
+  17:38 (a ~10-minute cadence — the recurring "CloneMe isn't
+  responding"), plus one 5,690 ms stall in :p3. And :black died
+  with INIT_FAILURE on SCREEN_OFF (18:38:47) and SCREEN_ON
+  (18:58:06) broadcast wakes, amid repeated SIGNALED deaths of
+  main/:black between 18:13–18:51. Changes: (a) **MainStall stack
+  capture** — the ClonerApp watchdog now appends the main thread's
+  top 12 stack frames (`MainStallStack:` lines) in the same stall
+  episode, sampled once per episode from
+  `Looper.getMainLooper().thread` (deliberately NOT
+  getAllStackTraces, which the watchdog avoids for hang risk);
+  zero cost when there is no stall. (b) **MqttTrace** — a new tag
+  in the report's PushTrace section: AMS-level startService/
+  stopService for mqtt classes (IActivityManagerProxy, beside
+  PushSvc) plus guest-process create / startCommand / destroy
+  for mqtt services (AppServiceDispatcher, all destroy paths:
+  whole-process onDestroy, stopService, unbind). Create→destroy
+  spacing is the service's lifetime — the framework-visible
+  proxy for whether MQTT can carry pushes while alive. Socket-
+  level connects are NOT hooked (OsStub hooks only getuid/stat;
+  a connect hook sits on the hot path of ALL guest traffic and
+  is neither minimal nor safe) — do not expect socket proof
+  from this tag. (c) **:black cold-wake guard + tracing** — the
+  exact INIT_FAILURE mechanism is NOT provable from static code
+  (candidates: an Error escaping the Exception-only init catches
+  under memory pressure, or the system killing the process
+  mid-init during a broadcast wake). Two small moves: the
+  process-survival catches in ClonerApp (attachBaseContext /
+  doCreate) and BlackBoxCore.doCreate now catch **Throwable**
+  and write a `BlackInit:` trace line, so an init Error degrades
+  to fallback/NoEngine instead of killing the process; and
+  ProxyBroadcastReceiver writes `BlackWake:` for SCREEN_ON/OFF
+  so the next report can line up wake → init markers
+  (doCreate start/completed, BlackInit) → death record. No
+  BActivityManagerService changes (per the v1.0.151 build note).
+  **First evidence to check in the next report:** MainStallStack
+  frames under a ~6 s stall (the 10-minute cadence suggests a
+  periodic job — the frames should name it), MqttTrace
+  create→destroy lifetimes for MqttServiceV2, BlackWake lines
+  vs :black deaths, and any BlackInit line naming a throwable.
 
 ## 7. Open problems (start here)
 
@@ -452,9 +500,18 @@ When they disagree, the user is right and the report is lying.
    LOW_MEMORY kills across the stub pool). v1.0.150 added `MainStall:`
    tracing only (watchdog writes one trace line per stall episode at
    >4 s blocked) — **no cure is claimed**. The launch path already runs
-   off the main thread (v1.0.131). **First evidence to check:**
-   MainStall lines in the next report and what trace activity surrounds
-   them. Do not promise to fix the LOW_MEMORY deaths themselves — with
+   off the main thread (v1.0.131). The 2026-11-23 18:58 report shows
+   the stalls at ~6,004–6,009 ms on a ~10-minute cadence (17:07 /
+   17:17 / 17:28 / 17:38) in the host main process, plus :black
+   INIT_FAILURE deaths on SCREEN_ON (18:58:06) and SCREEN_OFF
+   (18:38:47) broadcast wakes. v1.0.152 adds `MainStallStack:` frames
+   to each stall episode, `BlackWake:`/`BlackInit:` tracing for the
+   wake deaths, and widens the init catches to Throwable (see the §6
+   v1.0.152 entry). **First evidence to check:** the MainStallStack
+   frames — the cadence smells like a periodic job and the frames
+   should name the blocking code path — and whether :black still
+   dies on screen wakes (any BlackInit line names the throwable).
+   Do not promise to fix the LOW_MEMORY deaths themselves — with
    ~150 MB per stub and many heavy clones resident, LMK reaping cached
    stubs is Android behaving normally.
 6. **Per-clone notifications unreliable — pinned symptom: the Facebook
@@ -488,7 +545,18 @@ When they disagree, the user is right and the report is lying.
    the guest GMS's liveness (its own traces/PMCheck activity),
    not to the notification path. Also check NotifyChannel for
    katana: no line = its notification subsystem never even
-   initialized in-clone.
+   initialized in-clone. **Update (2026-11-23 18:58 report):** the
+   FCM branch is now confirmed dead (PushRx=0, PushBcast=0), but
+   NotifyChannel=21 (katana's subsystem initialized) and
+   PushSvc=14 (its MQTT service starts repeatedly) — the MQTT
+   channel is the last untried in-env route. v1.0.152 adds
+   `MqttTrace` (AMS start/stop + guest create/startCommand/
+   destroy) to measure that service's lifetime. **First evidence
+   to check:** MqttTrace lifetimes for
+   com.facebook.mqtt.service.MqttServiceV2 — long create→destroy
+   gaps mean the service (and plausibly its connection) lives;
+   rapid create/destroy cycling means it crash-loops under the
+   same memory pressure and MQTT cannot carry pushes either.
 
 **Fixed in v1.0.150 — do not chase again:** the com.facebook.aura
 "Missing ComponentInfo!" crash (malformed ResolveInfo from the virtual

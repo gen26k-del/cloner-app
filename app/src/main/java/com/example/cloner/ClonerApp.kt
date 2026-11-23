@@ -89,9 +89,26 @@ class ClonerApp : Application() {
                         if (blockedFor > 4000 && !stallTraced) {
                             stallTraced = true
                             runCatching {
-                                java.io.File(cacheDir, "init_trace.txt").appendText(
+                                val line = StringBuilder(
                                     "${Date()} [$procName] MainStall: main thread blocked for ${blockedFor}ms\n"
                                 )
+                                // v1.0.152: stall-এর মুহূর্তে main thread
+                                // ঠিক কোন কোডে আটকে আছে — তার stack-এর
+                                // প্রথম কয়েকটি ফ্রেম একই সঙ্গে লিখো।
+                                // 2026-11-23-র রিপোর্টে ~৬s-এর stall প্রতি
+                                // ~১০ মিনিটে ফিরেছে (17:07/17:17/17:28/
+                                // 17:38), কিন্তু কোন কাজে আটকায় তা জানা
+                                // ছিল না। শুধু stall episode-এ একবারই
+                                // স্যাম্পল হয় (Looper-এর main thread
+                                // সরাসরি — getAllStackTraces নয়), তাই
+                                // stall না থাকলে overhead শূন্য।
+                                try {
+                                    val st = Looper.getMainLooper().thread.stackTrace
+                                    for (el in st.take(12)) {
+                                        line.append("MainStallStack: at $el\n")
+                                    }
+                                } catch (_: Exception) { }
+                                java.io.File(cacheDir, "init_trace.txt").appendText(line.toString())
                             }
                         }
                         if (blockedFor <= 4000) stallTraced = false
@@ -162,8 +179,18 @@ class ClonerApp : Application() {
                 override fun isEnableDaemonService(): Boolean = true
                 override fun requestInstallPackage(file: File?, userId: Int): Boolean = false
             })
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // v1.0.152: Exception নয়, Throwable ধরো — cold start-এ
+            // (বিশেষ করে broadcast-এ জাগা :black প্রসেসে) init-এর ভেতর
+            // কোনো Error (যেমন UnsatisfiedLinkError / OOM) ছিটকে গেলে
+            // আগে প্রসেসটাই মরে যেত (INIT_FAILURE exit), এখন degrade
+            // করে বেঁচে থাকবে আর BlackInit লাইনে প্রমাণ থাকবে।
             Log.e("ClonerApp", "BlackBox attach failed", e)
+            runCatching {
+                java.io.File(cacheDir, "init_trace.txt").appendText(
+                    "${Date()} BlackInit: attachBaseContext failed: $e\n"
+                )
+            }
         }
     }
 
@@ -236,8 +263,15 @@ class ClonerApp : Application() {
             } catch (_: Exception) { }
             Engine.current = BlackBoxCloneEngine()
             Log.i("ClonerApp", "BlackBox engine ready")
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // v1.0.152: উপরের attach-এর মতোই — doCreate-এর Error-ও
+            // প্রসেস না মেরে NoEngine-এ নামিয়ে আনো + BlackInit ট্রেস।
             Log.e("ClonerApp", "BlackBox init failed, using NoEngine", e)
+            runCatching {
+                java.io.File(cacheDir, "init_trace.txt").appendText(
+                    "${Date()} BlackInit: doCreate failed: $e\n"
+                )
+            }
             Engine.current = NoEngine
         }
         // নোটিফিকেশন বাঁচিয়ে রাখার জন্য keep-alive সার্ভিস (শুধু মেইন প্রসেসে)

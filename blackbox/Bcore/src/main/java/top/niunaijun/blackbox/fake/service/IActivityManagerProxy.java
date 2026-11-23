@@ -281,6 +281,19 @@ public class IActivityManagerProxy extends ClassInvocationStub {
                         "PushSvc: from=" + BActivityThread.getAppPackageName()
                                 + " action=" + action + " class=" + cls
                                 + " resolved=" + (resolveInfo != null));
+                // v1.0.152: MQTT লাইভনেস — katana-র MqttServiceV2
+                // resolve+start হয় (PushSvc ×14, 2026-11-23), কিন্তু
+                // connection সত্যিই ওঠে/টেকে কিনা অজানা। MQTT ক্লাসের
+                // start/stop আলাদা MqttTrace ট্যাগে রাখো; guest
+                // প্রসেসের ভেতরের create/destroy/startCommand
+                // AppServiceDispatcher একই ট্যাগে লেখে — দুটো মিলিয়ে
+                // সার্ভিসটার জীবনকাল (কখন উঠল, কখন মরল) মাপা যাবে।
+                if (cls != null && (cls.contains("Mqtt") || cls.contains("mqtt"))) {
+                    BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                            "MqttTrace: startService from=" + BActivityThread.getAppPackageName()
+                                    + " class=" + cls
+                                    + " resolved=" + (resolveInfo != null));
+                }
             } catch (Throwable ignored) { }
         }
     }
@@ -292,8 +305,20 @@ public class IActivityManagerProxy extends ClassInvocationStub {
             try {
                 Intent intent = (Intent) args[1];
                 String resolvedType = (String) args[2];
-                
-                                        
+
+                // v1.0.152: MQTT লাইভনেস (উপরের StartService দেখো) —
+                // MQTT সার্ভিসের stop-ও একই ট্যাগে ধরো।
+                try {
+                    if (intent != null && intent.getComponent() != null) {
+                        String stopCls = intent.getComponent().getClassName();
+                        if (stopCls != null && (stopCls.contains("Mqtt") || stopCls.contains("mqtt"))) {
+                            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                                    "MqttTrace: stopService from=" + BActivityThread.getAppPackageName()
+                                            + " class=" + stopCls);
+                        }
+                    }
+                } catch (Throwable ignored) { }
+
                         if (intent != null && intent.getComponent() != null) {
                             String servicePackage = intent.getComponent().getPackageName();
                             String currentPackage = BActivityThread.getAppPackageName();

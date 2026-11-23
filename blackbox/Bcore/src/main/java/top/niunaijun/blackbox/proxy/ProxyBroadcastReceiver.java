@@ -57,6 +57,19 @@ public class ProxyBroadcastReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         intent.setExtrasClassLoader(context.getClassLoader());
+        // v1.0.152: :black প্রসেস মৃত থাকলে SCREEN_ON/OFF broadcast-ই
+        // তাকে জাগায় — আর 2026-11-23-র রিপোর্টে ঠিক এই দুই wake-এই
+        // :black INIT_FAILURE-এ মরেছে (18:38 SCREEN_OFF, 18:58
+        // SCREEN_ON)। wake-এর মুহূর্তটা ট্রেসে রাখো, যাতে পরের
+        // রিপোর্টে wake → init marker (doCreate start/completed,
+        // BlackInit) → মৃত্যুর রেকর্ড পাশাপাশি মেলানো যায়। শুধু এই
+        // দুই action-এই লেখা হয় — অন্য broadcast-এ কোনো খরচ নেই।
+        try {
+            String action = intent.getAction();
+            if (Intent.ACTION_SCREEN_ON.equals(action) || Intent.ACTION_SCREEN_OFF.equals(action)) {
+                BlackBoxCore.traceInitPublic(context, "BlackWake: action=" + action);
+            }
+        } catch (Throwable ignored) { }
         ProxyBroadcastRecord record = ProxyBroadcastRecord.create(intent);
         PendingResult pendingResult = goAsync();
         if (record.mIntent == null) {

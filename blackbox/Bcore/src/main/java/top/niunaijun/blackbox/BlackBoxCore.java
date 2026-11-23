@@ -1034,10 +1034,17 @@ public class BlackBoxCore extends ClientConfiguration {
             long totalTime = System.currentTimeMillis() - startTime;
             Slog.d(TAG, "BlackBox initialization completed in " + totalTime + "ms");
             traceInit(getContext(), "doCreate completed");
-            
-        } catch (Exception e) {
+
+        } catch (Throwable e) {
+            // v1.0.152: আগে Exception ধরা হতো — init-এর ভেতরের কোনো
+            // Error (linkage/OOM) ছিটকে গিয়ে cold-start প্রসেস
+            // (broadcast-এ জাগা :black) মেরে ফেলতে পারত (INIT_FAILURE
+            // exit: 2026-11-23 18:38 SCREEN_OFF, 18:58 SCREEN_ON)।
+            // এখন Throwable ধরে fallback init-এই এগোই + BlackInit
+            // ট্রেসে কোন ধাপে কী ছিটকেছে তার প্রমাণ রাখি।
             long totalTime = System.currentTimeMillis() - startTime;
             Slog.e(TAG, "BlackBox initialization failed after " + totalTime + "ms", e);
+            traceInit(getContext(), "BlackInit: doCreate failed: " + e);
             
             
             try {

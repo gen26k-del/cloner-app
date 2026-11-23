@@ -457,6 +457,9 @@ public class AppServiceDispatcher {
         Service service = getOrCreateService(stubRecord);
         if (service == null)
             return START_NOT_STICKY;
+        // v1.0.152: MQTT লাইভনেস — প্রতিটি start delivery ধরো
+        // (restart-এর ঘনত্বই crash-loop-এর প্রমাণ)।
+        traceMqtt("startCommand", stubRecord.mServiceInfo.packageName, stubRecord.mServiceInfo.name);
         stubRecord.mServiceIntent.setExtrasClassLoader(service.getClassLoader());
         ServiceRecord record = findRecord(stubRecord.mServiceIntent);
         record.setStartId(stubRecord.mStartId);
@@ -486,6 +489,10 @@ public class AppServiceDispatcher {
                             "onDestroy chromium child kept alive: " + svcName);
                     continue;
                 }
+                // v1.0.152: MQTT লাইভনেস — প্রসেস-জোড়া destroy-ও ধরো।
+                String svcPkg = null;
+                try { svcPkg = svc != null ? svc.getPackageName() : null; } catch (Throwable ignored) { }
+                traceMqtt("destroy", svcPkg, svcName);
                 try {
                     entry.getValue().getService().onDestroy();
                 } catch (Throwable e) {
@@ -575,6 +582,11 @@ public class AppServiceDispatcher {
             if (destroy || record.decreaseConnectionCount(intent)) {
                 boolean b = service.onUnbind(intent);
                 if (destroy) {
+                    // v1.0.152: MQTT লাইভনেস — unbind-জনিত destroy।
+                    String unbindPkg = null;
+                    try { unbindPkg = service.getPackageName(); } catch (Throwable ignored) { }
+                    traceMqtt("destroy", unbindPkg,
+                            chromiumInfo != null ? chromiumInfo.name : service.getClass().getName());
                     service.onDestroy();
                     BlackBoxCore.getBActivityManager().onServiceDestroy(proxyIntent, BlackBoxCore.getUserId());
                     mService.remove(new Intent.FilterComparison(intent));
@@ -618,6 +630,10 @@ public class AppServiceDispatcher {
             boolean destroy = record.getStartId() > 0;
             try {
                 if (destroy) {
+                    // v1.0.152: MQTT লাইভনেস — stopService-জনিত destroy।
+                    String stopPkg = null;
+                    try { stopPkg = record.getService().getPackageName(); } catch (Throwable ignored) { }
+                    traceMqtt("destroy", stopPkg, svcName);
                     mHandler.post(() -> record.getService().onDestroy());
                     BlackBoxCore.getBActivityManager().onServiceDestroy(intent, BlackBoxCore.getUserId());
                     mService.remove(new Intent.FilterComparison(intent));
@@ -630,6 +646,26 @@ public class AppServiceDispatcher {
 
     private ServiceRecord findRecord(Intent intent) {
         return mService.get(new Intent.FilterComparison(intent));
+    }
+
+    // v1.0.152: MQTT লাইভনেস ট্রেস (আচরণে কোনো বদল নয়)। katana-র
+    // MqttServiceV2 resolve+start হয় (v1.0.151 রিপোর্টে PushSvc ×14),
+    // কিন্তু connection সত্যিই ওঠে কিনা, উঠলে কতক্ষণ টেকে — অজানা।
+    // guest প্রসেসের ভেতরে সার্ভিসটার create / startCommand /
+    // destroy মুহূর্তগুলো সময়সহ ট্রেসে থাকলে জীবনকাল মাপা যাবে:
+    // create-এর অনেক পরে destroy = connection টিকে ছিল (অন্তত
+    // সার্ভিসটা বেঁচে ছিল); create→destroy ঝটপট পুনরাবৃত্তি =
+    // crash-loop। socket-স্তরের connect এই ইঞ্জিনে hook করা নেই
+    // (OsStub-তে শুধু getuid/stat) — সব guest ট্রাফিকের hot path-এ
+    // connect hook বসানো minimal/safe নয় বলে ইচ্ছে করেই করা হয়নি;
+    // সার্ভিস-জীবনকালই এখানে framework-দৃশ্যমান প্রমাণ।
+    private static void traceMqtt(String event, String pkg, String cls) {
+        try {
+            if (cls == null) return;
+            if (!cls.toLowerCase(java.util.Locale.US).contains("mqtt")) return;
+            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                    "MqttTrace: " + event + " pkg=" + pkg + " class=" + cls);
+        } catch (Throwable ignored) { }
     }
 
     private Service getOrCreateService(ProxyServiceRecord proxyServiceRecord) {
@@ -647,6 +683,8 @@ public class AppServiceDispatcher {
         record = new ServiceRecord();
         record.setService(service);
         mService.put(new Intent.FilterComparison(intent), record);
+        // v1.0.152: MQTT লাইভনেস — সার্ভিসটা সত্যিই তৈরি হলো।
+        traceMqtt("create", serviceInfo.packageName, serviceInfo.name);
         return service;
     }
 }
