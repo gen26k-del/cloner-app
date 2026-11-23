@@ -66,7 +66,7 @@ android {
         // আচরণ পরিবর্তনে hook ভাঙা এড়াতে। ব্যক্তিগত ব্যবহারে ঠিক আছে।
         targetSdk = 28
         versionCode = 136
-        versionName = "1.0.151 পুশ-তদন্ত"
+        versionName = "1.0.151 পুশ-ডেলিভারি"
     }
 
     compileOptions {

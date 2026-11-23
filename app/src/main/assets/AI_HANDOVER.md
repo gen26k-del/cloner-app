@@ -359,12 +359,26 @@ When they disagree, the user is right and the report is lying.
   all (guest RUNTIME receivers were unaffected — they go through
   the RegisterReceiver hook + InnerReceiverDelegate). Raw
   broadcasts are now forwarded into virtual dispatch for all
-  existing user spaces (`BActivityManagerService.
-  scheduleBroadcastReceiverAllUsers`; delivery only to already-
-  running processes, same rule as the stub path), with a 2 s
-  dedupe window in the receiver (several :black proxy receivers
-  can match one action; key includes google.message_id so distinct
-  FCM messages are never deduped). This fix is a prerequisite for
+  existing users: ProxyBroadcastReceiver itself fans out using
+  only pre-existing AIDL client calls (`BlackBoxCore.getUsers()`
+  + `getBPackageManager().queryBroadcastReceivers(...)` per user,
+  then the existing `scheduleBroadcastReceiver(...)` for each
+  user with a matching manifest receiver; delivery only to
+  already-running processes, same rule as the stub path), with
+  a 2 s dedupe window in the receiver (several :black proxy
+  receivers can match one action; key includes google.message_id
+  so distinct FCM messages are never deduped). **Build note —
+  do not repeat:** the first v1.0.151 attempt put this fan-out
+  in a new `BActivityManagerService` helper method instead.
+  Every CI build containing that BAMS change failed at
+  `gradle assembleDebug` (5 runs, bisected to that file alone —
+  even a pure method-extraction refactor of it), while the exact
+  same code compiles clean under javac with the full classpath
+  and annotation processing. The CI log could not be retrieved
+  (API rate limits / auth), so the Gradle-level cause is
+  UNDETERMINED; the BAMS helper was dropped and the fan-out
+  moved into ProxyBroadcastReceiver as above. Do not add methods
+  to BActivityManagerService without first securing a CI log. This fix is a prerequisite for
   any broadcast-driven wakeup of manifest receivers; it does NOT
   by itself admit real-GMS FCM (see (b)) and is not claimed to fix
   notifications. (d) **Push tracing — diagnosis only, no behaviour
