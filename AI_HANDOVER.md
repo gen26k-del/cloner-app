@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-23, at version **1.0.150** (versionCode 135).
+> Last updated: 2026-11-23, at version **1.0.151** (versionCode 136).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -318,6 +318,76 @@ When they disagree, the user is right and the report is lying.
   katana's process never posts inside the clone; lines present = posts
   happen but never surface — the two cases need different fixes),
   MainStall lines around any ANR, and the aura crash file staying gone.
+  **Device verdict (2026-11-23, two v1.0.150 reports):** NotifyPost =
+  0 across ALL clones in both windows while NotifyCancel fired
+  normally (katana id=6/10004/103773363, whatsapp id=2) — katana
+  never posts inside the clone. The clone's FB shows 6 unread on its
+  in-app bell badge (server fetch works when opened); the original
+  FB app on the same phone notifies normally. See §7.6 / v1.0.151.
+- **v1.0.151** — **Push investigation + one broadcast fix** (device
+  evidence above; code investigation this round). What the code
+  actually shows: (a) The guest notification POST path is sound —
+  `INotificationManagerProxy.EnqueueNotificationWithTag` forwards
+  to `BNotificationManagerService`, which remaps the id, rewrites
+  the channel to `<id>@black-<userId>` and calls the real
+  NotificationManager under the host package; the v1.0.150
+  NotifyPost trace sits at the first hop of that path, and the same
+  apps' cancels pass through the same proxy, so "katana never calls
+  notify() inside the clone" is a sound conclusion, not a trace
+  blind spot (short of an app posting through an unproxied binder,
+  for which there is no evidence). (b) Real-GMS FCM delivery is
+  **structurally unreachable** for a clone: GMS dispatches FCM as a
+  package-targeted broadcast (`com.google.android.c2dm.intent.
+  RECEIVE`, setPackage = the app's package), and AMS delivers
+  package-targeted broadcasts only to that package — the REAL
+  Facebook app, which is exactly why the original notifies and the
+  clone cannot. No host-side receiver can intercept another
+  package's FCM. The only in-environment route is the guest GMS
+  clone's own MCS connection → guest GMS sends the C2DM broadcast
+  through the hooked `broadcastIntent` → BAMS shadow → guest
+  FirebaseInstanceIdReceiver → FirebaseMessagingService → notify();
+  every in-env hop exists in code, but whether the guest GMS's
+  checkin/MCS connection is alive on the device is NOT provable
+  from static code. (c) **FIXED — a real break in the broadcast
+  chain:** `ProxyBroadcastReceiver.onReceive` silently dropped
+  every broadcast without the `_B_|_target_` stub extra.
+  `BroadcastManager.registerPackage` registers these receivers in
+  :black with every guest manifest receiver's raw intent-filter —
+  precisely to catch system broadcasts for guest manifest
+  receivers — so the drop made that whole registration a no-op:
+  guest MANIFEST receivers never received system broadcasts at
+  all (guest RUNTIME receivers were unaffected — they go through
+  the RegisterReceiver hook + InnerReceiverDelegate). Raw
+  broadcasts are now forwarded into virtual dispatch for all
+  existing user spaces (`BActivityManagerService.
+  scheduleBroadcastReceiverAllUsers`; delivery only to already-
+  running processes, same rule as the stub path), with a 2 s
+  dedupe window in the receiver (several :black proxy receivers
+  can match one action; key includes google.message_id so distinct
+  FCM messages are never deduped). This fix is a prerequisite for
+  any broadcast-driven wakeup of manifest receivers; it does NOT
+  by itself admit real-GMS FCM (see (b)) and is not claimed to fix
+  notifications. (d) **Push tracing — diagnosis only, no behaviour
+  change:** `PushRx:` (raw C2DM broadcast arrives at a :black
+  proxy receiver), `PushBcast:` (a guest — e.g. guest GMS — sends
+  a C2DM broadcast inside the env), `PushSvc:` (startService for
+  MESSAGING_EVENT / INSTANCE_ID_EVENT or a firebase/mqtt service
+  class, with resolved=), `NotifyChannel:` (a guest creates its
+  notification channels — pkg + ids). The smart report gained a
+  dedicated "PushTrace" section (totals + last 10 of each) and the
+  four prefixes joined the diagnosis keyword lists. (e) Facebook's
+  own MQTT channel: no proxy-level block was found (services
+  resolve and start virtually; setServiceForeground is hooked) —
+  but katana's processes die repeatedly under LOW_MEMORY on this
+  phone (device evidence), which kills any MQTT connection, and
+  FCM is precisely the wakeup path that never fires. **First
+  evidence to check in the next report:** the PushTrace section —
+  any PushBcast with from=com.google.android.gms (guest GMS is
+  dispatching FCM inside the env) or PushSvc for katana (delivery
+  reached the guest's messaging service); NotifyChannel lines for
+  katana (did its notification subsystem ever initialize?); and
+  whether system broadcasts now reach guest manifest receivers of
+  running clones (the (c) fix).
 
 ## 7. Open problems (start here)
 
@@ -377,19 +447,34 @@ When they disagree, the user is right and the report is lying.
    clone (com.facebook.katana) receives NO notifications at all, while
    the ORIGINAL Facebook app (outside CloneMe) notifies normally**
    (owner, 2026-11-23; total absence — not delay, not misattribution —
-   and the fault is clone-side only). Diagnosis first: v1.0.150 adds
-   `NotifyPost:`/`NotifyCancel:` traces at the
-   INotificationManagerProxy enqueue/cancel hooks plus a dedicated
-   report section; **no notification behaviour was changed**. The
-   v1.0.150 trace distinguishes never-posts vs
-   posts-but-never-surfaces.
-   **First evidence to check:** whether ANY NotifyPost line with
-   pkg=com.facebook.katana exists in the next report. Zero lines =
-   katana never posts inside the clone (look at push/provider wakeup
-   and process liveness); lines present = posts happen but never
-   surface (look at BNotificationManager forwarding and channel
-   handling). A fix belongs to a later build, once the trace decides
-   which case it is.
+   and the fault is clone-side only). **Trace verdict (v1.0.150,
+   two reports, 2026-11-23): never-posts.** NotifyPost = 0 across
+   all clones while NotifyCancel fires normally — katana never
+   calls notify() inside the clone, though its in-app bell badge
+   shows 6 unread (server fetch on open works). **Investigation
+   (v1.0.151, code-proven; full detail in the §6 v1.0.151 entry):**
+   the post path itself is sound (proxy → BNotificationManager
+   Service → real NotificationManager under the host package).
+   Real-GMS FCM is structurally unreachable for clones — GMS
+   dispatches FCM as a package-targeted broadcast and AMS delivers
+   those only to the real package. The only possible route is the
+   guest GMS clone's own MCS connection dispatching inside the
+   env; whether that connection is alive is the remaining unknown.
+   v1.0.151 fixed a separate real break found on the way (raw
+   system broadcasts to guest MANIFEST receivers were silently
+   dropped by ProxyBroadcastReceiver — now forwarded) and added
+   PushRx/PushBcast/PushSvc/NotifyChannel tracing + a PushTrace
+   report section to isolate the push chain to one hop.
+   **First evidence to check:** the PushTrace section of the next
+   report. PushBcast from=com.google.android.gms present = guest
+   GMS dispatches FCM inside the env (then check PushSvc/Notify
+   Post downstream); ALL push lines zero = nothing push-shaped
+   ever moves inside the env — guest GMS checkin/MCS is dead or
+   katana registered with the real GMS, and effort should go to
+   the guest GMS's liveness (its own traces/PMCheck activity),
+   not to the notification path. Also check NotifyChannel for
+   katana: no line = its notification subsystem never even
+   initialized in-clone.
 
 **Fixed in v1.0.150 — do not chase again:** the com.facebook.aura
 "Missing ComponentInfo!" crash (malformed ResolveInfo from the virtual

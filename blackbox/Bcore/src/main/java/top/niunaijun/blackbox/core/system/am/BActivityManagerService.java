@@ -11,6 +11,7 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.os.RemoteException;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -195,6 +196,10 @@ public class BActivityManagerService extends IBActivityManagerService.Stub imple
             return;
         }
         mBroadcastManager.sendBroadcast(pendingResultData);
+        deliverBroadcastToResolves(intent, pendingResultData, resolves, userId);
+    }
+
+    private void deliverBroadcastToResolves(Intent intent, PendingResultData pendingResultData, List<ResolveInfo> resolves, int userId) {
         for (ResolveInfo resolve : resolves) {
             ProcessRecord processRecord = BProcessManagerService.get().findProcessRecord(resolve.activityInfo.packageName, resolve.activityInfo.processName, userId);
             // bActivityThread null হতে পারে — প্রসেস চালু হয়েছে কিন্তু
@@ -208,6 +213,40 @@ public class BActivityManagerService extends IBActivityManagerService.Stub imple
                 data.data = pendingResultData;
                 processRecord.bActivityThread.scheduleReceiver(data);
             }
+        }
+    }
+
+    // v1.0.151: আসল সিস্টেম থেকে আসা ব্রডকাস্ট (stub extra ছাড়া) সব
+    // বিদ্যমান user space-এর guest manifest receiver-দের কাছে পৌঁছে
+    // দাও। ProxyBroadcastReceiver আগে এগুলো নিঃশব্দে ফেলে দিত, তাই
+    // BroadcastManager-এর registerPackage দিয়ে বসানো :black
+    // receiver-গুলো (প্রতিটি guest-এর manifest filter) কার্যত অকেজো
+    // ছিল — guest-দের manifest receiver সিস্টেম ব্রডকাস্ট কখনোই
+    // পেত না (runtime receiver-রা RegisterReceiver hook দিয়ে আলাদা
+    // পথে পায়)। শুধু server process থেকেই ডাকতে হবে (স্থানীয়
+    // singleton)। scheduleBroadcastReceiver-এর মতোই এখানেও শুধু
+    // চলমান প্রসেসে ডেলিভারি হয় — ব্রডকাস্টের জন্য নতুন প্রসেস
+    // তোলা হয় না।
+    public void scheduleBroadcastReceiverAllUsers(Intent intent, PendingResultData pendingResultData) {
+        List<Integer> userIds;
+        synchronized (mUserSpace) {
+            userIds = new ArrayList<>(mUserSpace.keySet());
+        }
+        boolean anyDelivered = false;
+        for (int userId : userIds) {
+            List<ResolveInfo> resolves = BPackageManagerService.get().queryBroadcastReceivers(intent, GET_META_DATA, null, userId);
+            if (resolves.isEmpty()) {
+                continue;
+            }
+            if (!anyDelivered) {
+                mBroadcastManager.sendBroadcast(pendingResultData);
+                anyDelivered = true;
+            }
+            deliverBroadcastToResolves(intent, pendingResultData, resolves, userId);
+        }
+        if (!anyDelivered) {
+            pendingResultData.build().finish();
+            Slog.d(TAG, "scheduleBroadcastReceiverAllUsers empty: " + intent.getAction());
         }
     }
 
