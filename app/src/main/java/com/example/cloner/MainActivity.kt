@@ -1054,8 +1054,8 @@ fun ClonerAppScreen() {
             // ফিক্স চলেছিল কিনা আর renderer কখন মরল। বিরল লাইনগুলো (setup/
             // transact) পুরো ট্রেস থেকে নাও — শেষ ২০-এ চাপা পড়ে যায় বলে
             // v1.0.82-84-তে "relroInfo nulled"/"transact code=" কখনো দেখা যায়নি।
-            val diagKeywords = listOf("SHUTDOWN HOOK", "System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed", "transact code=", "no-sandbox", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan", "NotifyPost", "NotifyCancel", "MainStall", "PushRx", "PushBcast", "PushSvc", "NotifyChannel")
-            val rareKeywords = listOf("transact code=", "relroInfo nulled", "RELRO blocked", "no-sandbox", "setupConnection rewrite failed", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan", "NotifyPost", "NotifyCancel", "MainStall", "PushRx", "PushBcast", "PushSvc", "NotifyChannel")
+            val diagKeywords = listOf("SHUTDOWN HOOK", "System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed", "transact code=", "no-sandbox", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan", "NotifyPost", "NotifyCancel", "MainStall")
+            val rareKeywords = listOf("transact code=", "relroInfo nulled", "RELRO blocked", "no-sandbox", "setupConnection rewrite failed", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan", "NotifyPost", "NotifyCancel", "MainStall")
             val rareLines = trace.lines().filter { line -> rareKeywords.any { k -> line.contains(k) } }.takeLast(30)
             // v1.0.96 রিপোর্ট-স্বাস্থ্য: একই লাইন বারবার আসে (যেমন
             // "foreground promoted" ২২ বার, শুধু সময়/PID আলাদা) — distinct()
@@ -1099,27 +1099,6 @@ fun ClonerAppScreen() {
             if (notifyPostAll.isNotEmpty()) sb.append(notifyPostAll.takeLast(10).joinToString("\n") + "\n")
             sb.append("NotifyCancel: মোট " + notifyCancelAll.size + "টি লাইন\n")
             if (notifyCancelAll.isNotEmpty()) sb.append(notifyCancelAll.takeLast(10).joinToString("\n") + "\n")
-            // v1.0.151: পুশ-তদন্তের আলাদা অংশ — পুশ শৃঙ্খলের কোন
-            // ধাপ পর্যন্ত ঘটনা পৌঁছায় তার প্রমাণ। PushRx = raw
-            // C2DM broadcast :black receiver-এ এসেছে; PushBcast =
-            // কোনো guest (যেমন guest GMS) ভেতরে C2DM broadcast
-            // পাঠিয়েছে; PushSvc = FirebaseMessagingService/MQTT
-            // সার্ভিস চালুর চেষ্টা; NotifyChannel = guest তার
-            // notification channel তৈরি করেছে। সব ০ মানে পুশ
-            // ভার্চুয়াল পরিবেশের ভেতরে কোথাও জাগেইনি।
-            val pushRxAll = trace.lines().filter { it.contains("PushRx:") }
-            val pushBcastAll = trace.lines().filter { it.contains("PushBcast:") }
-            val pushSvcAll = trace.lines().filter { it.contains("PushSvc:") }
-            val notifyChannelAll = trace.lines().filter { it.contains("NotifyChannel:") }
-            sb.append("\n--- PushTrace (আলাদা অংশ) ---\n")
-            sb.append("PushRx: মোট " + pushRxAll.size + "টি লাইন\n")
-            if (pushRxAll.isNotEmpty()) sb.append(pushRxAll.takeLast(10).joinToString("\n") + "\n")
-            sb.append("PushBcast: মোট " + pushBcastAll.size + "টি লাইন\n")
-            if (pushBcastAll.isNotEmpty()) sb.append(pushBcastAll.takeLast(10).joinToString("\n") + "\n")
-            sb.append("PushSvc: মোট " + pushSvcAll.size + "টি লাইন\n")
-            if (pushSvcAll.isNotEmpty()) sb.append(pushSvcAll.takeLast(10).joinToString("\n") + "\n")
-            sb.append("NotifyChannel: মোট " + notifyChannelAll.size + "টি লাইন\n")
-            if (notifyChannelAll.isNotEmpty()) sb.append(notifyChannelAll.takeLast(10).joinToString("\n") + "\n")
             // টম্বস্টোন ফ্রেম: renderer SIGSEGV-র কল স্ট্যাক — কোন ফাংশনে
             // মরলো বোঝার একমাত্র সূত্র। লগ ভিউ ফ্রেমগুলো কেটে ফেলে, তাই
             // রিপোর্টেই ধরো (সংক্ষিপ্ত আকারে: ফ্রেম নম্বর, pc, লাইব্রেরি)।
