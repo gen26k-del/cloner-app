@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-23, at version **1.0.152** (versionCode 137).
+> Last updated: 2026-11-23, at version **1.0.153** (versionCode 138).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -450,6 +450,40 @@ When they disagree, the user is right and the report is lying.
   periodic job — the frames should name it), MqttTrace
   create→destroy lifetimes for MqttServiceV2, BlackWake lines
   vs :black deaths, and any BlackInit line naming a throwable.
+- **v1.0.153** — **Smart-report completeness ONLY** (device
+  evidence: the owner's screenshot, 2026-11-23 19:24 — the
+  v1.0.152 report **ends mid-word inside the app's own report
+  dialog**, at "--- PushTrace (আলাদা অংশ) ---\nPu"). Root
+  cause found in `MainActivity.generateReport`: the finished
+  report string was hard-capped — `reportText =
+  sb.toString().take(20000)` — and by the time the builder
+  reached the PushTrace section the text was already ~20,000
+  chars, so everything from "Pu…" on (PushTrace details,
+  MqttTrace, tombstone, death logs, trace tail) was silently
+  cut. NOT a capped file read: the trace is read in full and
+  every section IS assembled into the StringBuilder; only the
+  final hand-off to the dialog truncated it. Changes (report
+  builder only, no behaviour changes anywhere else): (a) the
+  20,000-char cap is **removed** — the dialog now receives the
+  complete report; (b) every generated report is also written
+  in full to **`smart_report.txt`** in the app's external
+  files dir (`/storage/emulated/0/Android/data/com.example.
+  cloner/files/`, the path the report header already prints),
+  and when that write succeeds the dialog text gets one
+  Bengali note line at the top saying so — the file is the
+  reliable way to share a complete report; (c) the PushTrace
+  section (incl. the MqttTrace block) moved to **right after
+  the per-clone summary (সারাংশ)**, before the crash/death
+  sections, and a dedicated **MainStall / MainStallStack**
+  section (totals + last 10 each) now sits just before it —
+  previously MainStall lines only surfaced inside the grouped
+  diagnosis section. All other sections and their relative
+  order are unchanged. **First evidence to check:** a
+  v1.0.153 report (or its smart_report.txt) that runs to the
+  true end ("--- ট্রেস (শেষাংশ) ---" last), with the early
+  PushTrace/MqttTrace and MainStallStack sections present —
+  that report finally carries the v1.0.152 evidence §7 items
+  5 and 6 are waiting on.
 
 ## 7. Open problems (start here)
 
@@ -513,7 +547,12 @@ When they disagree, the user is right and the report is lying.
    dies on screen wakes (any BlackInit line names the throwable).
    Do not promise to fix the LOW_MEMORY deaths themselves — with
    ~150 MB per stub and many heavy clones resident, LMK reaping cached
-   stubs is Android behaving normally.
+   stubs is Android behaving normally. **Update (v1.0.153):** the
+   v1.0.152 device window DID run (19:15–19:23), but its report was
+   cut by the report builder's 20,000-char cap before any
+   MainStallStack line (see §6 v1.0.153) — the stack evidence is
+   still outstanding; read it from the first v1.0.153 report or its
+   smart_report.txt, where the MainStall section now sits early.
 6. **Per-clone notifications unreliable — pinned symptom: the Facebook
    clone (com.facebook.katana) receives NO notifications at all, while
    the ORIGINAL Facebook app (outside CloneMe) notifies normally**
@@ -557,6 +596,13 @@ When they disagree, the user is right and the report is lying.
    gaps mean the service (and plausibly its connection) lives;
    rapid create/destroy cycling means it crash-loops under the
    same memory pressure and MQTT cannot carry pushes either.
+   **Update (v1.0.153):** the v1.0.152 window showed MqttTrace
+   startService/startCommand lines (19:16:15, ×7) but the report
+   itself was truncated by the 20,000-char cap before the
+   MqttTrace block (see §6 v1.0.153) — create→destroy lifetimes
+   are still unmeasured and this evidence is still outstanding;
+   read it from the first v1.0.153 report's early PushTrace
+   section or its smart_report.txt.
 
 **Fixed in v1.0.150 — do not chase again:** the com.facebook.aura
 "Missing ComponentInfo!" crash (malformed ResolveInfo from the virtual

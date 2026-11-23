@@ -961,6 +961,50 @@ fun ClonerAppScreen() {
             } else {
                 sb.append(verdicts.joinToString("\n") + "\n")
             }
+            // v1.0.153: সবচেয়ে দরকারি ডায়াগনসিস অংশগুলো সারাংশের
+            // ঠিক পরেই — লম্বা ক্র্যাশ/মৃত্যু অংশগুলোর আগে। আগে এগুলো
+            // রিপোর্টের একদম শেষে থাকত, আর পুরনো take(20000) সীমায়
+            // রিপোর্ট PushTrace-এর মাঝখানে কেটে যেত (v1.0.152-এর
+            // রিপোর্ট "Pu"-তে থেমেছিল) — তাই কপি আংশিক হলেও এই
+            // অংশগুলো এখন সবার আগে পৌঁছায়।
+            // MainStall / MainStallStack: হোস্ট মেইন থ্রেড আটকে থাকার
+            // সময়কাল আর সেই মুহূর্তের স্ট্যাক ফ্রেম (v1.0.150/152)।
+            val mainStallAll = trace.lines().filter { it.contains("MainStall:") }
+            val mainStallStackAll = trace.lines().filter { it.contains("MainStallStack:") }
+            sb.append("\n--- MainStall / MainStallStack (আলাদা অংশ) ---\n")
+            sb.append("MainStall: মোট " + mainStallAll.size + "টি লাইন\n")
+            if (mainStallAll.isNotEmpty()) sb.append(mainStallAll.takeLast(10).joinToString("\n") + "\n")
+            sb.append("MainStallStack: মোট " + mainStallStackAll.size + "টি লাইন\n")
+            if (mainStallStackAll.isNotEmpty()) sb.append(mainStallStackAll.takeLast(10).joinToString("\n") + "\n")
+            // v1.0.151: পুশ-তদন্তের আলাদা অংশ — পুশ শৃঙ্খলের কোন
+            // ধাপ পর্যন্ত ঘটনা পৌঁছায় তার প্রমাণ। PushRx = raw
+            // C2DM broadcast :black receiver-এ এসেছে; PushBcast =
+            // কোনো guest (যেমন guest GMS) ভেতরে C2DM broadcast
+            // পাঠিয়েছে; PushSvc = FirebaseMessagingService/MQTT
+            // সার্ভিস চালুর চেষ্টা; NotifyChannel = guest তার
+            // notification channel তৈরি করেছে। সব ০ মানে পুশ
+            // ভার্চুয়াল পরিবেশের ভেতরে কোথাও জাগেইনি।
+            // (v1.0.153-তে এই অংশটা রিপোর্টের শেষ থেকে এখানে আনা হলো।)
+            val pushRxAll = trace.lines().filter { it.contains("PushRx:") }
+            val pushBcastAll = trace.lines().filter { it.contains("PushBcast:") }
+            val pushSvcAll = trace.lines().filter { it.contains("PushSvc:") }
+            val notifyChannelAll = trace.lines().filter { it.contains("NotifyChannel:") }
+            sb.append("\n--- PushTrace (আলাদা অংশ) ---\n")
+            sb.append("PushRx: মোট " + pushRxAll.size + "টি লাইন\n")
+            if (pushRxAll.isNotEmpty()) sb.append(pushRxAll.takeLast(10).joinToString("\n") + "\n")
+            sb.append("PushBcast: মোট " + pushBcastAll.size + "টি লাইন\n")
+            if (pushBcastAll.isNotEmpty()) sb.append(pushBcastAll.takeLast(10).joinToString("\n") + "\n")
+            sb.append("PushSvc: মোট " + pushSvcAll.size + "টি লাইন\n")
+            if (pushSvcAll.isNotEmpty()) sb.append(pushSvcAll.takeLast(10).joinToString("\n") + "\n")
+            sb.append("NotifyChannel: মোট " + notifyChannelAll.size + "টি লাইন\n")
+            if (notifyChannelAll.isNotEmpty()) sb.append(notifyChannelAll.takeLast(10).joinToString("\n") + "\n")
+            // v1.0.152: MQTT লাইভনেস — MqttServiceV2-র startService/
+            // stopService (AMS স্তর) আর guest প্রসেসের ভেতরের create/
+            // startCommand/destroy। create→destroy ব্যবধানই সার্ভিসটার
+            // জীবনকাল; ঘন ঘন create = crash-loop।
+            val mqttTraceAll = trace.lines().filter { it.contains("MqttTrace:") }
+            sb.append("MqttTrace: মোট " + mqttTraceAll.size + "টি লাইন\n")
+            if (mqttTraceAll.isNotEmpty()) sb.append(mqttTraceAll.takeLast(10).joinToString("\n") + "\n")
             // v1.0.98: ফোরগ্রাউন্ড নোটিফিকেশন যাচাই — "CloneMe — Chrome
             // চলছে" নোটিফিকেশনটা আসল সিস্টেমে পোস্ট হয়েছে কিনা। ফলাফল
             // fgs_check.txt-এ থাকে (ক্লোন চালু করার পর ৩০ সেকেন্ড পোল করা হয়)।
@@ -1099,34 +1143,6 @@ fun ClonerAppScreen() {
             if (notifyPostAll.isNotEmpty()) sb.append(notifyPostAll.takeLast(10).joinToString("\n") + "\n")
             sb.append("NotifyCancel: মোট " + notifyCancelAll.size + "টি লাইন\n")
             if (notifyCancelAll.isNotEmpty()) sb.append(notifyCancelAll.takeLast(10).joinToString("\n") + "\n")
-            // v1.0.151: পুশ-তদন্তের আলাদা অংশ — পুশ শৃঙ্খলের কোন
-            // ধাপ পর্যন্ত ঘটনা পৌঁছায় তার প্রমাণ। PushRx = raw
-            // C2DM broadcast :black receiver-এ এসেছে; PushBcast =
-            // কোনো guest (যেমন guest GMS) ভেতরে C2DM broadcast
-            // পাঠিয়েছে; PushSvc = FirebaseMessagingService/MQTT
-            // সার্ভিস চালুর চেষ্টা; NotifyChannel = guest তার
-            // notification channel তৈরি করেছে। সব ০ মানে পুশ
-            // ভার্চুয়াল পরিবেশের ভেতরে কোথাও জাগেইনি।
-            val pushRxAll = trace.lines().filter { it.contains("PushRx:") }
-            val pushBcastAll = trace.lines().filter { it.contains("PushBcast:") }
-            val pushSvcAll = trace.lines().filter { it.contains("PushSvc:") }
-            val notifyChannelAll = trace.lines().filter { it.contains("NotifyChannel:") }
-            sb.append("\n--- PushTrace (আলাদা অংশ) ---\n")
-            sb.append("PushRx: মোট " + pushRxAll.size + "টি লাইন\n")
-            if (pushRxAll.isNotEmpty()) sb.append(pushRxAll.takeLast(10).joinToString("\n") + "\n")
-            sb.append("PushBcast: মোট " + pushBcastAll.size + "টি লাইন\n")
-            if (pushBcastAll.isNotEmpty()) sb.append(pushBcastAll.takeLast(10).joinToString("\n") + "\n")
-            sb.append("PushSvc: মোট " + pushSvcAll.size + "টি লাইন\n")
-            if (pushSvcAll.isNotEmpty()) sb.append(pushSvcAll.takeLast(10).joinToString("\n") + "\n")
-            sb.append("NotifyChannel: মোট " + notifyChannelAll.size + "টি লাইন\n")
-            if (notifyChannelAll.isNotEmpty()) sb.append(notifyChannelAll.takeLast(10).joinToString("\n") + "\n")
-            // v1.0.152: MQTT লাইভনেস — MqttServiceV2-র startService/
-            // stopService (AMS স্তর) আর guest প্রসেসের ভেতরের create/
-            // startCommand/destroy। create→destroy ব্যবধানই সার্ভিসটার
-            // জীবনকাল; ঘন ঘন create = crash-loop।
-            val mqttTraceAll = trace.lines().filter { it.contains("MqttTrace:") }
-            sb.append("MqttTrace: মোট " + mqttTraceAll.size + "টি লাইন\n")
-            if (mqttTraceAll.isNotEmpty()) sb.append(mqttTraceAll.takeLast(10).joinToString("\n") + "\n")
             // টম্বস্টোন ফ্রেম: renderer SIGSEGV-র কল স্ট্যাক — কোন ফাংশনে
             // মরলো বোঝার একমাত্র সূত্র। লগ ভিউ ফ্রেমগুলো কেটে ফেলে, তাই
             // রিপোর্টেই ধরো (সংক্ষিপ্ত আকারে: ফ্রেম নম্বর, pc, লাইব্রেরি)।
@@ -1263,7 +1279,22 @@ fun ClonerAppScreen() {
             sb.append(if (browserWindow.isEmpty()) "ব্রাউজার প্রসেসের লগ পাওয়া যায়নি\n" else browserWindow + "\n")
             sb.append("\n--- ট্রেস (শেষাংশ) ---\n")
             sb.append(if (traceTail.isEmpty()) "ট্রেস নেই\n" else traceTail + "\n")
-            withContext(Dispatchers.Main) { reportText = sb.toString().take(20000) }
+            // v1.0.153: কাটা পড়ার আসল কারণ ছিল এখানকার take(20000)
+            // সীমা — রিপোর্ট ~২০ হাজার অক্ষর পেরোলেই PushTrace অংশের
+            // মাঝখানে ("Pu"-তে) থেমে যেত (v1.0.152-এর ডিভাইস রিপোর্টে
+            // প্রমাণিত)। এখন পুরো লেখাটাই ডায়ালগে যায়, আর একই লেখা
+            // বাইরের ফোল্ডারে smart_report.txt হিসেবেও লেখা হয় —
+            // ডায়ালগ/কপিতে কিছু কাটা পড়লেও ফাইলটা সবসময় পুরো থাকে।
+            val fullReport = sb.toString()
+            val savedToFile = runCatching {
+                val dir = ctx.getExternalFilesDir(null) ?: return@runCatching false
+                java.io.File(dir, "smart_report.txt").writeText(fullReport)
+                true
+            }.getOrDefault(false)
+            val noteLine = if (savedToFile)
+                "📄 পুরো রিপোর্টটি smart_report.txt নামে অ্যাপের ফোল্ডারে সেভ করা হয়েছে — ওই ফাইলটা শেয়ার করলেই পুরো রিপোর্ট পাওয়া যাবে।\n\n"
+            else ""
+            withContext(Dispatchers.Main) { reportText = noteLine + fullReport }
         }
     }
 
