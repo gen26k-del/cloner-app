@@ -150,26 +150,9 @@ public class INotificationManagerProxy extends BinderInvocationStub {
             List<?> list = BRParceledListSlice.get(args[1]).getList();
             if (list == null)
                 return 0;
-            StringBuilder channelIds = new StringBuilder();
             for (Object o : list) {
-                NotificationChannel channel = (NotificationChannel) o;
-                BNotificationManager.get().createNotificationChannel(channel);
-                if (channelIds.length() > 0) channelIds.append(",");
-                channelIds.append(channel.getId());
+                BNotificationManager.get().createNotificationChannel((NotificationChannel) o);
             }
-            // v1.0.151: পুশ-তদন্তের ট্রেস (আচরণে কোনো বদল নয়)।
-            // guest তার notification channel তৈরি করলেই NotifyChannel:
-            // লাইন থাকে — katana-র এমন লাইন না থাকলে ওর notification
-            // উপব্যবস্থা clone-এর ভেতরে কখনো initialize-ই হয়নি (পুশ
-            // registration ব্যর্থ হওয়ার পার্শ্ব-লক্ষণ হতে পারে)।
-            try {
-                String pkg = BActivityThread.getAppPackageName();
-                if (pkg != null) {
-                    BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
-                            "NotifyChannel: pkg=" + pkg + " user=" + BActivityThread.getUserId()
-                                    + " channels=" + channelIds);
-                }
-            } catch (Throwable ignored) { }
             return 0;
         }
     }

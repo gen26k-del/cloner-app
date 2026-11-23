@@ -235,7 +235,6 @@ public class IActivityManagerProxy extends ClassInvocationStub {
             Intent intent = (Intent) args[1];
             String resolvedType = (String) args[2];
             ResolveInfo resolveInfo = BlackBoxCore.getBPackageManager().resolveService(intent, 0, resolvedType, BActivityThread.getUserId());
-            tracePushService(intent, resolveInfo);
             if (resolveInfo == null) {
                 return method.invoke(who, args);
             }
@@ -253,35 +252,6 @@ public class IActivityManagerProxy extends ClassInvocationStub {
                 return 3;
             }
             return -1;
-        }
-
-        // v1.0.151: পুশ-তদন্তের ট্রেস (আচরণে কোনো বদল নয়)।
-        // FirebaseMessagingService চালু হওয়া মানেই MESSAGING_EVENT
-        // action-এ startService — PushSvc: লাইন থাকলে FCM ডেলিভারি
-        // guest-এর দরজা পর্যন্ত পৌঁছেছে; resolved=false হলে ভার্চুয়াল
-        // PM-এ সার্ভিসটাই মেলেনি। Facebook-এর নিজের MQTT পুশ
-        // সার্ভিসের ক্লাস নামে mqtt থাকলেও একই লাইনে ধরা পড়বে।
-        private static void tracePushService(Intent intent, ResolveInfo resolveInfo) {
-            try {
-                String action = intent.getAction();
-                String cls = null;
-                if (intent.getComponent() != null) {
-                    cls = intent.getComponent().getClassName();
-                } else if (resolveInfo != null && resolveInfo.serviceInfo != null) {
-                    cls = resolveInfo.serviceInfo.name;
-                }
-                boolean push = "com.google.firebase.MESSAGING_EVENT".equals(action)
-                        || "com.google.firebase.INSTANCE_ID_EVENT".equals(action)
-                        || (cls != null && (cls.contains("firebase") || cls.contains("Firebase")
-                                || cls.contains("Mqtt") || cls.contains("mqtt")));
-                if (!push) {
-                    return;
-                }
-                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
-                        "PushSvc: from=" + BActivityThread.getAppPackageName()
-                                + " action=" + action + " class=" + cls
-                                + " resolved=" + (resolveInfo != null));
-            } catch (Throwable ignored) { }
         }
     }
 
@@ -672,7 +642,6 @@ public class IActivityManagerProxy extends ClassInvocationStub {
             int intentIndex = getIntentIndex(args);
             Intent intent = (Intent) args[intentIndex];
             String resolvedType = (String) args[intentIndex + 1];
-            tracePushBroadcast(intent);
             Intent proxyIntent = BlackBoxCore.getBActivityManager().sendBroadcast(intent, resolvedType, BActivityThread.getUserId());
             if (proxyIntent != null) {
                 proxyIntent.setExtrasClassLoader(BActivityThread.getApplication().getClassLoader());
@@ -715,27 +684,6 @@ public class IActivityManagerProxy extends ClassInvocationStub {
                 }
             }
             return 1;
-        }
-
-        // v1.0.151: পুশ-তদন্তের ট্রেস (আচরণে কোনো বদল নয়)। কোনো
-        // guest C2DM/FCM broadcast পাঠালে PushBcast: লাইন থাকে —
-        // বিশেষ করে guest GMS (clone) যদি FCM মেসেজ ভেতরে বিলি করে,
-        // তার RECEIVE broadcast এই hook দিয়েই যাবে; লাইন না থাকলে
-        // ভার্চুয়াল পরিবেশের ভেতরে পুশ broadcast ঘটেইনি।
-        private static void tracePushBroadcast(Intent intent) {
-            try {
-                String action = intent.getAction();
-                if (!"com.google.android.c2dm.intent.RECEIVE".equals(action)
-                        && !"com.google.android.c2dm.intent.REGISTRATION".equals(action)
-                        && !"com.google.android.c2dm.intent.REGISTER".equals(action)) {
-                    return;
-                }
-                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
-                        "PushBcast: from=" + BActivityThread.getAppPackageName()
-                                + " action=" + action
-                                + " targetPkg=" + intent.getPackage()
-                                + " component=" + intent.getComponent());
-            } catch (Throwable ignored) { }
         }
     }
 
