@@ -453,6 +453,32 @@ public class BlackBoxCore extends ClientConfiguration {
 
     
     
+    // v1.0.156: FIX 2a — isBlackProcessRunning() একবার সত্যি উত্তর
+    // দিলে তা মনে রাখা হয়, যাতে startup পথ cached উত্তরেই এগোতে
+    // পারে (নিচে isBlackProcessRunningCached /
+    // ensureBlackProcessInitialized দেখো)। volatile — background
+    // verify thread লেখে, main thread পড়ে।
+    private volatile boolean mBlackProcessSeenRunning = false;
+    private volatile boolean mBlackInitVerifyInFlight = false;
+
+    // v1.0.156: FIX 2a — কোনো provider call ছাড়া, কোনো অপেক্ষা
+    // ছাড়া শুধু cache থেকে উত্তর: আগে কখনো :black চলতে দেখা
+    // গেছে, অথবা কোনো service binder cache-এ জীবিত আছে (সেটাও
+    // :black চলারই প্রমাণ)। কোনোটাই না থাকলে false — caller
+    // তখন নিজের bounded পথে যাচাই করবে।
+    public boolean isBlackProcessRunningCached() {
+        if (mBlackProcessSeenRunning) {
+            return true;
+        }
+        for (IBinder binder : mServices.values()) {
+            if (binder != null && binder.isBinderAlive()) {
+                mBlackProcessSeenRunning = true;
+                return true;
+            }
+        }
+        return false;
+    }
+
     private boolean isBlackProcessRunning() {
         try {
             
@@ -464,6 +490,7 @@ public class BlackBoxCore extends ClientConfiguration {
                 Bundle result = ProviderCall.callSafely(ProxyManifest.getBindProvider(), "VM", null, testBundle);
                 if (result != null) {
                     Slog.d(TAG, "Black process is running - SystemCallProvider accessible");
+                    mBlackProcessSeenRunning = true;
                     return true;
                 }
             } catch (Exception e) {
@@ -494,6 +521,7 @@ public class BlackBoxCore extends ClientConfiguration {
                     for (android.app.ActivityManager.RunningServiceInfo service : am.getRunningServices(Integer.MAX_VALUE)) {
                         if (service.service.getClassName().contains("DaemonService")) {
                             Slog.d(TAG, "DaemonService is running - black process active");
+                            mBlackProcessSeenRunning = true;
                             return true;
                         }
                     }
@@ -841,29 +869,65 @@ public class BlackBoxCore extends ClientConfiguration {
     
     
     public void ensureBlackProcessInitialized() {
-        if (isMainProcess() && !isBlackProcessRunning()) {
-            Slog.w(TAG, "Ensuring black process is initialized...");
-            startBlackProcess();
-            
-            
-            int maxRetries = 5;
-            int retryCount = 0;
-            while (retryCount < maxRetries && !isBlackProcessRunning()) {
-                try {
-                    Thread.sleep(500);
-                    retryCount++;
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-            
-            if (isBlackProcessRunning()) {
-                Slog.d(TAG, "Black process initialized successfully");
-            } else {
-                Slog.w(TAG, "Black process failed to initialize, using fallback services");
-            }
+        if (!isMainProcess()) {
+            return;
         }
+        // v1.0.156: FIX 2a — startup ANR ফিক্স। আগে এই মেথড
+        // doCreate (ClonerApp.onCreate, main thread) থেকে সরাসরি
+        // isBlackProcessRunning() ডাকত — প্রতিটি ডাক একটা
+        // synchronous provider call, :black ধীর থাকলে একেকটা
+        // ~6s পর্যন্ত আটকে থাকত (ContentProviderCompat-এর
+        // acquire+call timeout), আর retry loop-এ তা আরও বাড়ত।
+        // v1.0.154 রিপোর্টে ধরা পড়া আসল ANR (2026-11-24
+        // 04:46:08) ঠিক এই stack-এই: doCreate →
+        // ensureBlackProcessInitialized → isBlackProcessRunning
+        // → FutureTask.get, main thread 6003ms ব্লক।
+        // এখন: cache-এ :black চলার প্রমাণ থাকলে সাথে সাথে ফেরত;
+        // না থাকলে :black চালু করে যাচাইটা background thread-এ
+        // পাঠাও — একই bounded বাজেটে (সর্বোচ্চ ৫ বার পুনঃযাচাই,
+        // ৫০০ms বিরতি)। main thread আর অপেক্ষা করে না। :black
+        // সত্যিই দরকার হলে lazy পথ (getServiceInternal /
+        // areServicesAvailable) নিজের bounded provider call-এ
+        // binder এনে নেয় — init semantics অপরিবর্তিত, শুধু
+        // startup-এর অপেক্ষাটা main thread থেকে সরল।
+        if (isBlackProcessRunningCached()) {
+            return;
+        }
+        Slog.w(TAG, "Ensuring black process is initialized (async)...");
+        startBlackProcess();
+        if (mBlackInitVerifyInFlight) {
+            return;
+        }
+        mBlackInitVerifyInFlight = true;
+        Thread verifyThread = new Thread(() -> {
+            try {
+                int maxRetries = 5;
+                int retryCount = 0;
+                boolean running = isBlackProcessRunning();
+                while (retryCount < maxRetries && !running) {
+                    try {
+                        Thread.sleep(500);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                    retryCount++;
+                    running = isBlackProcessRunning();
+                }
+                try {
+                    traceInit(getContext(), "BlackInitAsync: running=" + running + " retries=" + retryCount);
+                } catch (Throwable ignored) { }
+                if (running) {
+                    Slog.d(TAG, "Black process initialized successfully");
+                } else {
+                    Slog.w(TAG, "Black process failed to initialize, using fallback services");
+                }
+            } finally {
+                mBlackInitVerifyInFlight = false;
+            }
+        }, "black-init-verify");
+        verifyThread.setDaemon(true);
+        verifyThread.start();
     }
 
     public void doAttachBaseContext(Context context,

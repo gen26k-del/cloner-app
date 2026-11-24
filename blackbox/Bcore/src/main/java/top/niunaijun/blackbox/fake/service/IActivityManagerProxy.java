@@ -698,7 +698,26 @@ public class IActivityManagerProxy extends ClassInvocationStub {
             Intent intent = (Intent) args[intentIndex];
             String resolvedType = (String) args[intentIndex + 1];
             tracePushBroadcast(intent);
-            Intent proxyIntent = BlackBoxCore.getBActivityManager().sendBroadcast(intent, resolvedType, BActivityThread.getUserId());
+            // v1.0.156: FIX 1 — virtual AM-এর broadcast কল কোনোভাবেই
+            // guest thread মারতে পারবে না। BActivityManager.
+            // sendBroadcast এখন নিজে RuntimeException গিলে null
+            // দেয়; এখানেও belt-and-braces Throwable guard — কিছু
+            // ছিটকে এলে proxyIntent=null ধরে আগের service-null পথেই
+            // এগোও (আসল AM-এ মূল intent যাবে)। প্রমাণ: v1.0.155
+            // রিপোর্ট 2026-11-24 13:34:50 — নতুন Facebook ক্লোনের
+            // firebase-iid thread এই পথে uncaught NPE-তে মরেছিল।
+            Intent proxyIntent;
+            try {
+                proxyIntent = BlackBoxCore.getBActivityManager().sendBroadcast(intent, resolvedType, BActivityThread.getUserId());
+            } catch (Throwable t) {
+                proxyIntent = null;
+                try {
+                    BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                            "BcastGuard: hook action=" + intent.getAction()
+                                    + " pkg=" + intent.getPackage()
+                                    + " err=" + t.getClass().getSimpleName());
+                } catch (Throwable ignored) { }
+            }
             if (proxyIntent != null) {
                 proxyIntent.setExtrasClassLoader(BActivityThread.getApplication().getClassLoader());
                 ProxyBroadcastRecord.saveStub(proxyIntent, intent, BActivityThread.getUserId());

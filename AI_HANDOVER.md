@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-24, at version **1.0.155** (versionCode 140).
+> Last updated: 2026-11-24, at version **1.0.156** (versionCode 141).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -633,6 +633,83 @@ When they disagree, the user is right and the report is lying.
   the Reels/video activities and their elapsed times,
   and whether the owner's popup count changes at all —
   his count is the verdict, not the trace totals.
+- **v1.0.156** — **Startup-ANR chain + fresh-clone
+  broadcast crash + guest unbind stall (three fixes)**
+  (device evidence: the second v1.0.154 report,
+  2026-11-24 13:12 — a REAL captured ANR with full
+  stacks — plus the v1.0.155 report, 2026-11-24
+  13:34:53, and the owner's answers 13:35–13:37).
+  (1) **Fresh-clone broadcast crash** (the owner's
+  "second Facebook clone opens then closes
+  immediately"): katana user-1 launched to its login
+  screen twice, fast (LaunchTime 1,624 ms / 836 ms,
+  SlowLaunch 0), then died at 13:34:50 — NPE reading
+  `PackageItemInfo.packageName` on a null object inside
+  `BActivityManagerService.sendBroadcast`, rethrown
+  through the Parcel into the guest's
+  `firebase-iid-executor` thread via
+  `BActivityManager.sendBroadcast` ←
+  `IActivityManagerProxy$BroadcastIntent.hook`;
+  uncaught there, the whole guest process died. The
+  IID broadcast path fires on a FRESH clone's first
+  registration, which is why the long-registered
+  user-0 katana never hits it. Fix is CLIENT-side only
+  (BActivityManagerService stays untouched — §8 rule):
+  `BActivityManager.sendBroadcast` now also catches
+  RuntimeException (the AIDL-rethrown server exception
+  is NOT a RemoteException, so the old catch missed
+  it), traces `BcastGuard: svc …` and returns null —
+  the pre-existing service-null flow; the
+  BroadcastIntent hook additionally wraps the call in
+  a Throwable guard tracing `BcastGuard: hook …`.
+  Broadcasts are fire-and-forget, so a swallowed
+  failure is benign. (2) **Startup ANR chain**
+  (captured ANR 2026-11-24 04:46:08 on .154):
+  (a) host main thread blocked 6,003 ms in
+  `ClonerApp.onCreate → BlackBoxCore.doCreate →
+  ensureBlackProcessInitialized →
+  isBlackProcessRunning → ProviderCall →
+  FutureTask.get`. `ensureBlackProcessInitialized`
+  (sole caller: doCreate) no longer waits on the main
+  thread: a new `isBlackProcessRunningCached()`
+  answers from memory only (a volatile seen-running
+  flag, set by isBlackProcessRunning on success, or
+  any live cached service binder); on a cold start it
+  calls startBlackProcess() and runs the SAME bounded
+  verification (≤5 checks, 500 ms apart) on a daemon
+  background thread, tracing
+  `BlackInitAsync: running=…`. Init semantics are
+  preserved because the lazy path (getServiceInternal
+  / areServicesAvailable) still does its own bounded
+  provider fetch at first real use — only the startup
+  wait moved off the main thread. (b) :black main
+  thread blocked 6,006 ms in `Settings.scanPackage →
+  updatePackageLP → FileUtils.toByteArray →
+  Linux.readBytes`: the stream reader used a
+  **100-byte buffer**, so reading each multi-MB
+  package-conf parcel took tens of thousands of
+  native reads. The buffer is now 8,192 bytes —
+  identical bytes out, ~80× fewer reads. The scan
+  itself stays synchronous ON PURPOSE:
+  `BlackBoxSystem.startup()` consumes `mPackages`
+  immediately after systemReady() (the pre-install
+  check), so deferring the scan would race a real
+  consumer. (3) **Guest unbind stall** (:p3, 4,282 ms,
+  11:45:18 on .154): the guest-side
+  `IActivityManagerProxy$UnbindService.hook →
+  BActivityManager.unbindService` made a synchronous
+  binder call into :black on the guest main thread.
+  unbindService is void and result-free, so
+  `BActivityManager.unbindService` now dispatches the
+  remote call to a background executor (trace
+  `UnbindAsync: queued`); the v1.0.154
+  server-callback cached fix is untouched. **First
+  evidence to check in the next report:** BcastGuard
+  lines + whether a fresh clone survives its first
+  open; BlackInitAsync lines and whether the ~6 s
+  startup MainStall entries stop; UnbindAsync lines
+  vs. any remaining :pN unbind stacks. The owner's
+  verdict governs, as always.
 
 ## 7. Open problems (start here)
 
@@ -733,6 +810,25 @@ When they disagree, the user is right and the report is lying.
    §6). **First evidence to check:** :pN MainStall samples
    and SlowLaunch lines in the next report, read against the
    owner's own popup count.
+   **Update (v1.0.155 report + v1.0.156, 2026-11-24):** the
+   .155 window (~20 min) added NO new MainStall lines (total
+   still 21, all pre-.155) and launches were fast — but the
+   window is too short to conclude anything. The second
+   .154 report (13:12) captured a REAL ANR (04:46:08) with
+   the next root cause in full: the STARTUP chain —
+   doCreate → ensureBlackProcessInitialized →
+   isBlackProcessRunning blocking the host main thread
+   6,003 ms, while :black's own main thread blocked
+   6,006 ms reading package confs in Settings.scanPackage
+   (100-byte read buffer in FileUtils.toByteArray).
+   Process restarts are frequent under the LOW_MEMORY
+   churn, so this startup block is the leading explanation
+   for the popup returning again and again. v1.0.156
+   targets all three legs (async ensure + cached check,
+   8 KB read buffer, async guest unbind — see §6).
+   **First evidence to check:** BlackInitAsync lines,
+   absence of new ~6 s startup MainStall entries across a
+   long window with restarts, and the owner's popup count.
 6. **Per-clone notifications unreliable — pinned symptom: the Facebook
    clone (com.facebook.katana) receives NO notifications at all, while
    the ORIGINAL Facebook app (outside CloneMe) notifies normally**
@@ -810,6 +906,25 @@ When they disagree, the user is right and the report is lying.
    still 0, NotifyCancel 51. Unresolved: whether the receiver
    guard changed wake deaths at all — needs a clean .154+
    window with the smart_report.txt file, not a paste.
+
+7. **Fresh clone opens then closes immediately (second
+   Facebook clone, katana user 1) — FIXED in v1.0.156,
+   pending the owner's device verdict.** Root cause
+   (v1.0.155 report, 2026-11-24 13:34:50): on a fresh
+   clone's first launch, the guest's Firebase IID thread
+   sends a broadcast; :black's
+   `BActivityManagerService.sendBroadcast` NPEs on a null
+   PackageItemInfo, and the exception is rethrown into the
+   guest thread uncaught, killing the process ~2 s after
+   the login screen appears. Long-registered clones never
+   fire that path, so only NEW clones die. v1.0.156 guards
+   the client side (BActivityManager.sendBroadcast
+   RuntimeException catch + BroadcastIntent hook Throwable
+   guard, `BcastGuard:` traces) — BActivityManagerService
+   itself untouched per the §8 rule. **First evidence to
+   check:** create/open a fresh clone on .156 — it must
+   reach and STAY on its login screen; BcastGuard lines in
+   the report show the guard absorbing the failure.
 
 **Fixed in v1.0.150 — do not chase again:** the com.facebook.aura
 "Missing ComponentInfo!" crash (malformed ResolveInfo from the virtual

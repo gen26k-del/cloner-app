@@ -20,6 +20,9 @@ import top.niunaijun.blackbox.entity.am.RunningAppProcessInfo;
 import top.niunaijun.blackbox.entity.am.RunningServiceInfo;
 import top.niunaijun.blackbox.utils.Slog;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 
 public class BActivityManager extends BlackManager<IBActivityManagerService> {
     private static final String TAG = "BActivityManager";
@@ -233,15 +236,34 @@ public class BActivityManager extends BlackManager<IBActivityManagerService> {
         return null;
     }
 
-    public void unbindService(IBinder binder, int userId) {
+    // v1.0.156: FIX 3 — unbindService-এর remote কল background-এ
+    // পাঠানোর executor (নিচে দেখো)।
+    private static final ExecutorService sUnbindExecutor = Executors.newCachedThreadPool();
+
+    public void unbindService(final IBinder binder, final int userId) {
+        // v1.0.156: FIX 3 — আগে এই মেথড guest main thread-এ সরাসরি
+        // synchronous binder কল করত :black-এ; :black ব্যস্ত থাকলে
+        // guest main thread আটকে যেত (v1.0.154 রিপোর্ট: guest p3
+        // 11:45:18, 4282ms stall — IActivityManagerProxy$UnbindService
+        // .hook → BActivityManager.unbindService → Stub$Proxy.
+        // unbindService transact)। unbindService void এবং caller-এর
+        // কোনো ফল দরকার নেই, তাই remote কলটা background executor-এ
+        // পাঠাও — semantics একই, শুধু calling thread আর অপেক্ষা করে
+        // না। (v1.0.154-এর server-callback onServiceUnbind cached
+        // fix অপরিবর্তিত।)
         try {
-            IBActivityManagerService service = getService();
-            if (service != null) {
-                service.unbindService(binder, userId);
+            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(), "UnbindAsync: queued");
+        } catch (Throwable ignored) { }
+        sUnbindExecutor.execute(() -> {
+            try {
+                IBActivityManagerService service = getService();
+                if (service != null) {
+                    service.unbindService(binder, userId);
+                }
+            } catch (Throwable e) {
+                Slog.e(TAG, "async unbindService failed", e);
             }
-        } catch (RemoteException e) {
-            e.printStackTrace();
-        }
+        });
     }
 
     public void stopServiceToken(ComponentName componentName, IBinder token, int userId) {
@@ -330,6 +352,23 @@ public class BActivityManager extends BlackManager<IBActivityManagerService> {
             }
         } catch (RemoteException e) {
             e.printStackTrace();
+        } catch (RuntimeException e) {
+            // v1.0.156: FIX 1 — :black-এর BActivityManagerService.
+            // sendBroadcast ভেতরে NPE মারলে (null PackageItemInfo.
+            // packageName) AIDL সেই exception-টা Parcel দিয়ে guest-এর
+            // calling thread-এ RuntimeException হিসেবে ফেরত ছোড়ে —
+            // RemoteException নয়, তাই আগের catch ধরত না। v1.0.155
+            // রিপোর্টে (2026-11-24 13:34:50) ঠিক এভাবেই নতুন Facebook
+            // ক্লোনের (user 1) firebase-iid-executor thread-এ uncaught
+            // NPE গিয়ে পুরো guest প্রসেস মরে যায় — ক্লোন খুলেই বন্ধ।
+            // Broadcast fire-and-forget: ব্যর্থ হলে null ফেরত দাও
+            // (service-null পথের মতোই), guest thread যেন কখনো না মরে।
+            try {
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "BcastGuard: svc action=" + intent.getAction()
+                                + " pkg=" + intent.getPackage()
+                                + " err=" + e.getClass().getSimpleName());
+            } catch (Throwable ignored) { }
         }
         return null;
     }

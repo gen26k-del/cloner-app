@@ -152,9 +152,21 @@ public class FileUtils {
 
     public static byte[] toByteArray(InputStream inStream) throws IOException {
         ByteArrayOutputStream swapStream = new ByteArrayOutputStream();
-        byte[] buff = new byte[100];
+        // v1.0.156: FIX 2b — buffer আগে ছিল মাত্র 100 byte: বড়
+        // ফাইল (Settings.updatePackageLP-তে পড়া multi-MB package
+        // conf parcel) পড়তে হাজার হাজার native read লাগত, আর
+        // :black চালুর সময় main thread-এ সেই পড়াই 6006ms ব্লক
+        // হয়েছিল (v1.0.154 রিপোর্ট: Settings.scanPackage →
+        // updatePackageLP → FileUtils.toByteArray →
+        // Linux.readBytes)। 8192-byte buffer-এ একই কাজ ~80 গুণ
+        // কম read-এ হয়; আচরণ/ফলাফল হুবহু একই। (scanPackage
+        // synchronous-ই থাকে — BlackBoxSystem.startup() তার
+        // ঠিক পরেই pre-install যাচাইয়ে mPackages ব্যবহার করে,
+        // তাই scan পেছানো নিরাপদ নয়; ধীরগতির মূল কারণ ছিল এই
+        // buffer-ই।)
+        byte[] buff = new byte[8192];
         int rc;
-        while ((rc = inStream.read(buff, 0, 100)) > 0) {
+        while ((rc = inStream.read(buff, 0, buff.length)) > 0) {
             swapStream.write(buff, 0, rc);
         }
         return swapStream.toByteArray();
