@@ -1019,6 +1019,25 @@ fun ClonerAppScreen() {
             val mqttTraceAll = trace.lines().filter { it.contains("MqttTrace:") }
             sb.append("MqttTrace: মোট " + mqttTraceAll.size + "টি লাইন\n")
             if (mqttTraceAll.isNotEmpty()) sb.append(mqttTraceAll.takeLast(10).joinToString("\n") + "\n")
+            // v1.0.159: নোটিফিকেশন-তদন্তের নতুন ধাপগুলো। GmsBind =
+            // guest-এর bindService Google (gms/gsf) সার্ভিসের দিকে —
+            // resolved/outcome সহ (virtual = guest GMS-এ পৌঁছেছে,
+            // failed0 = caller নিঃশব্দে bind-ব্যর্থ পেয়েছে, real =
+            // আসল AMS-এ ফলথ্রু)। FcmReg = c2dm ছাড়া অন্য action-এ
+            // FCM রেজিস্ট্রেশনের broadcast চেষ্টা (target gms /
+            // cloudmessaging / firebase)। GmsSvc = Google প্যাকেজের
+            // সার্ভিসে startService — guest GMS নিজের checkin/GCM
+            // সার্ভিস তোলে কিনা তার প্রমাণ। তিনটাই ০ মানে katana
+            // FCM-এর দিকে কোনো দৃশ্যমান চেষ্টাই করেনি।
+            val gmsBindAll = trace.lines().filter { it.contains("GmsBind:") }
+            sb.append("GmsBind: মোট " + gmsBindAll.size + "টি লাইন\n")
+            if (gmsBindAll.isNotEmpty()) sb.append(gmsBindAll.takeLast(10).joinToString("\n") + "\n")
+            val fcmRegAll = trace.lines().filter { it.contains("FcmReg:") }
+            sb.append("FcmReg: মোট " + fcmRegAll.size + "টি লাইন\n")
+            if (fcmRegAll.isNotEmpty()) sb.append(fcmRegAll.takeLast(10).joinToString("\n") + "\n")
+            val gmsSvcAll = trace.lines().filter { it.contains("GmsSvc:") }
+            sb.append("GmsSvc: মোট " + gmsSvcAll.size + "টি লাইন\n")
+            if (gmsSvcAll.isNotEmpty()) sb.append(gmsSvcAll.takeLast(10).joinToString("\n") + "\n")
             // v1.0.98: ফোরগ্রাউন্ড নোটিফিকেশন যাচাই — "CloneMe — Chrome
             // চলছে" নোটিফিকেশনটা আসল সিস্টেমে পোস্ট হয়েছে কিনা। ফলাফল
             // fgs_check.txt-এ থাকে (ক্লোন চালু করার পর ৩০ সেকেন্ড পোল করা হয়)।
@@ -1112,8 +1131,8 @@ fun ClonerAppScreen() {
             // ফিক্স চলেছিল কিনা আর renderer কখন মরল। বিরল লাইনগুলো (setup/
             // transact) পুরো ট্রেস থেকে নাও — শেষ ২০-এ চাপা পড়ে যায় বলে
             // v1.0.82-84-তে "relroInfo nulled"/"transact code=" কখনো দেখা যায়নি।
-            val diagKeywords = listOf("SHUTDOWN HOOK", "System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed", "transact code=", "no-sandbox", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan", "NotifyPost", "NotifyCancel", "MainStall", "MainStallStack", "PushRx", "PushBcast", "PushSvc", "NotifyChannel", "MqttTrace", "BlackWake", "BlackInit", "BlackInitFail", "UnbindSvc", "LaunchTime", "SlowLaunch", "BcastReg", "SvcWait", "HookInit")
-            val rareKeywords = listOf("transact code=", "relroInfo nulled", "RELRO blocked", "no-sandbox", "setupConnection rewrite failed", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan", "NotifyPost", "NotifyCancel", "MainStall", "MainStallStack", "PushRx", "PushBcast", "PushSvc", "NotifyChannel", "MqttTrace", "BlackWake", "BlackInit", "BlackInitFail", "UnbindSvc", "LaunchTime", "SlowLaunch", "BcastReg", "SvcWait", "HookInit")
+            val diagKeywords = listOf("SHUTDOWN HOOK", "System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed", "transact code=", "no-sandbox", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan", "NotifyPost", "NotifyCancel", "MainStall", "MainStallStack", "PushRx", "PushBcast", "PushSvc", "NotifyChannel", "MqttTrace", "BlackWake", "BlackInit", "BlackInitFail", "UnbindSvc", "LaunchTime", "SlowLaunch", "BcastReg", "SvcWait", "HookInit", "GmsBind", "GmsSvc", "FcmReg")
+            val rareKeywords = listOf("transact code=", "relroInfo nulled", "RELRO blocked", "no-sandbox", "setupConnection rewrite failed", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan", "NotifyPost", "NotifyCancel", "MainStall", "MainStallStack", "PushRx", "PushBcast", "PushSvc", "NotifyChannel", "MqttTrace", "BlackWake", "BlackInit", "BlackInitFail", "UnbindSvc", "LaunchTime", "SlowLaunch", "BcastReg", "SvcWait", "HookInit", "GmsBind", "GmsSvc", "FcmReg")
             val rareLines = trace.lines().filter { line -> rareKeywords.any { k -> line.contains(k) } }.takeLast(30)
             // v1.0.96 রিপোর্ট-স্বাস্থ্য: একই লাইন বারবার আসে (যেমন
             // "foreground promoted" ২২ বার, শুধু সময়/PID আলাদা) — distinct()

@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-25, at version **1.0.158** (versionCode 143).
+> Last updated: 2026-11-25, at version **1.0.159** (versionCode 144).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -879,6 +879,122 @@ When they disagree, the user is right and the report is lying.
   named from source — the fix does not depend on it,
   since EVERY guest cold start pays the same init
   path.
+- **v1.0.159** — **Notifications: connection-level
+  tracing (NO behaviour change — an investigation
+  build, deliberately)** (owner's order 2026-11-25
+  18:31: "নোটিফিকেশন ঠিক কর", right after the
+  v1.0.158 delivery; the .158 popup verdict is still
+  his to give). The push chain was re-traced in code
+  this round; what is now PROVEN vs still unknown:
+  (a) **How a guest perceives GMS:**
+  `IPackageManagerProxy.GetPackageInfo` answers for
+  com.google.android.gms from the VIRTUAL PM only
+  (GMS is not in AppSystemEnv's open-package list, so
+  there is no real-PM fallthrough; not cloned →
+  null). The `PMCheck` trace only prints when the
+  target is virtually installed (tracePmCheck), and
+  the .157 report HAS PMCheck lines for
+  target=com.google.android.gms found=true — so
+  **GMS is installed as a clone in katana's user
+  slot**, with its real versionCode: every
+  GMS-availability check inside katana passes
+  against the GUEST GMS. Katana therefore registers
+  for FCM and has no reason to take a no-GMS
+  fallback. (b) **Where registration traffic goes:**
+  Firebase's registration leaves the app via
+  bindService to a com.google.android.gms component,
+  a c2dm REGISTER broadcast, or startService.
+  bindService lands in
+  `IActivityManagerProxy.BindServiceCommon`:
+  virtual resolution is plain manifest resolution
+  (`BPackageManagerService.resolveService` — no
+  permission checks anywhere in the service path);
+  resolved → virtual bind into the stub process
+  hosting guest GMS; unresolved-but-virtual →
+  **silently returns 0** (the caller sees a plain
+  bind failure and Firebase retries with backoff
+  forever). Until this build NONE of those outcomes
+  was traced for GMS targets. The c2dm broadcast
+  net (PushBcast) covers only the three c2dm
+  actions, yet the v1.0.156 crash proves katana's
+  firebase-iid thread DOES send a broadcast on
+  first registration — if that broadcast uses a
+  cloud-messaging action, the old net misses it
+  and PushBcast=0 overstates "nothing attempted".
+  (c) **Provider entanglement:** the
+  GetContentProvider hook forwards every authority
+  containing com.google.android.gms /
+  com.google.android.gsf to the REAL GMS/GSF
+  providers (host package as caller on Q+) — so
+  the guest GMS reads the REAL GMS's provider
+  state (gservices etc.); whether its own
+  checkin/MCS can authenticate independently of
+  the real GMS's identity is NOT provable from
+  static code. (d) **MQTT:** the dispatcher
+  already traces create/startCommand/destroy for
+  MqttServiceV2, but katana's BINDS to its own
+  MQTT service were invisible — the ~5 s-apart
+  startService/startCommand pairs in the .157
+  report cannot be separated into "cold-process
+  start latency" vs "bind failing and retrying"
+  without them. (e) The guest GMS clone exists
+  and its manifest receivers wake stub processes
+  (v1.0.154 report: gms.scheduler.DeviceState
+  Receiver, gms.gcm.DozeChangeReceiver), but
+  whether its checkin/GCM services ever START is
+  unobserved — GMS service starts were not
+  traced. **Changes (one engine file,
+  `fake/service/IActivityManagerProxy.java`, plus
+  report plumbing in MainActivity.kt; NO
+  BActivityManagerService changes; the .157/.158
+  fixes untouched):** (1) `GmsBind:` —
+  BindServiceCommon now traces every bind whose
+  target package is com.google.android.gms/gsf,
+  at every return point: from / target / action /
+  component / resolved / outcome (virtual =
+  reached the guest GMS through the virtual AMS;
+  failed0 = caller silently got bind-failure 0;
+  real = fell through to the real AMS under the
+  host identity). (2) The same return points trace
+  MQTT-class binds as `MqttTrace: bindService
+  from=… class=… outcome=…`. (3) `GmsSvc:` — the
+  StartService hook traces every startService
+  whose target is a Google package (gms/gsf/
+  vending), from any caller including guest GMS
+  itself, with resolved=. (4) `FcmReg:` — the
+  BroadcastIntent hook additionally traces
+  broadcasts targeted at com.google.android.gms
+  or carrying cloudmessaging/firebase actions
+  (c2dm actions excluded — they stay in
+  PushBcast). (5) Report: GmsBind/GmsSvc/FcmReg
+  added to both keyword lists and as totals +
+  last-10 blocks in the PushTrace section.
+  **Why no fix in this build:** every candidate
+  was weighed and none is provable — lying in the
+  PM ("GMS not installed" for katana) to force an
+  MQTT fallback is speculative (current FB builds'
+  fallback behaviour is not in our code) and would
+  break katana's other GMS consumers; a
+  keep-alive for the MQTT process has no
+  engine-side kill to defend against (its deaths
+  are LMK + the wake failures .157/.158 attack);
+  c2dm routing has nothing arriving to route
+  (the .151 fan-out stands). Shipping a guess
+  here risks the working FB/Messenger clones.
+  **First evidence to check in the next report:**
+  GmsBind lines for katana (present+virtual =
+  registration reaches guest GMS → the guest
+  GMS's liveness is the problem; present+failed0
+  = the bind itself is the break, with the exact
+  component named; absent = katana never even
+  binds → read with FcmReg); FcmReg lines (the
+  firebase-iid broadcast's real action); GmsSvc
+  lines with from=com.google.android.gms (guest
+  GMS starting its own services — pair with the
+  existing "handleBindApplication start/done:
+  com.google.android.gms" markers); MqttTrace
+  bindService outcomes for MqttServiceV2; and
+  NotifyPost, still the bottom line.
 
 ## 7. Open problems (start here)
 
@@ -1117,6 +1233,38 @@ When they disagree, the user is right and the report is lying.
    still 0, NotifyCancel 51. Unresolved: whether the receiver
    guard changed wake deaths at all — needs a clean .154+
    window with the smart_report.txt file, not a paste.
+   **Update (v1.0.159, 2026-11-25):** the owner ordered the
+   notifications fix directly. The code re-trace (§6 v1.0.159)
+   proved the shape of the dead end: GMS **is** cloned in
+   katana's user slot (PMCheck only prints for virtually
+   installed targets, and gms shows found=true), so katana's
+   GMS-availability checks pass against the guest GMS and it
+   registers for FCM instead of falling back — but whether
+   that registration bind reaches the guest GMS, silently
+   fails (BindServiceCommon returns 0 with no trace), or
+   falls through to the real AMS was unobserved, as were
+   the guest GMS's own service starts and the non-c2dm
+   action of the firebase-iid thread's first-registration
+   broadcast (proven to exist by the v1.0.156 crash).
+   v1.0.159 is a tracing-only build for exactly those three
+   hops: `GmsBind:` (bind outcomes to gms/gsf targets),
+   `FcmReg:` (registration broadcasts beyond the c2dm
+   trio), `GmsSvc:` (startService to Google packages,
+   incl. from guest GMS itself), plus MQTT-class binds
+   folded into `MqttTrace:`. No fix is claimed — the
+   candidate fixes (PM lie to force MQTT fallback,
+   MQTT keep-alive, c2dm routing) were all weighed and
+   none is provable yet; see the §6 entry for the
+   reasoning. **First evidence to check:** the PushTrace
+   section of the first .159 report — GmsBind outcome
+   for katana decides the next build: virtual → guest
+   GMS liveness work (pair with GmsSvc from=gms and
+   the gms bind markers); failed0 → the bind path
+   itself, component named in the line; no GmsBind and
+   no FcmReg at all → katana attempts nothing
+   FCM-shaped in-clone and suspicion moves to its
+   in-app push arming (e.g. its own settings/token
+   state), not to transport.
 
 7. **Fresh clone opens then closes immediately (second
    Facebook clone, katana user 1) — FIXED in v1.0.156,

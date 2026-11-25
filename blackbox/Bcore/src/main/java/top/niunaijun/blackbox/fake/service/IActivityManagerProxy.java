@@ -236,6 +236,7 @@ public class IActivityManagerProxy extends ClassInvocationStub {
             String resolvedType = (String) args[2];
             ResolveInfo resolveInfo = BlackBoxCore.getBPackageManager().resolveService(intent, 0, resolvedType, BActivityThread.getUserId());
             tracePushService(intent, resolveInfo);
+            traceGmsService(intent, resolveInfo);
             if (resolveInfo == null) {
                 return method.invoke(who, args);
             }
@@ -294,6 +295,46 @@ public class IActivityManagerProxy extends ClassInvocationStub {
                                     + " class=" + cls
                                     + " resolved=" + (resolveInfo != null));
                 }
+            } catch (Throwable ignored) { }
+        }
+
+        // v1.0.159: নোটিফিকেশন-তদন্ত (আচরণে কোনো বদল নয়)। Google
+        // প্যাকেজের (gms/gsf/vending) সার্ভিসে startService — যেকোনো
+        // caller থেকে, guest GMS নিজে হলেও। guest GMS-এর checkin /
+        // GCM / scheduler সার্ভিসগুলো সত্যিই চালু হয় কিনা এটাই তার
+        // একমাত্র AMS-স্তরের প্রমাণ: GmsSvc লাইন from=
+        // com.google.android.gms মানে guest GMS নিজের সার্ভিস চালু
+        // করছে (জীবিত থাকার লক্ষণ); একদম লাইন না থাকলে GMS clone
+        // কখনো নিজের push/checkin সার্ভিসই তোলেনি। resolved=false
+        // হলে এই hook আসল AMS-এ ফলথ্রু করে (host পরিচয়ে) — সেটাও
+        // লাইনে ধরা থাকে।
+        private static void traceGmsService(Intent intent, ResolveInfo resolveInfo) {
+            try {
+                String targetPkg = null;
+                if (intent.getComponent() != null) {
+                    targetPkg = intent.getComponent().getPackageName();
+                } else if (intent.getPackage() != null) {
+                    targetPkg = intent.getPackage();
+                } else if (resolveInfo != null && resolveInfo.serviceInfo != null) {
+                    targetPkg = resolveInfo.serviceInfo.packageName;
+                }
+                if (!"com.google.android.gms".equals(targetPkg)
+                        && !"com.google.android.gsf".equals(targetPkg)
+                        && !"com.android.vending".equals(targetPkg)) {
+                    return;
+                }
+                String cls = null;
+                if (intent.getComponent() != null) {
+                    cls = intent.getComponent().getClassName();
+                } else if (resolveInfo != null && resolveInfo.serviceInfo != null) {
+                    cls = resolveInfo.serviceInfo.name;
+                }
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "GmsSvc: from=" + BActivityThread.getAppPackageName()
+                                + " action=" + intent.getAction()
+                                + " class=" + cls
+                                + " target=" + targetPkg
+                                + " resolved=" + (resolveInfo != null));
             } catch (Throwable ignored) { }
         }
     }
@@ -426,8 +467,27 @@ public class IActivityManagerProxy extends ClassInvocationStub {
         // 0 মানে "bind হয়নি" (LoadedApk false দেয়, exception নয়) — Chrome
         // সেটা সামলে child প্রসেস আবার চালানোর চেষ্টা করতে পারে।
         boolean isVirtual = isVirtualServiceIntent(intent, userId);
+        // v1.0.159: নোটিফিকেশন-তদন্তের bind ট্রেস (আচরণে কোনো বদল নয়)।
+        // FCM রেজিস্ট্রেশন app প্রসেস ছাড়ে bindService দিয়ে —
+        // com.google.android.gms/gsf প্যাকেজের সার্ভিসে bind (GoogleApi /
+        // CloudMessaging Rpc transport) — অথবা app-এর নিজের MQTT
+        // সার্ভিসে bind দিয়ে। এতদিন এই bind-গুলোর ফলাফল কোথাও লেখা
+        // হতো না: virtual resolve হলো কিনা, redirect সফল হলো কিনা,
+        // নাকি নিঃশব্দে 0 (bind ব্যর্থ) ফিরল — PushBcast/PushSvc
+        // কোনোটাই তা বলে না। নিচের প্রতিটি return-এর আগে
+        // traceBindOutcome159 ফলাফলটা লিখে রাখে (GmsBind: /
+        // MqttTrace: bindService)।
+        final String bindTargetPkg159 = intent.getComponent() != null
+                ? intent.getComponent().getPackageName() : intent.getPackage();
+        final boolean gmsTarget159 = "com.google.android.gms".equals(bindTargetPkg159)
+                || "com.google.android.gsf".equals(bindTargetPkg159);
+        String bindCls159 = intent.getComponent() != null
+                ? intent.getComponent().getClassName() : null;
         try {
             ResolveInfo resolveInfo = BlackBoxCore.getBPackageManager().resolveService(intent, 0, resolvedType, userId);
+            if (bindCls159 == null && resolveInfo != null && resolveInfo.serviceInfo != null) {
+                bindCls159 = resolveInfo.serviceInfo.name;
+            }
             if (resolveInfo != null || AppSystemEnv.isOpenPackage(intent.getComponent())) {
                 Intent proxyIntent = BlackBoxCore.getBActivityManager().bindService(intent,
                         connection == null ? null : connection.asBinder(),
@@ -460,9 +520,11 @@ public class IActivityManagerProxy extends ClassInvocationStub {
                 if (proxyIntent != null && proxyIntent != intent) {
                     args[2] = proxyIntent;
                     try {
+                        traceBindOutcome159(intent, bindTargetPkg159, gmsTarget159, bindCls159, resolveInfo != null, "virtual");
                         return method.invoke(who, args);
                     } catch (Exception e) {
                         Slog.e(TAG, "BindServiceCommon: proxy bind failed", e);
+                        traceBindOutcome159(intent, bindTargetPkg159, gmsTarget159, bindCls159, resolveInfo != null, "failed0");
                         return 0;
                     }
                 }
@@ -470,20 +532,53 @@ public class IActivityManagerProxy extends ClassInvocationStub {
                 // এসেছে — যেমন stub প্রসেস চালু হতে দেরি হলে startProcessLocked
                 // null দেয়)। ভার্চুয়াল intent আসল AM-এ পাঠিও না।
                 Slog.w(TAG, "BindServiceCommon: redirect failed for " + intent.getComponent());
+                traceBindOutcome159(intent, bindTargetPkg159, gmsTarget159, bindCls159, resolveInfo != null, "failed0");
                 return 0;
             }
             if (isVirtual) {
                 Slog.w(TAG, "BindServiceCommon: unresolved virtual service " + intent.getComponent());
+                traceBindOutcome159(intent, bindTargetPkg159, gmsTarget159, bindCls159, false, "failed0");
                 return 0;
             }
+            traceBindOutcome159(intent, bindTargetPkg159, gmsTarget159, bindCls159, resolveInfo != null, "real");
             return method.invoke(who, args);
         } catch (Exception e) {
             Slog.e(TAG, "BindServiceCommon: Unexpected error", e);
             if (isVirtual) {
+                traceBindOutcome159(intent, bindTargetPkg159, gmsTarget159, bindCls159, false, "failed0");
                 return 0;
             }
+            traceBindOutcome159(intent, bindTargetPkg159, gmsTarget159, bindCls159, false, "real");
             return method.invoke(who, args);
         }
+    }
+
+    // v1.0.159: BindServiceCommon-এর ফলাফল ট্রেস (উপরে দেখো)। শুধু
+    // Google প্যাকেজের (gms/gsf) সার্ভিসে bind আর MQTT ক্লাসের
+    // সার্ভিসে bind-এই লেখে — বাকি bind-এ কোনো খরচ নেই। outcome:
+    // virtual = virtual AMS দিয়ে stub প্রসেসে bind গেছে; failed0 =
+    // caller নিঃশব্দে bind-ব্যর্থ (0) পেয়েছে; real = আসল AMS-এ
+    // ফলথ্রু হয়েছে (host পরিচয়ে আসল GMS-এ পৌঁছাতে পারে)।
+    private static void traceBindOutcome159(Intent intent, String targetPkg,
+            boolean gmsTarget, String cls, boolean resolved, String outcome) {
+        try {
+            String from = BActivityThread.getAppPackageName();
+            if (gmsTarget) {
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "GmsBind: from=" + from
+                                + " target=" + targetPkg
+                                + " action=" + intent.getAction()
+                                + " component=" + intent.getComponent()
+                                + " resolved=" + resolved
+                                + " outcome=" + outcome);
+            }
+            if (cls != null && cls.toLowerCase(java.util.Locale.US).contains("mqtt")) {
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "MqttTrace: bindService from=" + from
+                                + " class=" + cls
+                                + " outcome=" + outcome);
+            }
+        } catch (Throwable ignored) { }
     }
 
     private static boolean isVirtualServiceIntent(Intent intent, int userId) {
@@ -698,6 +793,7 @@ public class IActivityManagerProxy extends ClassInvocationStub {
             Intent intent = (Intent) args[intentIndex];
             String resolvedType = (String) args[intentIndex + 1];
             tracePushBroadcast(intent);
+            traceFcmReg(intent);
             // v1.0.156: FIX 1 — virtual AM-এর broadcast কল কোনোভাবেই
             // guest thread মারতে পারবে না। BActivityManager.
             // sendBroadcast এখন নিজে RuntimeException গিলে null
@@ -778,6 +874,44 @@ public class IActivityManagerProxy extends ClassInvocationStub {
                         "PushBcast: from=" + BActivityThread.getAppPackageName()
                                 + " action=" + action
                                 + " targetPkg=" + intent.getPackage()
+                                + " component=" + intent.getComponent());
+            } catch (Throwable ignored) { }
+        }
+
+        // v1.0.159: FCM রেজিস্ট্রেশনের দ্বিতীয় জাল (আচরণে কোনো বদল
+        // নয়)। tracePushBroadcast শুধু c2dm action তিনটে ধরে, কিন্তু
+        // v1.0.156-এর ক্র্যাশ প্রমাণ করে katana-র firebase-iid থ্রেড
+        // প্রথম রেজিস্ট্রেশনে broadcast পাঠায়ই — সেটা c2dm action
+        // না হলে (যেমন cloud-messaging transport) পুরনো জালে ধরা
+        // পড়ে না, আর PushBcast=0 ভুল সিদ্ধান্ত দেয়। এখানে ধরা
+        // হয়: target প্যাকেজ সরাসরি com.google.android.gms এমন
+        // যেকোনো broadcast, আর action-এ cloudmessaging/firebase
+        // থাকা broadcast (c2dm actionগুলো বাদে — ওগুলো PushBcast-এই
+        // থাকে, double নয়)। FcmReg লাইন থাকলে katana কোন
+        // transport-এ রেজিস্ট্রেশনের চেষ্টা করছে তা দেখা যাবে;
+        // GmsBind-এর সঙ্গে মিলিয়ে পড়তে হবে।
+        private static void traceFcmReg(Intent intent) {
+            try {
+                String action = intent.getAction();
+                if ("com.google.android.c2dm.intent.RECEIVE".equals(action)
+                        || "com.google.android.c2dm.intent.REGISTRATION".equals(action)
+                        || "com.google.android.c2dm.intent.REGISTER".equals(action)) {
+                    return;
+                }
+                String targetPkg = intent.getPackage();
+                if (targetPkg == null && intent.getComponent() != null) {
+                    targetPkg = intent.getComponent().getPackageName();
+                }
+                String a = action == null ? "" : action.toLowerCase(java.util.Locale.US);
+                if (!"com.google.android.gms".equals(targetPkg)
+                        && !a.contains("cloudmessaging")
+                        && !a.contains("firebase")) {
+                    return;
+                }
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "FcmReg: from=" + BActivityThread.getAppPackageName()
+                                + " action=" + action
+                                + " targetPkg=" + targetPkg
                                 + " component=" + intent.getComponent());
             } catch (Throwable ignored) { }
         }
