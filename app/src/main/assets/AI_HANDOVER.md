@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-24, at version **1.0.156** (versionCode 141).
+> Last updated: 2026-11-25, at version **1.0.157** (versionCode 142).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -710,6 +710,80 @@ When they disagree, the user is right and the report is lying.
   startup MainStall entries stop; UnbindAsync lines
   vs. any remaining :pN unbind stacks. The owner's
   verdict governs, as always.
+- **v1.0.157** — **Startup receiver-registration deferred
+  (the :black cold-wake / ANR-loop fix)** (device evidence:
+  the v1.0.156 smart report, 2026-11-25 10:31, plus the
+  owner's verdict 10:32 — **the popup is NOT fixed on
+  .156**: "CloneMe isn't responding" keeps returning even
+  after he closes it). What that report proved: (A) The
+  .156 fixes are all live (BlackInitAsync running=true,
+  UnbindSvc cached=true ×12, 8 KB scan buffer) and there
+  is NO new crash file — the only crash is the old
+  .155-era katana IID NPE (24 Nov 13:37), so the fresh-
+  clone broadcast crash did not recur. (B) But :black
+  still died with **INIT_FAILURE on SCREEN_OFF
+  (09:48:54) and SCREEN_ON (10:04:05) broadcast wakes**
+  — "user request after error: Broadcast of Intent …
+  cmp=…ProxyBroadcastReceiver" — amid repeated SIGNALED
+  deaths of main+:black pairs (09:50 / 10:08 / 10:18 /
+  10:29): the restart loop behind the returning popup.
+  (C) MainStall 09:09–09:14: main thread blocked
+  2,005–6,011 ms across main, :p0–:p6 and :black; the
+  :black stack is the smoking gun —
+  `SystemCallProvider.onCreate → BlackBoxSystem.startup
+  → BActivityManagerService.systemReady →
+  BroadcastManager.startup (line 77) → registerPackage
+  (line 89) → ContextImpl.registerReceiver →
+  registerReceiverWithFeature` binder wait, 6,011 ms.
+  Root cause: `BActivityManagerService.systemReady()`
+  does exactly one thing — `BroadcastManager.startup()`
+  — and that method synchronously registered a
+  ProxyBroadcastReceiver with the real AMS for EVERY
+  intent filter of EVERY guest manifest receiver, on
+  :black's main thread, inside process initialization
+  (SystemCallProvider.onCreate). A broadcast-wake cold
+  start therefore had to finish that whole binder loop
+  (plus the PMS package scan) before init could
+  complete; under memory pressure it blew the init
+  window and AMS killed :black with INIT_FAILURE, and
+  every death re-triggered the same slow startup across
+  the stub pool — the loop the owner experiences as the
+  endlessly returning popup. The screen wakes themselves
+  are legitimate (guest manifest receivers — e.g. GMS —
+  declare SCREEN_ON/OFF; the v1.0.151 fan-out delivers
+  them to running guests), so the registrations are
+  KEPT; only their timing moves. **Change (one file,
+  `core/system/am/BroadcastManager.java`; NO
+  BActivityManagerService changes):** `startup()` now
+  snapshots the package list (already a copy) and runs
+  the registerPackage loop on a daemon background
+  thread ("BcastReg"), tracing `BcastReg: deferred done
+  packages=N elapsed=Mms` at completion; `startup()`
+  itself returns immediately, so :black's init no longer
+  waits on the AMS registration loop. A duplicate guard
+  (`mRegisteredPackages`, held under the existing
+  mReceivers lock, maintained by onPackageInstalled /
+  onPackageUninstalled) keeps the deferred sweep and
+  the install path from ever registering a package
+  twice; the sweep skips packages uninstalled after the
+  snapshot, and one package's failure no longer aborts
+  the rest (the old synchronous throw would have broken
+  all of BlackBoxSystem.startup). Behaviour is
+  equivalent in steady state: every receiver still ends
+  up registered, just moments after startup instead of
+  during it. Deliberately NOT changed: the PMS package
+  scan stays synchronous (BlackBoxSystem.startup's
+  pre-install check consumes it — see the v1.0.156
+  note), and no screen-broadcast registration is
+  dropped. Companion change: `BcastReg` added to the
+  smart report's diagnosis/rare keyword lists
+  (MainActivity.kt). **First evidence to check in the
+  next report:** a `BcastReg: deferred done` line per
+  :black start (registration completed, short elapsed),
+  NO new ~6 s :black MainStall with the BroadcastManager
+  stack, INIT_FAILURE deaths on SCREEN_ON/OFF wakes
+  gone or sharply reduced, and — the verdict that
+  counts — the owner's popup count.
 
 ## 7. Open problems (start here)
 
@@ -829,6 +903,24 @@ When they disagree, the user is right and the report is lying.
    **First evidence to check:** BlackInitAsync lines,
    absence of new ~6 s startup MainStall entries across a
    long window with restarts, and the owner's popup count.
+   **Update (v1.0.156 report + owner verdict, 2026-11-25):**
+   .156's three legs are live (BlackInitAsync, UnbindSvc
+   cached=true ×12) and the startup MainStall entries in
+   the old doCreate/scan stacks are gone — but the popup
+   STILL returns (owner, 10:32), and the report shows why:
+   :black still died INIT_FAILURE on SCREEN_OFF (09:48:54)
+   and SCREEN_ON (10:04:05) broadcast wakes, and its main
+   thread blocked 6,011 ms in the one heavy startup step
+   .156 did not touch — BroadcastManager.startup's
+   synchronous registerReceiver loop (called from
+   BAMS.systemReady inside SystemCallProvider.onCreate,
+   i.e. during :black process init). v1.0.157 defers that
+   registration to a background thread (see §6) — the
+   wake itself is legitimate and kept; the init weight
+   was the failure. **First evidence to check:**
+   `BcastReg: deferred done` lines, no new :black
+   BroadcastManager-stack stalls, INIT_FAILURE wake
+   deaths gone/reduced, and the owner's popup count.
 6. **Per-clone notifications unreliable — pinned symptom: the Facebook
    clone (com.facebook.katana) receives NO notifications at all, while
    the ORIGINAL Facebook app (outside CloneMe) notifies normally**
@@ -925,6 +1017,13 @@ When they disagree, the user is right and the report is lying.
    check:** create/open a fresh clone on .156 — it must
    reach and STAY on its login screen; BcastGuard lines in
    the report show the guard absorbing the failure.
+   **Update (2026-11-25):** the v1.0.156 report contains
+   NO new crash file — the only crash is the old .155-era
+   IID NPE (24 Nov 13:37) — so the crash did not recur in
+   that window; katana launches at 08:21 / 09:10 completed
+   with normal LaunchTime lines. The owner's explicit
+   stay-open verdict for the second clone is still the
+   deciding test.
 
 **Fixed in v1.0.150 — do not chase again:** the com.facebook.aura
 "Missing ComponentInfo!" crash (malformed ResolveInfo from the virtual

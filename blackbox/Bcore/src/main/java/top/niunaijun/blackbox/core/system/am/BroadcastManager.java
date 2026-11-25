@@ -9,8 +9,10 @@ import android.os.Message;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import top.niunaijun.blackbox.BlackBoxCore;
 import top.niunaijun.blackbox.core.system.pm.BPackage;
@@ -35,6 +37,10 @@ public class BroadcastManager implements PackageMonitor {
     private final BPackageManagerService mPms;
     private final Map<String, List<BroadcastReceiver>> mReceivers = new HashMap<>();
     private final Map<String, PendingResultData> mReceiversData = new HashMap<>();
+    // v1.0.157: কোন প্যাকেজগুলোর receiver ইতিমধ্যে register হয়েছে —
+    // mReceivers লকের ভেতরেই রাখা হয়। deferred startup sweep আর
+    // onPackageInstalled একই প্যাকেজ দুইবার register করা ঠেকায়।
+    private final Set<String> mRegisteredPackages = new HashSet<>();
 
     private final Handler mHandler = new Handler(Looper.getMainLooper()) {
         @Override
@@ -71,15 +77,67 @@ public class BroadcastManager implements PackageMonitor {
 
     public void startup() {
         mPms.addPackageMonitor(this);
-        List<BPackageSettings> bPackageSettings = mPms.getBPackageSettings();
-        for (BPackageSettings bPackageSetting : bPackageSettings) {
-            BPackage bPackage = bPackageSetting.pkg;
-            registerPackage(bPackage);
-        }
+        final List<BPackageSettings> bPackageSettings = mPms.getBPackageSettings();
+        // v1.0.157: receiver registration আর startup-এর critical path-এ
+        // নেই। আগে এই loop-টা :black-এর main thread-এ synchronous
+        // চলত (SystemCallProvider.onCreate → BlackBoxSystem.startup →
+        // BAMS.systemReady → এখানে) — প্রতিটি guest receiver-এর
+        // প্রতিটি filter-এর জন্য একটা করে registerReceiver binder
+        // call আসল AMS-এ। v1.0.156-এর রিপোর্টে :black main thread
+        // ঠিক এই stack-এ 6,011ms আটকে ছিল, আর SCREEN_ON/OFF
+        // broadcast-wake-এ :black INIT_FAILURE-এ মরছিল (09:48:54 /
+        // 10:04:05, 2026-11-25): process init-এর window-তে startup
+        // শেষই হতো না। এখন loop-টা background thread-এ চলে —
+        // startup() সাথে সাথে ফেরত আসে, registration একটু পরেই
+        // সম্পূর্ণ হয় (শেষে BcastReg ট্রেস)। আচরণ একই: সব receiver
+        // শেষ পর্যন্ত register হয়; onPackageInstalled পথও একই
+        // registerPackage-ই ব্যবহার করে (নিচের duplicate guard
+        // দুই পথের race ঠেকায়)।
+        Thread registerThread = new Thread(() -> {
+            long startMs = System.currentTimeMillis();
+            int registered = 0;
+            try {
+                for (BPackageSettings bPackageSetting : bPackageSettings) {
+                    try {
+                        BPackage bPackage = bPackageSetting.pkg;
+                        if (bPackage == null) {
+                            continue;
+                        }
+                        // snapshot নেওয়ার পর package uninstall হয়ে
+                        // গেলে তার receiver আর register কোরো না।
+                        if (mPms.getBPackageSetting(bPackage.packageName) == null) {
+                            continue;
+                        }
+                        registerPackage(bPackage);
+                        registered++;
+                    } catch (Throwable e) {
+                        // একটা package-এর ব্যর্থতা বাকিগুলোকে থামাবে না
+                        // (আগের synchronous পথে একটা throw পুরো
+                        // BlackBoxSystem.startup-ই ভেঙে দিত)।
+                        Slog.e(TAG, "Deferred registerPackage failed", e);
+                    }
+                }
+            } catch (Throwable e) {
+                Slog.e(TAG, "Deferred receiver registration failed", e);
+            }
+            try {
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "BcastReg: deferred done packages=" + registered
+                                + " elapsed=" + (System.currentTimeMillis() - startMs) + "ms");
+            } catch (Throwable ignored) { }
+        }, "BcastReg");
+        registerThread.setDaemon(true);
+        registerThread.start();
     }
 
     private void registerPackage(BPackage bPackage) {
         synchronized (mReceivers) {
+            // v1.0.157: duplicate guard — deferred startup sweep আর
+            // onPackageInstalled একই package দুইবার register করবে না
+            // (দুইবার হলে প্রতিটি broadcast guest-এ দুইবার যেত)।
+            if (!mRegisteredPackages.add(bPackage.packageName)) {
+                return;
+            }
             Slog.d(TAG, "register: " + bPackage.packageName + ", size: " + bPackage.receivers.size());
             for (BPackage.Activity receiver : bPackage.receivers) {
                 List<BPackage.ActivityIntentInfo> intents = receiver.intents;
@@ -136,6 +194,9 @@ public class BroadcastManager implements PackageMonitor {
                     }
                 }
                 mReceivers.remove(packageName);
+                // v1.0.157: guard set থেকেও সরাও — নইলে reinstall-এর
+                // পর registerPackage skip হয়ে যাবে।
+                mRegisteredPackages.remove(packageName);
             }
         }
     }
@@ -144,6 +205,9 @@ public class BroadcastManager implements PackageMonitor {
     public void onPackageInstalled(String packageName, int userId) {
         synchronized (mReceivers) {
             mReceivers.remove(packageName);
+            // v1.0.157: নতুন install-এর receiver নতুন করে register
+            // হতে হবে — guard set-এর পুরনো entry সরাও।
+            mRegisteredPackages.remove(packageName);
             BPackageSettings bPackageSetting = mPms.getBPackageSetting(packageName);
             if (bPackageSetting != null) {
                 registerPackage(bPackageSetting.pkg);
