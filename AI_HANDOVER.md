@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-25, at version **1.0.157** (versionCode 142).
+> Last updated: 2026-11-25, at version **1.0.158** (versionCode 143).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -784,6 +784,101 @@ When they disagree, the user is right and the report is lying.
   stack, INIT_FAILURE deaths on SCREEN_ON/OFF wakes
   gone or sharply reduced, and — the verdict that
   counts — the owner's popup count.
+- **v1.0.158** — **Guest-process wake budgets cut
+  (popup fix round 2: the :pN cold-start init window)**
+  (device evidence: the v1.0.157 smart report,
+  2026-11-25 17:31, session 17:03–17:31, plus the
+  owner's verdict 17:37 — **the popup STILL came on
+  .157**). What .157 proved: the BroadcastManager
+  stall is gone (no registerReceiver stack), :black
+  now SURVIVES SCREEN_OFF (17:31:25) and SCREEN_ON
+  (17:31:40) wakes (BlackWake lines, no :black death),
+  no Java crashes, katana launches in 80–152 ms. What
+  remains: **:p0 died INIT_FAILURE at 17:31:38 on the
+  SCREEN_OFF wake** ("user request after error:
+  Broadcast of Intent { act=SCREEN_OFF …
+  cmp=com.example.cloner/X.0Agj }", rss ~1,041,096
+  kB), amid LOW_MEMORY kills of :p3/:p5 in the same
+  minutes — and the only two MainStalls (~2 s, both in
+  :p2) name the guest startup path itself: (a)
+  `ClonerApp.attachBaseContext → BlackBoxCore.
+  doAttachBaseContext (1067) → HookManager.init (228)
+  → injectAll (257) → ClassInvocationStub.injectHook
+  (58) → initAnnotation (71) → Class.getAnnotation →
+  AnnotationMember.<init>`; (b) `ClonerApp.onCreate →
+  BlackBoxCore.doCreate (1089) →
+  ensureProperInitialization (1955) →
+  ServiceManager.initBlackManager (71) →
+  BlackBoxCore.areServicesAvailable (304) →
+  CountDownLatch.await` — the main thread PARKED.
+  Root cause: a guest stub process cold-started by
+  AMS (here, for a broadcast delivery) must finish
+  the FULL client init on its main thread before it
+  can answer: two native waits with 8 s caps in
+  setEssentialProperties, the ~90-stub hook injection
+  (in this fork `isBlackProcess()` means BAppClient —
+  BlackBoxCore:1367 — so guests take the full list),
+  NativeCore.init waited up to 8 s in
+  ensureProperInitialization, and the 8-service fetch
+  parking the main thread up to 6 s on the latch. The
+  caps alone sum to ~30 s; under memory pressure the
+  real cost blows the init window, AMS kills the
+  process (INIT_FAILURE), and a main thread parked
+  for seconds during a broadcast-triggered start is
+  what raises the package's "isn't responding"
+  dialog. The virtual broadcast path itself never
+  cold-starts a guest (BActivityManagerService.
+  scheduleBroadcastReceiver only delivers to
+  processes with a live bActivityThread), so nothing
+  engine-side needs a guest's full init before it can
+  *start* — and both waits already degrade by design
+  (latch timeout → proceed, missing binders lazy-load
+  later via getServiceInternal; native timeout →
+  "skipped/timed out, continuing", the native work
+  keeps running on its daemon thread). **Changes
+  (NO BActivityManagerService changes; the .157
+  BroadcastManager fix untouched):** (1)
+  `BlackBoxCore.areServicesAvailable()` — for guest
+  (BAppClient) processes the service-latch budget is
+  1500 ms instead of 6000 ms (Main/Server unchanged);
+  a `SvcWait:` trace records proc type, budget,
+  elapsed, done, and cached count (n/8). (2)
+  `BlackBoxCore.ensureProperInitialization()` — for
+  guest processes the NativeCore.init wait is
+  3000 ms instead of 8000 ms (others unchanged). (3)
+  `HookManager.injectAll()` — timing trace only
+  (`HookInit: stubs=N elapsed=Mms`); injection
+  semantics deliberately NOT changed this round (no
+  compiler to verify a restructure, and every guest
+  entry point depends on the hooks being complete) —
+  the trace exists so the next report shows whether
+  injection is now the dominant remaining cost. (4)
+  `SvcWait` + `HookInit` added to the smart report's
+  diagnosis/rare keyword lists (MainActivity.kt).
+  When :black is healthy the 8 parallel service calls
+  return in well under 1.5 s, so normal launches are
+  unchanged; the budgets only bite when :black is
+  cold/slow — exactly the wake-under-pressure case
+  that was dying. **First evidence to check in the
+  next report:** SvcWait lines for client processes
+  (budget=1500ms; done=true with a healthy :black;
+  done=false + low cached count = the budget fired
+  and lazy-load took over), HookInit elapsed for :pN
+  processes, NO new :pN INIT_FAILURE on SCREEN_ON/OFF
+  wakes, and — the verdict that counts — the owner's
+  popup count. **Honest limits:** .158 does not
+  reduce hook-injection cost, does not touch the
+  attach-path native waits in setEssentialProperties
+  (8 s caps ×2), and cannot fix LOW_MEMORY reaping
+  itself; if the popup persists and HookInit shows
+  injection dominating, that is the .159 target. Also
+  unidentified: the exit record's component
+  `com.example.cloner/X.0Agj` is an R8-obfuscated
+  name and no mapping file ships in the repo, so the
+  exact AMS-side component that started :p0 cannot be
+  named from source — the fix does not depend on it,
+  since EVERY guest cold start pays the same init
+  path.
 
 ## 7. Open problems (start here)
 
@@ -921,6 +1016,30 @@ When they disagree, the user is right and the report is lying.
    `BcastReg: deferred done` lines, no new :black
    BroadcastManager-stack stalls, INIT_FAILURE wake
    deaths gone/reduced, and the owner's popup count.
+   **Update (v1.0.157 report + owner verdict,
+   2026-11-25):** .157's fix is proven for :black
+   (BcastReg deferred registration; :black survives
+   both screen wakes; the old 6 s BroadcastManager
+   stack is gone; no crashes; fast launches) — and
+   the popup STILL came (owner, 17:37). The failure
+   has moved into the GUEST processes: :p0 died
+   INIT_FAILURE on the SCREEN_OFF wake (17:31:38,
+   ~1 GB rss, amid LOW_MEMORY kills), and the only
+   two MainStalls (~2 s, :p2) name the guest startup
+   path — HookManager.injectAll's annotation scan
+   during attachBaseContext, and the
+   areServicesAvailable latch park during doCreate.
+   v1.0.158 cuts the guest budgets on those waits
+   (latch 6 s → 1.5 s, NativeCore.init wait 8 s →
+   3 s, guests only) and adds SvcWait / HookInit
+   traces (see §6). **First evidence to check:**
+   SvcWait + HookInit lines in the next report, any
+   :pN INIT_FAILURE entries on screen wakes, and the
+   owner's popup count. If HookInit shows injection
+   now dominates the guest init window, .159 goes
+   after the injection cost itself. The popup is
+   still OPEN — narrowed to the guest wake path,
+   not fixed.
 6. **Per-clone notifications unreliable — pinned symptom: the Facebook
    clone (com.facebook.katana) receives NO notifications at all, while
    the ORIGINAL Facebook app (outside CloneMe) notifies normally**

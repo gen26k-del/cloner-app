@@ -251,6 +251,15 @@ public class HookManager {
     }
 
     void injectAll() {
+        // v1.0.158: injection-এর মোট সময় ট্রেসে রাখো। .157
+        // রিপোর্টের stack (a) দেখিয়েছে guest cold start-এ main
+        // thread এই loop-এর ভেতরে ClassInvocationStub.initAnnotation
+        // → Class.getAnnotation → AnnotationMember.<init>-এ ~২s
+        // আটকে থাকে। .158-এ injection-এর semantics বদলানো হয়নি
+        // (ঝুঁকি বেশি, compiler নেই) — শুধু মাপা হচ্ছে, যাতে পরের
+        // রিপোর্টে HookInit লাইন দেখে বোঝা যায় latch/native
+        // বাজেট কমানোর পর এখন injection-ই প্রধান খরচ কিনা।
+        long injectStartMs158 = System.currentTimeMillis();
         for (IInjectHook value : mInjectors.values()) {
             try {
                 Slog.d(TAG, "hook: " + value);
@@ -261,6 +270,11 @@ public class HookManager {
                 handleHookError(value, e);
             }
         }
+        try {
+            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                    "HookInit: stubs=" + mInjectors.size()
+                            + " elapsed=" + (System.currentTimeMillis() - injectStartMs158) + "ms");
+        } catch (Throwable ignored) { }
     }
 
     

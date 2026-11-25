@@ -298,14 +298,46 @@ public class BlackBoxCore extends ClientConfiguration {
                 });
             }
             pool.shutdown();
+            // v1.0.158: guest (BAppClient, :pN) প্রসেসে latch-এর
+            // বাজেট ৬s → ১.৫s। কারণ: .157-এর রিপোর্টে (2026-11-25
+            // 17:31) :p0 SCREEN_OFF wake-এ INIT_FAILURE-এ মরেছে —
+            // broadcast-এ জাগা guest প্রসেসের init window সবচেয়ে
+            // ছোট, অথচ doCreate → ensureProperInitialization →
+            // initBlackManager → এখানে main thread পুরো ৬s পর্যন্ত
+            // latch-এ park থাকে (রিপোর্টের stack (b): CountDownLatch
+            // .await, BlackBoxCore:304)। এই অপেক্ষা correctness gate
+            // নয় — timeout হলেও নিচে mServicesInitialized=true হয়
+            // আর না-আসা binder পরে getService()→getServiceInternal
+            // দিয়ে lazy-load হয় (আজকের slow-:black আচরণই)। :black
+            // সুস্থ থাকলে ৮টা parallel call কয়েকশো ms-এই ফেরে, তাই
+            // ১.৫s বাজেট স্বাভাবিক wake-এ কিছুই বদলায় না; :black
+            // ধীর/ঠান্ডা হলেই শুধু guest main thread ~৪.৫s আগে
+            // ছাড়া পায়। Main/Server প্রসেসে বাজেট আগের মতোই ৬s।
+            final boolean guestProc158 = isBlackProcess();
+            final long latchBudgetMs158 = guestProc158 ? 1500 : 6000;
+            final long latchStartMs158 = System.currentTimeMillis();
+            boolean latchDone158;
             try {
-                // মোট ৬ সেকেন্ডের বেশি আটকে থাকলে ANR-ই হবে — যা পাওয়া
-                // গেছে তাই নিয়ে এগোও, বাকিগুলো পরে lazy-load হবে।
-                latch.await(6, TimeUnit.SECONDS);
+                latchDone158 = latch.await(latchBudgetMs158, TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                latchDone158 = false;
             }
-            
+            try {
+                int cached158 = 0;
+                for (String serviceName : serviceNames) {
+                    IBinder b158 = mServices.get(serviceName);
+                    if (b158 != null && b158.isBinderAlive()) {
+                        cached158++;
+                    }
+                }
+                traceInit(getContext(), "SvcWait: proc=" + (guestProc158 ? "client" : "other")
+                        + " budget=" + latchBudgetMs158 + "ms"
+                        + " elapsed=" + (System.currentTimeMillis() - latchStartMs158) + "ms"
+                        + " done=" + latchDone158
+                        + " cached=" + cached158 + "/" + serviceNames.length);
+            } catch (Throwable ignored) { }
+
             Slog.d(TAG, "Services initialized successfully");
             mServicesInitialized = true;
             
@@ -1919,7 +1951,21 @@ public class BlackBoxCore extends ClientConfiguration {
             
             try {
                 // NativeCore.init() আটকে গেলে পুরো doCreate ব্লক হয় — timeout সুরক্ষা
-                boolean ok = runNativeWithTimeout("init", 8000);
+                // v1.0.158: guest (BAppClient) প্রসেসে অপেক্ষা ৮s → ৩s।
+                // timeout হলে এই পথ এমনিতেই "skipped/timed out,
+                // continuing" বলে এগিয়ে যায় (নিচের Slog) আর native
+                // কাজটা daemon thread-এ চলতেই থাকে — শুধু main
+                // thread-এর park ছোট হয়, যাতে broadcast-wake guest
+                // তার init window-এর ভেতরে AMS-কে সাড়া দিতে পারে
+                // (.157 রিপোর্টের :p0 INIT_FAILURE, 2026-11-25
+                // 17:31:38)। Main/Server প্রসেসে আগের মতোই ৮s।
+                long nativeBudget158 = 8000;
+                try {
+                    if (BlackBoxCore.get().isBlackProcess()) {
+                        nativeBudget158 = 3000;
+                    }
+                } catch (Throwable ignored) { }
+                boolean ok = runNativeWithTimeout("init", nativeBudget158);
                 Slog.d(TAG, ok ? "NativeCore initialized successfully"
                                : "NativeCore init skipped/timed out, continuing");
                 traceInit(sContext, "ensureProperInitialization after NativeCore.init");
