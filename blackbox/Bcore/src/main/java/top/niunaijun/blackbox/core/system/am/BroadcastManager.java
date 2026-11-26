@@ -77,7 +77,6 @@ public class BroadcastManager implements PackageMonitor {
 
     public void startup() {
         mPms.addPackageMonitor(this);
-        final List<BPackageSettings> bPackageSettings = mPms.getBPackageSettings();
         // v1.0.157: receiver registration আর startup-এর critical path-এ
         // নেই। আগে এই loop-টা :black-এর main thread-এ synchronous
         // চলত (SystemCallProvider.onCreate → BlackBoxSystem.startup →
@@ -97,6 +96,12 @@ public class BroadcastManager implements PackageMonitor {
             long startMs = System.currentTimeMillis();
             int registered = 0;
             try {
+                // v1.0.161: the PM package scan is itself deferred
+                // (PmReady thread) — wait for it before taking the
+                // snapshot, or this sweep would see an empty package
+                // list and register no guest receivers at all.
+                mPms.awaitReady(20000);
+                final List<BPackageSettings> bPackageSettings = mPms.getBPackageSettings();
                 for (BPackageSettings bPackageSetting : bPackageSettings) {
                     try {
                         BPackage bPackage = bPackageSetting.pkg;

@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-26, at version **1.0.160** (versionCode 145).
+> Last updated: 2026-11-26, at version **1.0.161** (versionCode 146).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -1033,6 +1033,52 @@ When they disagree, the user is right and the report is lying.
   onReceive/scanPackage/save, :black INIT_FAILURE wake
   deaths gone or sharply reduced, and — decisive as always —
   the owner's popup count.
+- **v1.0.161** — **Popup fix round 4: :black init no longer
+  runs the package scan** (device evidence: the .160
+  smart_report.txt of 2026-11-26 20:10 + the owner's verdict
+  the same evening — **the popup STILL comes on .160**; the
+  owner ordered this build directly). What the .160 report
+  proved: (A) all 8 clones exist (katana ×2, orca, WhatsApp,
+  Chrome, Telegram, aura ×2) — the .159 report #2 "কোনো
+  ক্লোন নেই" line was a misread; (B) NO new MainStall after
+  the 17:13 install — the 11 listed stalls are all .159-era
+  (03:08–12:57), so the .160 scan-off-main fix holds in the
+  trace; (C) BUT :black still died INIT_FAILURE on screen
+  wakes on .160 (19:32 SCREEN_OFF, 19:35 SCREEN_ON, 19:38
+  SCREEN_ON, 20:10 SCREEN_OFF, plus main-process SIGNALED
+  deaths 19:37 / 20:08) — the wake-death/restart churn is
+  the remaining popup suspect; (D) no clone was opened after
+  the install, so the PushTrace/GmsBind evidence is STILL
+  empty — notifications remain unanswered, and no PkgScan
+  line appeared (the PACKAGE_ADDED receiver never fired in
+  the window). Root cause chased in code: :black binding
+  runs SystemCallProvider.onCreate →
+  BlackBoxSystem.startup() → every service's systemReady()
+  synchronously on the main thread, and
+  BPackageManagerService.systemReady() still ran the FULL
+  package scan + component-resolver rebuild inline (the
+  .160 entry above kept it synchronous "for startup
+  ordering") — so on wakes the process could not finish
+  binding inside the window. Changes
+  (BActivityManagerService untouched, per the standing
+  rule): (1) BPackageManagerService.systemReady() now
+  starts a daemon "PmReady" thread that runs the exact
+  same scan + resolver rebuild, then counts down a ready
+  latch and traces `PmReady: deferred done packages=N
+  elapsed=Xms` (keyword added to the smart report's diag
+  lists); a new public awaitReady(timeoutMs) exposes the
+  latch. (2) BroadcastManager.startup()'s deferred BcastReg
+  thread now awaits PM ready (20 s) BEFORE snapshotting
+  the package list — otherwise it would snapshot an empty
+  list and register no guest receivers. (3) BlackBoxSystem
+  .startup()'s pre-install pass (which reads isInstalled)
+  now runs on a "PreInstall" daemon thread that awaits
+  the same latch, instead of blocking onCreate. **First
+  evidence to check:** PmReady lines present; BcastReg
+  still completes with packages=15; :black INIT_FAILURE
+  wake deaths gone or sharply reduced across a full
+  evening of screen on/off; and — decisive as always —
+  the owner's popup count on .161.
 
 ## 7. Open problems (start here)
 
@@ -1207,6 +1253,21 @@ When they disagree, the user is right and the report is lying.
    save conditional (see §6). **First evidence to
    check:** PkgScan traces, no scan-path MainStall
    stacks, and the owner's popup count on .160.
+   **Update (v1.0.160 verdict + v1.0.161, 2026-11-26):**
+   the owner reports the popup STILL comes on .160.
+   Its report shows no new MainStall after install,
+   but :black still dies INIT_FAILURE on screen
+   wakes — because the same full package scan still
+   ran synchronously inside :black's process init
+   (BPackageManagerService.systemReady, called from
+   SystemCallProvider.onCreate during binding).
+   v1.0.161 defers that scan to a PmReady background
+   thread with a ready latch for its two ordered
+   consumers (BroadcastManager registration,
+   BlackBoxSystem pre-install). **First evidence to
+   check:** PmReady traces, :black wake deaths in
+   the death-records section, and the owner's popup
+   count on .161.
 6. **Per-clone notifications unreliable — pinned symptom: the Facebook
    clone (com.facebook.katana) receives NO notifications at all, while
    the ORIGINAL Facebook app (outside CloneMe) notifies normally**

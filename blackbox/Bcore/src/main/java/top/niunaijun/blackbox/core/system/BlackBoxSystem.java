@@ -67,16 +67,26 @@ public class BlackBoxSystem {
             service.systemReady();
         }
 
-        List<String> preInstallPackages = AppSystemEnv.getPreInstallPackages();
-        for (String preInstallPackage : preInstallPackages) {
-            try {
-                if (!BPackageManagerService.get().isInstalled(preInstallPackage, BUserHandle.USER_ALL)) {
-                    PackageInfo packageInfo = BlackBoxCore.getPackageManager().getPackageInfo(preInstallPackage, 0);
-                    BPackageManagerService.get().installPackageAsUser(packageInfo.applicationInfo.sourceDir, InstallOption.installBySystem(), BUserHandle.USER_ALL);
+        // v1.0.161: the pre-install pass reads the package list, which
+        // is now loaded on BPackageManagerService's PmReady thread —
+        // run this pass on a background thread that waits for the
+        // scan, instead of blocking startup (SystemCallProvider
+        // .onCreate) on it.
+        Thread preInstallThread = new Thread(() -> {
+            BPackageManagerService.get().awaitReady(20000);
+            List<String> preInstallPackages = AppSystemEnv.getPreInstallPackages();
+            for (String preInstallPackage : preInstallPackages) {
+                try {
+                    if (!BPackageManagerService.get().isInstalled(preInstallPackage, BUserHandle.USER_ALL)) {
+                        PackageInfo packageInfo = BlackBoxCore.getPackageManager().getPackageInfo(preInstallPackage, 0);
+                        BPackageManagerService.get().installPackageAsUser(packageInfo.applicationInfo.sourceDir, InstallOption.installBySystem(), BUserHandle.USER_ALL);
+                    }
+                } catch (PackageManager.NameNotFoundException ignored) {
                 }
-            } catch (PackageManager.NameNotFoundException ignored) {
             }
-        }
+        }, "PreInstall");
+        preInstallThread.setDaemon(true);
+        preInstallThread.start();
         
         JarManager.getInstance().initializeAsync();
         

@@ -27,8 +27,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import top.niunaijun.blackbox.BlackBoxCore;
@@ -903,12 +905,53 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
         return new ArrayList<>(mPackages.values());
     }
 
+    // v1.0.161: the full package scan + resolver rebuild used to run
+    // synchronously here, on :black's main thread, inside
+    // SystemCallProvider.onCreate (process binding). One scan pass
+    // blocked 5.1s in the .159 report, and on SCREEN_ON/OFF wakes
+    // :black kept dying INIT_FAILURE because binding never finished
+    // inside the window (.160 report: deaths at 19:32 / 19:35 /
+    // 19:38 / 20:10, all on screen wakes). The scan now runs on a
+    // daemon "PmReady" thread; consumers that must see the full
+    // package list (BroadcastManager's deferred registration,
+    // BlackBoxSystem's pre-install pass) await the latch on their
+    // own background threads.
+    private final CountDownLatch mReadyLatch = new CountDownLatch(1);
+    private volatile boolean mReady = false;
+
+    public boolean awaitReady(long timeoutMs) {
+        if (mReady) {
+            return true;
+        }
+        try {
+            return mReadyLatch.await(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return mReady;
+        }
+    }
+
     @Override
     public void systemReady() {
-        mSettings.scanPackage();
-        for (BPackageSettings value : mPackages.values()) {
-            mComponentResolver.removeAllComponents(value.pkg);
-            mComponentResolver.addAllComponents(value.pkg);
-        }
+        Thread pmReadyThread = new Thread(() -> {
+            long start = System.currentTimeMillis();
+            try {
+                mSettings.scanPackage();
+                for (BPackageSettings value : mPackages.values()) {
+                    mComponentResolver.removeAllComponents(value.pkg);
+                    mComponentResolver.addAllComponents(value.pkg);
+                }
+            } catch (Throwable e) {
+                e.printStackTrace();
+            } finally {
+                mReady = true;
+                mReadyLatch.countDown();
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "PmReady: deferred done packages=" + mPackages.size()
+                                + " elapsed=" + (System.currentTimeMillis() - start) + "ms");
+            }
+        }, "PmReady");
+        pmReadyThread.setDaemon(true);
+        pmReadyThread.start();
     }
 }
