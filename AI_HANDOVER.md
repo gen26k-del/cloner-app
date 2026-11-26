@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-25, at version **1.0.159** (versionCode 144).
+> Last updated: 2026-11-26, at version **1.0.160** (versionCode 145).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -995,6 +995,44 @@ When they disagree, the user is right and the report is lying.
   com.google.android.gms" markers); MqttTrace
   bindService outcomes for MqttServiceV2; and
   NotifyPost, still the bottom line.
+- **v1.0.160** — **Popup fix round 3: the package-scan path**
+  (device evidence: the .159 smart_report.txt of 2026-11-26
+  16:21, pasted in full by the owner; owner ordered this
+  build directly: "তাড়াতাড়ি ঠিক করে দাও"). What that report
+  proved: (A) the notification traces are STILL empty
+  (GmsBind/FcmReg/GmsSvc/MqttTrace all 0) because the report
+  contains NO clone activity at all — it even prints "কোনো
+  ক্লোন নেই" — so the .159 evidence is still outstanding;
+  do not treat .160 as a notifications build. (B) The popup
+  path is now stack-proven end to end: 11 MainStalls of
+  4.6–6.5 s across the day in main and :black, and BOTH
+  stacks name the package-scan path —
+  BPackageManagerService.mPackageChangedHandler.onReceive
+  (PACKAGE_ADDED/REMOVED, delivered on the main thread) →
+  Settings.scanPackage → updatePackageLP, blocking once in
+  FileUtils.toByteArray (whole conf read) and once in
+  BPackageSettings.save → BPackage.writeToParcel (whole
+  package parcel). Every host app install/update fires that
+  broadcast, so the freeze recurs all day; :black also died
+  INIT_FAILURE on 9 SCREEN_ON/OFF wakes the same day.
+  Changes (BPackageManagerService + Settings ONLY —
+  BActivityManagerService untouched, per the standing rule):
+  (1) the receiver no longer scans inline: schedulePackageScan()
+  runs scanPackage() on a dedicated daemon "PkgScan"
+  single-thread executor, coalescing bursts into at most one
+  extra pass, with a `PkgScan: off-main done elapsed=` trace
+  (keyword added to the smart report's diag lists in
+  MainActivity.kt); (2) Settings.updatePackageLP no longer
+  calls save() on every load — the conf was just read from
+  disk unchanged and save() parcels the whole package — it
+  now saves ONLY when the system-app reinstall branch
+  actually replaced the pkg (pkgChanged). systemReady()'s
+  own scan stays synchronous (startup ordering) but is now
+  read-only and much cheaper. **First evidence to check:**
+  PkgScan lines present, NO new MainStall stacks through
+  onReceive/scanPackage/save, :black INIT_FAILURE wake
+  deaths gone or sharply reduced, and — decisive as always —
+  the owner's popup count.
 
 ## 7. Open problems (start here)
 
@@ -1156,6 +1194,19 @@ When they disagree, the user is right and the report is lying.
    after the injection cost itself. The popup is
    still OPEN — narrowed to the guest wake path,
    not fixed.
+   **Update (v1.0.158 verdict + .159 report + v1.0.160,
+   2026-11-26):** the owner reports the popup on .158
+   is reduced to OCCASIONAL ("মাঝে মাঝে ডিস্টাব দেয়")
+   but the app also HANGS at times — not fixed. The
+   .159 report (2026-11-26 16:21) then stack-proved
+   the remaining all-day stall: the PACKAGE_ADDED/
+   REMOVED receiver running a full package scan on
+   the main thread (conf read + an unconditional
+   whole-package save per package). v1.0.160 moves
+   that scan to a background thread and makes the
+   save conditional (see §6). **First evidence to
+   check:** PkgScan traces, no scan-path MainStall
+   stacks, and the owner's popup count on .160.
 6. **Per-clone notifications unreliable — pinned symptom: the Facebook
    clone (com.facebook.katana) receives NO notifications at all, while
    the ORIGINAL Facebook app (outside CloneMe) notifies normally**

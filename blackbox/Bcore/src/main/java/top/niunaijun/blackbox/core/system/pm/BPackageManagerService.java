@@ -27,6 +27,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import top.niunaijun.blackbox.BlackBoxCore;
 import top.niunaijun.blackbox.core.GmsCore;
@@ -75,13 +78,52 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
                 .registerReceiver(mPackageChangedHandler, filter);
     }
 
+    // v1.0.160: PACKAGE_ADDED/REMOVED broadcasts arrive on the main thread, and a full
+    // scanPackage() there blocked it for 5-6.5s (see the .159 smart report MainStall
+    // stacks through this receiver), producing the recurring "CloneMe isn't responding"
+    // popup. The scan now runs on a dedicated daemon thread; bursts of broadcasts are
+    // coalesced into at most one extra pass.
+    private static final ExecutorService sPkgScanExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "PkgScan");
+        t.setDaemon(true);
+        return t;
+    });
+    private final AtomicBoolean mScanRunning = new AtomicBoolean(false);
+    private volatile boolean mScanAgain = false;
+
+    private void schedulePackageScan() {
+        mScanAgain = true;
+        if (mScanRunning.compareAndSet(false, true)) {
+            sPkgScanExecutor.execute(() -> {
+                try {
+                    while (mScanAgain) {
+                        mScanAgain = false;
+                        long start = System.currentTimeMillis();
+                        try {
+                            mSettings.scanPackage();
+                        } catch (Throwable e) {
+                            e.printStackTrace();
+                        }
+                        BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                                "PkgScan: off-main done elapsed=" + (System.currentTimeMillis() - start) + "ms");
+                    }
+                } finally {
+                    mScanRunning.set(false);
+                    if (mScanAgain) {
+                        schedulePackageScan();
+                    }
+                }
+            });
+        }
+    }
+
     private final BroadcastReceiver mPackageChangedHandler = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             String action = intent.getAction();
             if (!TextUtils.isEmpty(action)) {
                 if ("android.intent.action.PACKAGE_ADDED".equals(action) || "android.intent.action.PACKAGE_REMOVED".equals(action)) {
-                    mSettings.scanPackage();
+                    schedulePackageScan();
                 }
             }
         }

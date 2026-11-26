@@ -205,19 +205,26 @@ import top.niunaijun.blackbox.utils.compat.PackageParserCompat;
 
             BPackageSettings bPackageSettings = new BPackageSettings(packageSettingsIn);
             bPackageSettings.pkg.mExtras = bPackageSettings;
+            boolean pkgChanged = false;
             if (bPackageSettings.installOption.isFlag(InstallOption.FLAG_SYSTEM)) {
                 PackageInfo packageInfo = BlackBoxCore.getPackageManager().getPackageInfo(packageName, PackageManager.GET_META_DATA);
                 String currPackageSourcePath = packageInfo.applicationInfo.sourceDir;
                 if (!currPackageSourcePath.equals(bPackageSettings.pkg.baseCodePath)) {
-                    
+
                     BProcessManagerService.get().killAllByPackageName(bPackageSettings.pkg.packageName);
                     BPackageSettings newPkg = reInstallBySystem(packageInfo, bPackageSettings.installOption);
                     bPackageSettings.pkg = newPkg.pkg;
+                    pkgChanged = true;
                 }
             } else {
                 bPackageSettings.pkg.applicationInfo = PackageManagerCompat.generateApplicationInfo(bPackageSettings.pkg, 0, BPackageUserState.create(), 0);
             }
-            bPackageSettings.save();
+            // v1.0.160: save() parcels the whole package (seconds of work) and the conf
+            // file was just read from disk unchanged, so only persist when the scan
+            // actually replaced the package (system-app reinstall above).
+            if (pkgChanged) {
+                bPackageSettings.save();
+            }
             mPackages.put(bPackageSettings.pkg.packageName, bPackageSettings);
             Slog.d(TAG, "loaded Package: " + packageName);
         } catch (Throwable e) {
