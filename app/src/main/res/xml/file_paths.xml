@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- v1.0.168: share smart_report.txt (copied to cacheDir) as a real file -->
+    <cache-path name="shared" path="." />
+</paths>

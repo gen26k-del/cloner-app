@@ -26,6 +26,16 @@
              নিজের হোম (ক্লোন তালিকা) সামনে আসবে; এই task-এ উপরে থাকা
              ক্লোনের স্ক্রিন সরে যাবে। হোম-স্ক্রিন শর্টকাট আলাদা
              ShortcutLaunchActivity দিয়ে সরাসরি ক্লোন খোলে, অপরিবর্তিত। -->
+        <!-- v1.0.168: smart_report.txt ফাইল হিসেবে শেয়ারের জন্য -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
         <activity
             android:name=".MainActivity"
             android:exported="true"

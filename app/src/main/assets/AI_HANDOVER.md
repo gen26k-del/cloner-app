@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-27, at version **1.0.167** (versionCode 152).
+> Last updated: 2026-11-27, at version **1.0.168** (versionCode 153).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -1533,6 +1533,57 @@ When they disagree, the user is right and the report is lying.
   and — decisive as always — the owner's popup
   verdict on .166.
 
+- **v1.0.168** — **Proxy-service creation the
+  DualSpaceLivre way + the report in named parts**
+  (owner's verdict 2026-11-27 19:51: the popup
+  STILL comes on .167, "same as before"; he ordered
+  this build at once). Two workstreams:
+  (A) **createProxyService port**
+  (`HCallbackProxy`, plus two BlackReflection
+  additions: `ActivityThread.mServices/
+  mServicesData` and
+  `IActivityManager.serviceDoneExecuting`; BAMS
+  untouched). Until now a CREATE_SERVICE for one
+  of our own proxy services fell through to
+  ActivityThread's stock path, which resolves the
+  proxy's LoadedApk against the GUEST's bound
+  package — it can build a second LoadedApk and
+  instantiate the guest Application again (Meta
+  apps' one-per-process singletons and network
+  config cannot survive that), and the proxy
+  service stays in AM's "executing" state until a
+  false service ANR fires — a popup seam and the
+  leading suspect for WhatsApp's bind-without-
+  start (§7.3; its .167 report verdict is still
+  "bind হয়েছে, কিন্তু অ্যাক্টিভিটি শুরু হয়নি").
+  Now the proxy Service is created directly,
+  attached with the EXISTING guest Application,
+  registered in both ActivityThread service maps,
+  and acknowledged via serviceDoneExecuting.
+  Any failure returns false and the stock path
+  runs exactly as before. Traces: `ProxySvc:`
+  (created / maps unavailable / FAILED) in the
+  init trace; keyword added to the report lists.
+  (B) **Report in named parts** (owner's spec,
+  2026-11-27 19:49–19:50 — his phone's copy
+  truncates at exactly 20,000 chars, so full
+  pastes arrived cut and the decisive sections
+  were lost): the Smart Report dialog now lists
+  named parts split on the report's own section
+  headers, each part capped at ~9,000 chars with
+  its own Copy button (the pasted part carries a
+  "Part N/M" header line), plus a **Share file**
+  button that shares smart_report.txt as a real
+  file via a new FileProvider
+  (`${applicationId}.fileprovider`, cache-path).
+  Workflow: Muse asks for a part by name/number;
+  the owner sends only that part.
+  **First evidence to check:** the owner's popup
+  count on .168; whether WhatsApp now starts an
+  activity; `ProxySvc:` lines in the .168 report
+  (created for katana/orca/whatsapp services, no
+  FAILED); and a part-copy arriving whole.
+
 ## 7. Open problems (start here)
 
 1. **Chrome clone crashes while browsing / on YouTube.** The browser process
@@ -1576,6 +1627,12 @@ When they disagree, the user is right and the report is lying.
    "খোলে না". (For Meta apps that same verdict text was once a report
    artifact — §6 v1.0.142 — but for WhatsApp no onResume marker exists
    either, so treat it as real until a device test says otherwise.)
+   **Update (v1.0.168, 2026-11-27):** the
+   DualSpaceLivre createProxyService port (§6)
+   targets exactly this seam — proxy-service
+   creation could previously rebuild the guest
+   Application. Pending the owner's device test:
+   does WhatsApp open now?
 4. **Google Photos clone** opens but crashed on a tap with
    `SecurityException: Package ... does not belong to <uid>` from
    `ICrossProfileApps.getTargetUserProfiles` (same calling-UID family as the
@@ -1585,7 +1642,18 @@ When they disagree, the user is right and the report is lying.
    and ~13:12 (owner-confirmed dialog, NO crash file) — both times while
    many heavy clones were restarting at once under memory pressure
    (INIT_FAILURE restarts on SCREEN_ON/OFF broadcast deliveries +
-   LOW_MEMORY kills across the stub pool). v1.0.150 added `MainStall:`
+   LOW_MEMORY kills across the stub pool).
+   **Update (2026-11-27):** the owner's verdicts
+   on .166 AND .167 are both POPUP STILL COMES
+   ("same as before", 19:51) — .166's broadcast
+   round did not cure it on his phone. v1.0.168
+   attacks the false-service-ANR seam (§6); if
+   the popup persists on .168, the remaining
+   ranked candidates are the one-foreground-space
+   residency policy and the dead-hook audit (now
+   including the native layer — NewBlackbox #89:
+   FileSystemHook replacements are defined but
+   never installed). v1.0.150 added `MainStall:`
    tracing only (watchdog writes one trace line per stall episode at
    >4 s blocked) — **no cure is claimed**. The launch path already runs
    off the main thread (v1.0.131). The 2026-11-23 18:58 report shows

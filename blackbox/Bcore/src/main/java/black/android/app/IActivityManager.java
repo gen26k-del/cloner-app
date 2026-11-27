@@ -16,6 +16,11 @@ public interface IActivityManager {
     @BMethod
     Integer getTaskForActivity(IBinder IBinder0, boolean boolean1);
 
+    // v1.0.168 (DualSpaceLivre port): acknowledge proxy-service creation so
+    // ActivityManager does not raise a false service ANR.
+    @BMethod
+    void serviceDoneExecuting(IBinder token, int type, int startId, int result);
+
     @BMethod
     void overridePendingTransition(IBinder IBinder0, String String1, int int2, int int3);
 

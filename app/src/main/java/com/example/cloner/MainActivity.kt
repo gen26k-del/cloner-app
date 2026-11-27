@@ -178,6 +178,67 @@ private val ClonerLightColors = lightColorScheme(
     onSurface = Color(0xFF1B1B22)
 )
 
+// v1.0.168: স্মার্ট রিপোর্টকে নাম-দেওয়া পার্টে ভাগ করা — ব্যবহারকারীর
+// ফোনে কপি ২০,০০০ অক্ষরে কেটে যায়, তাই প্রতিটা পার্ট আলাদা Copy
+// বাটনে ছোট আকারে (সর্বোচ্চ ~৯,০০০ অক্ষর) কপি হয়; যেই পার্ট দরকার
+// শুধু সেটাই পাঠানো যায়। অংশগুলো রিপোর্টের === / --- হেডার ধরে ভাগ হয়।
+private fun splitReportParts168(report: String): List<Pair<String, String>> {
+    val raw = mutableListOf<Pair<String, StringBuilder>>()
+    var current = StringBuilder()
+    var name = "Start"
+    fun flush168() {
+        if (current.isNotEmpty()) {
+            raw.add(name to StringBuilder(current))
+            current = StringBuilder()
+        }
+    }
+    for (line in report.split("\n")) {
+        val t = line.trim()
+        val isHeader = (t.startsWith("===") || t.startsWith("---")) && t.length > 6
+        if (isHeader) {
+            flush168()
+            name = t.trim('=', '-', ' ').ifEmpty { "Part" }
+        }
+        current.append(line).append("\n")
+    }
+    flush168()
+    val out = mutableListOf<Pair<String, String>>()
+    for ((n, sb) in raw) {
+        val text = sb.toString()
+        if (text.length <= 9000) {
+            out.add(n to text)
+        } else {
+            var i = 0
+            var k = 1
+            while (i < text.length) {
+                val end = minOf(i + 9000, text.length)
+                out.add("$n ($k)" to text.substring(i, end))
+                i = end
+                k++
+            }
+        }
+    }
+    return out
+}
+
+// v1.0.168: রিপোর্ট ফাইলটা আসল ফাইল হিসেবে শেয়ার (Drive/চ্যাট) —
+// লেখা কপি করার কাটা-পড়ার সমস্যা এতে থাকে না।
+private fun shareReportFile168(ctx: Context, report: String) {
+    try {
+        val f = java.io.File(ctx.cacheDir, "smart_report.txt")
+        f.writeText(report)
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            ctx, ctx.packageName + ".fileprovider", f
+        )
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        ctx.startActivity(Intent.createChooser(intent, "Share report file"))
+    } catch (_: Exception) { }
+}
+
 @Composable
 fun ClonerTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = ClonerLightColors, content = content)
@@ -1215,8 +1276,8 @@ fun ClonerAppScreen() {
             // ফিক্স চলেছিল কিনা আর renderer কখন মরল। বিরল লাইনগুলো (setup/
             // transact) পুরো ট্রেস থেকে নাও — শেষ ২০-এ চাপা পড়ে যায় বলে
             // v1.0.82-84-তে "relroInfo nulled"/"transact code=" কখনো দেখা যায়নি।
-            val diagKeywords = listOf("SHUTDOWN HOOK", "System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed", "transact code=", "no-sandbox", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan", "NotifyPost", "NotifyCancel", "MainStall", "MainStallStack", "PushRx", "PushBcast", "PushSvc", "NotifyChannel", "MqttTrace", "BlackWake", "BlackInit", "BlackInitFail", "UnbindSvc", "LaunchTime", "SlowLaunch", "BcastReg", "SvcWait", "HookInit", "GmsBind", "GmsSvc", "FcmReg", "PkgScan", "PmReady", "BlackStage", "PinShortcut", "StopSvcToken", "HostStall", "AnrExit", "BcastTimeout", "JobCap", "NotifyDrop", "NotifyFix", "GuestDeath")
-            val rareKeywords = listOf("transact code=", "relroInfo nulled", "RELRO blocked", "no-sandbox", "setupConnection rewrite failed", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan", "NotifyPost", "NotifyCancel", "MainStall", "MainStallStack", "PushRx", "PushBcast", "PushSvc", "NotifyChannel", "MqttTrace", "BlackWake", "BlackInit", "BlackInitFail", "UnbindSvc", "LaunchTime", "SlowLaunch", "BcastReg", "SvcWait", "HookInit", "GmsBind", "GmsSvc", "FcmReg", "PkgScan", "PmReady", "BlackStage", "PinShortcut", "StopSvcToken", "HostStall", "AnrExit", "BcastTimeout", "JobCap", "NotifyDrop", "NotifyFix", "GuestDeath")
+            val diagKeywords = listOf("SHUTDOWN HOOK", "System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed", "transact code=", "no-sandbox", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan", "NotifyPost", "NotifyCancel", "MainStall", "MainStallStack", "PushRx", "PushBcast", "PushSvc", "NotifyChannel", "MqttTrace", "BlackWake", "BlackInit", "BlackInitFail", "UnbindSvc", "LaunchTime", "SlowLaunch", "BcastReg", "SvcWait", "HookInit", "GmsBind", "GmsSvc", "FcmReg", "PkgScan", "PmReady", "BlackStage", "PinShortcut", "StopSvcToken", "HostStall", "AnrExit", "BcastTimeout", "JobCap", "NotifyDrop", "NotifyFix", "GuestDeath", "ProxySvc")
+            val rareKeywords = listOf("transact code=", "relroInfo nulled", "RELRO blocked", "no-sandbox", "setupConnection rewrite failed", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan", "NotifyPost", "NotifyCancel", "MainStall", "MainStallStack", "PushRx", "PushBcast", "PushSvc", "NotifyChannel", "MqttTrace", "BlackWake", "BlackInit", "BlackInitFail", "UnbindSvc", "LaunchTime", "SlowLaunch", "BcastReg", "SvcWait", "HookInit", "GmsBind", "GmsSvc", "FcmReg", "PkgScan", "PmReady", "BlackStage", "PinShortcut", "StopSvcToken", "HostStall", "AnrExit", "BcastTimeout", "JobCap", "NotifyDrop", "NotifyFix", "GuestDeath", "ProxySvc")
             val rareLines = trace.lines().filter { line -> rareKeywords.any { k -> line.contains(k) } }.takeLast(30)
             // v1.0.96 রিপোর্ট-স্বাস্থ্য: একই লাইন বারবার আসে (যেমন
             // "foreground promoted" ২২ বার, শুধু সময়/PID আলাদা) — distinct()
@@ -2244,7 +2305,10 @@ fun ClonerAppScreen() {
             )
         }
         // v1.0.100: স্মার্ট রিপোর্ট ডায়ালগ (⋮ মেনু থেকে)।
+        // v1.0.168: পুরো রিপোর্ট একসাথে কপি হয় না — নাম-দেওয়া পার্টের
+        // তালিকা, প্রতিটার নিজের Copy বাটন + Share file বাটন।
         reportText?.let { report ->
+            val parts168 = splitReportParts168(report)
             Dialog(onDismissRequest = { reportText = null }) {
                 Card(
                     shape = RoundedCornerShape(16.dp),
@@ -2256,21 +2320,39 @@ fun ClonerAppScreen() {
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
                         )
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(4.dp))
                         Text(
-                            report,
-                            fontSize = 11.sp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 420.dp)
-                                .verticalScroll(rememberScrollState())
+                            "Send only the part I ask for — each part copies on its own, nothing gets cut.",
+                            fontSize = 11.sp
                         )
+                        Spacer(Modifier.height(8.dp))
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 380.dp)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            parts168.forEachIndexed { idx, part ->
+                                Row(Modifier.fillMaxWidth()) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            "Part ${idx + 1} — ${part.first}",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text("${part.second.length} chars", fontSize = 10.sp)
+                                    }
+                                    TextButton(onClick = {
+                                        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        val payload = "CloneMe Report — Part ${idx + 1}/${parts168.size}: ${part.first}\n" + part.second
+                                        cm.setPrimaryClip(ClipData.newPlainText("report part ${idx + 1}", payload))
+                                        toast("Part ${idx + 1} copied")
+                                    }) { Text("Copy") }
+                                }
+                            }
+                        }
                         Row {
-                            TextButton(onClick = {
-                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                cm.setPrimaryClip(ClipData.newPlainText("report", report))
-                                toast("Report copied")
-                            }) { Text("Copy") }
+                            TextButton(onClick = { shareReportFile168(ctx, report) }) { Text("Share file") }
                             TextButton(onClick = { reportText = null }) { Text("Close") }
                         }
                     }
