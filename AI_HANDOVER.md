@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-27, at version **1.0.162** (versionCode 147).
+> Last updated: 2026-11-27, at version **1.0.163** (versionCode 148).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -1154,6 +1154,69 @@ When they disagree, the user is right and the report is lying.
   FAILED lines; NotifyPost, still the bottom line;
   and — decisive as always — the owner's popup
   count on .162.
+- **v1.0.163** — **Popup fix round 5: the guest
+  pin-shortcut wait** (device evidence: the .162
+  smart report, 2026-11-27 10:46, plus the owner's
+  verdict the same morning — **the popup STILL
+  comes repeatedly on .162**, "not responding —
+  Close or Wait"; the owner ordered the popup
+  fixed, scope = popup only). What the .162 report
+  added: BlackStage shows two CLEAN :black startups
+  (done 1559 ms / 1770 ms, every systemReady stage
+  1–8 ms) — no init stage hangs in that window —
+  and **NotifyPost fired for the first time ever**
+  (10:39:57, katana user 0; whether it reached the
+  shade is the owner's call, still open). The popup
+  evidence: a REAL ANR captured 10:39:58 in :p1,
+  MainStall 7 (2–3 s blocks), and MainStallStack
+  naming the blocker — katana's main thread parked
+  4011–7014 ms in `ShortcutManager.requestPin
+  Shortcut (ShortcutManager.java:604) →
+  getFutureOrThrow (799) → CompletableFuture.get()
+  → LockSupport.park`, triggered by a tap
+  (X.0JOe.onClick). Root cause, code-proven at both
+  ends: on Android 13/14 the framework's
+  requestPinShortcut does not finish on the AIDL
+  boolean — it parks on a CompletableFuture that
+  only the service's `IShortcutCallback.onResult`
+  completes. A guest's call is intercepted by
+  `IShortcutManagerProxy.RequestPinShortcut`, whose
+  hook swallowed the request and returned true
+  WITHOUT ever invoking that callback (there is no
+  server-side shortcut service in :black — this
+  proxy is the whole guest shortcut plumbing), so
+  nobody ever completed the future and the guest
+  main thread parked indefinitely → the ANR dialog.
+  Change (ONE engine file,
+  `fake/service/IShortcutManagerProxy.java`;
+  BActivityManagerService untouched; all .161/.162
+  fixes and tracing untouched): the hook now finds
+  the IShortcutCallback argument by type name and
+  invokes `onResult(false)` immediately, on the
+  calling thread, before the framework reaches
+  future.get() — pinning is genuinely not performed
+  in the virtual environment, so the request fails
+  fast instead of hanging. A `PinShortcut:` trace
+  (pkg / callback found / completed) proves the
+  path on device; the keyword joins the smart
+  report's diag/rare lists (MainActivity.kt). NOT
+  touched, deliberately: CloneMe's OWN per-clone
+  home-screen shortcuts — `MainActivity.pinClone
+  Shortcut` runs in the host main process, which
+  never installs these guest proxies (HookManager
+  injects only into guest/server processes), and
+  calls the real ShortcutService; that path is
+  unchanged. **First evidence to check:**
+  PinShortcut lines with completed=true in the
+  next report, no new requestPinShortcut
+  MainStallStack episodes, no :p1 ANR of that
+  signature, and — decisive as always — the
+  owner's popup count on .163. Honest limit: this
+  kills the pin-shortcut park only; the 2–3 s
+  katana camera/tab stalls in the same report and
+  the :black wake deaths are separate items — if
+  the popup persists, the next report's stacks
+  name the next path.
 
 ## 7. Open problems (start here)
 
@@ -1364,6 +1427,28 @@ When they disagree, the user is right and the report is lying.
    death records — the stage with a begin but no
    done at a wake death is the next fix target;
    plus the owner's popup count on .162.
+   **Update (v1.0.162 report + owner verdict,
+   2026-11-27):** the owner reports the popup on
+   .162 STILL comes repeatedly — NOT fixed. The
+   .162 report's BlackStage shows two clean :black
+   startups (no init stage hangs in that window),
+   but its MainStallStack names a new guest-side
+   blocker: katana's main thread parked 4–7 s in
+   the framework's ShortcutManager.requestPin
+   Shortcut future-wait after a tap, with a real
+   ANR captured in :p1 — because
+   IShortcutManagerProxy swallowed the pin request
+   without ever firing the IShortcutCallback that
+   completes the framework's future. v1.0.163
+   completes that callback immediately with false
+   (fail fast; see §6). **First evidence to
+   check:** PinShortcut completed=true lines, no
+   repeat of the requestPinShortcut stack, and
+   the owner's popup count on .163. The :black
+   wake-death question stays open (BlackStage
+   showed clean startups in the .162 window; the
+   10:44 restart's reason was not in the pasted
+   excerpt).
 6. **Per-clone notifications unreliable — pinned symptom: the Facebook
    clone (com.facebook.katana) receives NO notifications at all, while
    the ORIGINAL Facebook app (outside CloneMe) notifies normally**
