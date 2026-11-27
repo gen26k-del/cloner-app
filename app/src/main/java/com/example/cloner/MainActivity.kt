@@ -975,9 +975,65 @@ fun ClonerAppScreen() {
             sb.append("MainStall: মোট " + mainStallAll.size + "টি লাইন\n")
             if (mainStallAll.isNotEmpty()) sb.append(mainStallAll.takeLast(10).joinToString("\n") + "\n")
             sb.append("MainStallStack: মোট " + mainStallStackAll.size + "টি লাইন\n")
-            // v1.0.155: episode-প্রতি একাধিক স্যাম্পল আসে — শেষ ৩০ লাইন
-            // রাখলে অন্তত দুটো পুরো স্যাম্পল (১২ ফ্রেম করে) একসাথে দেখা যায়।
-            if (mainStallStackAll.isNotEmpty()) sb.append(mainStallStackAll.takeLast(30).joinToString("\n") + "\n")
+            // v1.0.165: পুরো রিপোর্ট এক পেস্টে ধরাতে শেষ ৬টি স্যাম্পলই
+            // দেখাও (আগে: শেষ ৩০ লাইন)। স্যাম্পল শুরু হয় "== sample"
+            // হেডার লাইনে; প্রথম হেডারের আগের ফ্রেমগুলো আগের
+            // স্যাম্পলের (হেডারবিহীন প্রথম স্যাম্পলের) অংশ।
+            if (mainStallStackAll.isNotEmpty()) {
+                val headerIdx165 = mainStallStackAll.indices.filter {
+                    mainStallStackAll[it].contains("== sample")
+                }
+                val segCount165 = headerIdx165.size + 1
+                val firstKept165 = maxOf(0, segCount165 - 6)
+                val start165 = if (firstKept165 == 0) 0 else headerIdx165[firstKept165 - 1]
+                val shownStack165 = mainStallStackAll.drop(start165)
+                sb.append("MainStallStack: শেষ " + (segCount165 - firstKept165) + "টি স্যাম্পল দেখানো হলো (" + shownStack165.size + "টি লাইন)\n")
+                sb.append(shownStack165.joinToString("\n") + "\n")
+            }
+            // v1.0.165: হোস্ট মেইন প্রসেসের নিজের stall — ClonerApp-র
+            // HostStall watchdog (শুধু main প্রসেসে, 2s threshold,
+            // পুরো stack + হোস্টের foreground activity)। পুরনো
+            // MainStall watchdog সব প্রসেসে চললেও হোস্টে তার জাল
+            // মোটা ছিল (4s/3s) — ডায়ালগ দেখা গেলেও লাইন নাও
+            // লেখা হতে পারত (.164-এর ফাঁক)।
+            val hostStallAll = trace.lines().filter { it.contains("HostStall:") }
+            sb.append("\n--- HostStall (আলাদা অংশ) ---\n")
+            sb.append("HostStall: মোট " + hostStallAll.size + "টি লাইন\n")
+            if (hostStallAll.isNotEmpty()) sb.append(hostStallAll.takeLast(60).joinToString("\n") + "\n")
+            // v1.0.165: সিস্টেমের নিজের ANR রেকর্ড — কোন প্রসেস
+            // (main / :black / :pN) আসলেই ANR খেয়েছে তার প্রমাণ।
+            // ANR ডায়ালগে সব প্রসেসেই একই প্যাকেজ-নাম ("CloneMe")
+            // দেখায়, তাই ডায়ালগ দেখে প্রসেস চেনা যায় না — এই
+            // রেকর্ডই নাম ধরে বলে দেয়। নিচের সাধারণ মৃত্যু-রেকর্ড
+            // অংশ (সব reason, শেষ ১০টি) থেকে আলাদা: এখানে শুধু
+            // ANR, শেষ ৫০টি রেকর্ড থেকে ছাঁকা, আর সবচেয়ে নতুন
+            // ANR-টির সিস্টেম ট্রেসের প্রথম অংশ (থাকলে)।
+            sb.append("\n--- AnrExit (সিস্টেম ANR রেকর্ড) ---\n")
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                val anrInfos165 = runCatching {
+                    val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                    am.getHistoricalProcessExitReasons(ctx.packageName, 0, 50)
+                        .filter { it.reason == android.app.ApplicationExitInfo.REASON_ANR }
+                }.getOrDefault(emptyList<android.app.ApplicationExitInfo>())
+                sb.append("AnrExit: মোট " + anrInfos165.size + "টি ANR রেকর্ড\n")
+                for (info in anrInfos165) {
+                    sb.append("AnrExit: ${java.util.Date(info.timestamp)} proc=${info.processName} pid=${info.pid} importance=${info.importance} rss=${info.rss}kB desc=${info.description}\n")
+                }
+                val newestAnr165 = anrInfos165.firstOrNull()
+                if (newestAnr165 != null) {
+                    val anrTrace165 = runCatching {
+                        newestAnr165.traceInputStream?.bufferedReader()?.readText()
+                    }.getOrNull()
+                    if (!anrTrace165.isNullOrEmpty()) {
+                        sb.append("AnrExitTrace: সবচেয়ে নতুন ANR (${java.util.Date(newestAnr165.timestamp)}, ${newestAnr165.processName}) — প্রথম ৩০ লাইন:\n")
+                        anrTrace165.lines().take(30).forEach { sb.append("AnrExitTrace: $it\n") }
+                    } else {
+                        sb.append("AnrExitTrace: সিস্টেম ট্রেস পাওয়া যায়নি\n")
+                    }
+                }
+            } else {
+                sb.append("API 30-এর নিচে এই রেকর্ড পাওয়া যায় না।\n")
+            }
             // v1.0.162: :black startup-এর ধাপভিত্তিক ট্রেস —
             // SystemCallProvider.onCreate থেকে BlackBoxSystem.startup
             // -এর প্রতিটি systemReady, PmReady scan/resolver,
@@ -987,8 +1043,21 @@ fun ClonerAppScreen() {
             // startup ~২০ লাইন, তাই শেষ ৪০ লাইন = প্রায় দুটো start।
             val blackStageAll = trace.lines().filter { it.contains("BlackStage:") }
             sb.append("\n--- BlackStage (আলাদা অংশ) ---\n")
-            sb.append("BlackStage: মোট " + blackStageAll.size + "টি লাইন\n")
-            if (blackStageAll.isNotEmpty()) sb.append(blackStageAll.takeLast(40).joinToString("\n") + "\n")
+            // v1.0.165: রিপোর্ট এক পেস্টে ধরাতে শেষ ২টি স্টার্টআপের
+            // লাইনই যথেষ্ট — পুরনো স্টার্টআপগুলো একই ধাপের
+            // পুনরাবৃত্তি। স্টার্টআপ শুরু হয় "startup begin" লাইনে,
+            // সেখান থেকে কাটো যাতে অর্ধেক স্টার্টআপ না আসে।
+            val bsStarts165 = blackStageAll.indices.filter {
+                blackStageAll[it].contains("BlackStage: startup begin")
+            }
+            val bsFrom165 = when {
+                bsStarts165.size >= 2 -> bsStarts165[bsStarts165.size - 2]
+                bsStarts165.size == 1 -> bsStarts165[0]
+                else -> maxOf(0, blackStageAll.size - 40)
+            }
+            val bsShown165 = blackStageAll.drop(bsFrom165)
+            sb.append("BlackStage: মোট " + blackStageAll.size + "টি লাইন — শেষ ২টি স্টার্টআপ দেখানো হলো (" + bsShown165.size + "টি লাইন)\n")
+            if (bsShown165.isNotEmpty()) sb.append(bsShown165.joinToString("\n") + "\n")
             // v1.0.155: launch timing — guest প্রসেসে activity launch
             // শুরু (HCallbackProxy) থেকে onResume (AppInstrumentation)
             // পর্যন্ত সময়। SlowLaunch = 2.5s-এর বেশি লাগা launch;
@@ -1021,8 +1090,10 @@ fun ClonerAppScreen() {
             if (pushBcastAll.isNotEmpty()) sb.append(pushBcastAll.takeLast(10).joinToString("\n") + "\n")
             sb.append("PushSvc: মোট " + pushSvcAll.size + "টি লাইন\n")
             if (pushSvcAll.isNotEmpty()) sb.append(pushSvcAll.takeLast(10).joinToString("\n") + "\n")
-            sb.append("NotifyChannel: মোট " + notifyChannelAll.size + "টি লাইন\n")
-            if (notifyChannelAll.isNotEmpty()) sb.append(notifyChannelAll.takeLast(10).joinToString("\n") + "\n")
+            // v1.0.165: NotifyChannel লাইনগুলো লম্বা আর সংখ্যায় অনেক —
+            // রিপোর্ট ছোট রাখতে প্রথম ১০টি + মোট সংখ্যা (আগে: শেষ ১০টি)।
+            sb.append("NotifyChannel: মোট " + notifyChannelAll.size + "টি লাইন — প্রথম ১০টি দেখানো হলো\n")
+            if (notifyChannelAll.isNotEmpty()) sb.append(notifyChannelAll.take(10).joinToString("\n") + "\n")
             // v1.0.152: MQTT লাইভনেস — MqttServiceV2-র startService/
             // stopService (AMS স্তর) আর guest প্রসেসের ভেতরের create/
             // startCommand/destroy। create→destroy ব্যবধানই সার্ভিসটার
@@ -1075,7 +1146,8 @@ fun ClonerAppScreen() {
                 val goneLines = watchText.lines().filter { it.contains("GONE") || it.contains("EXIT pid=") }.takeLast(10)
                 if (goneLines.isEmpty()) sb.append("GONE লাইন নেই — নজরদারির সময় কোনো প্রসেস উধাও হয়নি।\n")
                 else sb.append("GONE (মৃত্যু):\n" + goneLines.joinToString("\n") + "\n")
-                sb.append("--- শেষ নমুনা ---\n" + watchText.takeLast(1500) + "\n")
+                // v1.0.165: রিপোর্ট ছোট রাখতে শেষ নমুনা 1500→1000 অক্ষর।
+                sb.append("--- শেষ নমুনা ---\n" + watchText.takeLast(1000) + "\n")
             } else {
                 sb.append("এখনো নজরদারি হয়নি — ক্লোন চালু করলে ১০ মিনিট ধরে নমুনা নেওয়া হয়।\n")
             }
@@ -1132,7 +1204,8 @@ fun ClonerAppScreen() {
                 val tailLines = exitLines.filter { it.contains("TRACER INSTALLED") || it.contains("EXIT HOOKS") }.takeLast(6)
                 val headLine = if (blocks.size > 2) listOf("মোট ${blocks.size}টি exit ব্লক — শেষ ২টি দেখানো হলো (সবগুলোর স্ট্যাক একই রকম)") else emptyList()
                 val exitShown = if (blocks.isNotEmpty()) (headLine + blocks.takeLast(2).flatten() + tailLines).joinToString("\n") else exitRaw.takeLast(2000)
-                sb.append(exitShown.takeLast(5000) + "\n")
+                // v1.0.165: রিপোর্ট ছোট রাখতে 5000→2500 অক্ষর।
+                sb.append(exitShown.takeLast(2500) + "\n")
             } else {
                 sb.append("নেটিভ exit ট্রেস ফাইল নেই — কোনো প্রসেস exit() ডাকেনি (বা ট্রেসার বসেনি)।\n")
             }
@@ -1142,8 +1215,8 @@ fun ClonerAppScreen() {
             // ফিক্স চলেছিল কিনা আর renderer কখন মরল। বিরল লাইনগুলো (setup/
             // transact) পুরো ট্রেস থেকে নাও — শেষ ২০-এ চাপা পড়ে যায় বলে
             // v1.0.82-84-তে "relroInfo nulled"/"transact code=" কখনো দেখা যায়নি।
-            val diagKeywords = listOf("SHUTDOWN HOOK", "System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed", "transact code=", "no-sandbox", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan", "NotifyPost", "NotifyCancel", "MainStall", "MainStallStack", "PushRx", "PushBcast", "PushSvc", "NotifyChannel", "MqttTrace", "BlackWake", "BlackInit", "BlackInitFail", "UnbindSvc", "LaunchTime", "SlowLaunch", "BcastReg", "SvcWait", "HookInit", "GmsBind", "GmsSvc", "FcmReg", "PkgScan", "PmReady", "BlackStage", "PinShortcut", "StopSvcToken")
-            val rareKeywords = listOf("transact code=", "relroInfo nulled", "RELRO blocked", "no-sandbox", "setupConnection rewrite failed", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan", "NotifyPost", "NotifyCancel", "MainStall", "MainStallStack", "PushRx", "PushBcast", "PushSvc", "NotifyChannel", "MqttTrace", "BlackWake", "BlackInit", "BlackInitFail", "UnbindSvc", "LaunchTime", "SlowLaunch", "BcastReg", "SvcWait", "HookInit", "GmsBind", "GmsSvc", "FcmReg", "PkgScan", "PmReady", "BlackStage", "PinShortcut", "StopSvcToken")
+            val diagKeywords = listOf("SHUTDOWN HOOK", "System linker", "child process died", "kept alive", "RELRO disabled", "isolated rebind", "chromium child RELRO", "linker lookup", "LibraryLoader API", "Linker API", "sUseLinker", "splits:", "SplitCompat", "addDexPath", "probe", "dexElements", "ContextUtils", "loader hierarchy", "RELRO blocked", "relroInfo nulled", "binder wrapped", "setupConnection rewrite failed", "transact code=", "no-sandbox", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan", "NotifyPost", "NotifyCancel", "MainStall", "MainStallStack", "PushRx", "PushBcast", "PushSvc", "NotifyChannel", "MqttTrace", "BlackWake", "BlackInit", "BlackInitFail", "UnbindSvc", "LaunchTime", "SlowLaunch", "BcastReg", "SvcWait", "HookInit", "GmsBind", "GmsSvc", "FcmReg", "PkgScan", "PmReady", "BlackStage", "PinShortcut", "StopSvcToken", "HostStall", "AnrExit")
+            val rareKeywords = listOf("transact code=", "relroInfo nulled", "RELRO blocked", "no-sandbox", "setupConnection rewrite failed", "IChildProcessArgs fields", "relro null failed", "stopService chromium", "foreground promoted", "foreground promote failed", "fileDescriptorInfos", "in-process-gpu", "KeepChildProcessAfterIPCReset", "CrossClone", "ChromeArgs", "PMCheck", "LAUNCH MISMATCH", "launch assigned", "bindService orphan", "NotifyPost", "NotifyCancel", "MainStall", "MainStallStack", "PushRx", "PushBcast", "PushSvc", "NotifyChannel", "MqttTrace", "BlackWake", "BlackInit", "BlackInitFail", "UnbindSvc", "LaunchTime", "SlowLaunch", "BcastReg", "SvcWait", "HookInit", "GmsBind", "GmsSvc", "FcmReg", "PkgScan", "PmReady", "BlackStage", "PinShortcut", "StopSvcToken", "HostStall", "AnrExit")
             val rareLines = trace.lines().filter { line -> rareKeywords.any { k -> line.contains(k) } }.takeLast(30)
             // v1.0.96 রিপোর্ট-স্বাস্থ্য: একই লাইন বারবার আসে (যেমন
             // "foreground promoted" ২২ বার, শুধু সময়/PID আলাদা) — distinct()
@@ -1187,6 +1260,18 @@ fun ClonerAppScreen() {
             if (notifyPostAll.isNotEmpty()) sb.append(notifyPostAll.takeLast(10).joinToString("\n") + "\n")
             sb.append("NotifyCancel: মোট " + notifyCancelAll.size + "টি লাইন\n")
             if (notifyCancelAll.isNotEmpty()) sb.append(notifyCancelAll.takeLast(10).joinToString("\n") + "\n")
+            // v1.0.165: PinShortcut / StopSvcToken — .163/.164 পপআপ
+            // ফিক্সের প্রমাণ এই লাইনগুলোতেই, কিন্তু আগে এরা শুধু
+            // grouped ডায়াগনসিস অংশে চাপা পড়ত (আর রিপোর্ট লম্বা
+            // বলে পেস্ট সেখানে পৌঁছাতই না)। এখন আলাদা অংশে মোট
+            // সংখ্যা + শেষ ১০টি করে।
+            val pinShortcutAll = trace.lines().filter { it.contains("PinShortcut:") }
+            val stopSvcTokenAll = trace.lines().filter { it.contains("StopSvcToken:") }
+            sb.append("\n--- PinShortcut / StopSvcToken (আলাদা অংশ) ---\n")
+            sb.append("PinShortcut: মোট " + pinShortcutAll.size + "টি লাইন\n")
+            if (pinShortcutAll.isNotEmpty()) sb.append(pinShortcutAll.takeLast(10).joinToString("\n") + "\n")
+            sb.append("StopSvcToken: মোট " + stopSvcTokenAll.size + "টি লাইন\n")
+            if (stopSvcTokenAll.isNotEmpty()) sb.append(stopSvcTokenAll.takeLast(10).joinToString("\n") + "\n")
             // টম্বস্টোন ফ্রেম: renderer SIGSEGV-র কল স্ট্যাক — কোন ফাংশনে
             // মরলো বোঝার একমাত্র সূত্র। লগ ভিউ ফ্রেমগুলো কেটে ফেলে, তাই
             // রিপোর্টেই ধরো (সংক্ষিপ্ত আকারে: ফ্রেম নম্বর, pc, লাইব্রেরি)।
@@ -1244,7 +1329,8 @@ fun ClonerAppScreen() {
                     deathKeys.any { line.contains(it, ignoreCase = true) }
                 }
                 val creatingCount = deathMatched.count { it.contains("Creating new ChildProcessService") }
-                val deathLines = deathMatched.filterNot { it.contains("Creating new ChildProcessService") }.takeLast(40)
+                // v1.0.165: রিপোর্ট ছোট রাখতে মৃত্যুর লগ 40→20 লাইন।
+                val deathLines = deathMatched.filterNot { it.contains("Creating new ChildProcessService") }.takeLast(20)
                 val deathSummary = if (creatingCount > 0)
                     listOf("ChildProcessService নতুন তৈরি: ${creatingCount} বার — renderer বারবার নতুন করে তৈরি হচ্ছে (churn); উপরের লাইনগুলোতেই আসল মৃত্যুর কারণ খুঁজতে হবে")
                 else emptyList()
@@ -1259,10 +1345,11 @@ fun ClonerAppScreen() {
                     val xText = runCatching { java.io.File(ctx.cacheDir, "exit_trace.txt").readText() }.getOrDefault("")
                     val exitPid = Regex("=== .*pid=(\\d+)").findAll(xText).lastOrNull()?.groupValues?.get(1)
                     val gonePid = exitPid ?: Regex("GONE pid=(\\d+)").findAll(wText).lastOrNull()?.groupValues?.get(1)
+                    // v1.0.165: রিপোর্ট ছোট রাখতে কাঁচা লগ 40→20 লাইন।
                     if (gonePid == null) "" else logOut.lines().filter { line ->
                         val parts = line.split(Regex("\\s+"))
                         parts.size > 3 && parts[2] == gonePid
-                    }.takeLast(40).joinToString("\n")
+                    }.takeLast(20).joinToString("\n")
                 }.getOrDefault("")
                 // v1.0.139: ব্রাউজার প্রসেসের কাঁচা লগ — renderer মরার
                 // মুহূর্তে ব্রাউজার কী বলেছে (RPH teardown? channel error?
@@ -1281,10 +1368,11 @@ fun ClonerAppScreen() {
                                     b.copyOf(if (n >= 0) n else b.size).toString(Charsets.UTF_8) == "com.android.chrome"
                                 }?.name
                         }.getOrNull()
+                    // v1.0.165: রিপোর্ট ছোট রাখতে ব্রাউজার লগ 30→20 লাইন।
                     if (bPid == null) "" else logOut.lines().filter { line ->
                         val parts = line.split(Regex("\\s+"))
                         parts.size > 3 && parts[2] == bPid
-                    }.takeLast(30).joinToString("\n")
+                    }.takeLast(20).joinToString("\n")
                 }.getOrDefault("")
                 val frameRe = Regex("#(\\d+) pc ([0-9a-f]+)")
                 val offRe = Regex("\\(offset 0x[0-9a-f]+\\)")
@@ -1302,7 +1390,7 @@ fun ClonerAppScreen() {
                     }.getOrDefault("?")
                     val off = offRe.find(line)?.value ?: ""
                     "#${m.groupValues[1]} pc ${m.groupValues[2]} $lib $off".trim()
-                }.takeLast(100)
+                }.takeLast(40)
                 // BuildId: #00 ফ্রেমের লাইন থেকেই নাও (libchrome.so-র) — পুরো
                 // logcat-এর শেষ BuildId লাইন অন্য লাইব্রেরির (যেমন libc.so-র) হয়।
                 val buildId = recent.firstOrNull()

@@ -19,6 +19,16 @@ import java.util.Date
  */
 class ClonerApp : Application() {
 
+    companion object {
+        /**
+         * v1.0.165: হোস্ট মেইন প্রসেসে সর্বশেষ resume হওয়া
+         * activity-র ক্লাস নাম (lifecycle callback দিয়ে হালনাগাদ
+         * হয়) — HostStall watchdog-এর fg= ট্যাগে পড়ে।
+         */
+        @Volatile
+        var hostForegroundActivity: String? = null
+    }
+
     /**
      * নতুন রিপোর্ট আসলে আগের সব রিপোর্ট মুছে ফেলো — শুধু নতুনটাই থাকবে।
      * (ব্যবহারকারী: আগের রিপোর্ট যাতে না দেয়, নতুন রিপোর্ট আসলে আগেরটা মুছে যাবে।)
@@ -199,11 +209,81 @@ class ClonerApp : Application() {
         }
     }
 
+    /**
+     * v1.0.165: HostStall watchdog — শুধু হোস্ট মেইন প্রসেসে
+     * (procName == packageName, কোনো suffix নেই)। পুরনো MainStall
+     * watchdog (উপরে) সব প্রসেসেই চলে, কিন্তু হোস্টে তার threshold
+     * 4s, ticker 2s, চেক-ব্যবধান 3s, আর crash ফাইল লাগে >8s —
+     * মালিক ~5s-এর সিস্টেম ANR ডায়ালগে Wait/Close চাপলে প্রসেস
+     * ছাড়া পেয়ে/মরে যেতে পারে watchdog লাইন লেখার আগেই (.164
+     * রিপোর্টে ঠিক এই ফাঁকটাই দেখা গেছে: পপআপ বারবার, অথচ নতুন
+     * MainStall লাইন শূন্য)। এটা আরও সূক্ষ্ম জাল: threshold 2s,
+     * ticker/check 1s, episode-প্রতি সর্বোচ্চ ৪টি স্যাম্পল,
+     * প্রতিটিতে main thread-এর পুরো stack (সর্বোচ্চ ৫০ ফ্রেম) +
+     * হোস্টের foreground activity (companion-এ lifecycle দিয়ে
+     * রাখা — guest-এর BActivityThread static হোস্ট UI প্রসেসে
+     * অর্থহীন)। একই init_trace.txt-তে "HostStall:" লাইনে লেখে;
+     * স্মার্ট রিপোর্টে এর আলাদা অংশ আছে।
+     */
+    private fun startHostStallWatchdog() {
+        try {
+            val procName = runCatching {
+                java.io.File("/proc/self/cmdline").readText()
+                    .replace("\u0000", " ").trim().ifEmpty { "?" }
+            }.getOrDefault("?")
+            // শুধু হোস্ট মেইন প্রসেস — :black আর :pN guest-এ চলবে না
+            if (procName != packageName) return
+            val mainHandler = Handler(Looper.getMainLooper())
+            val state = longArrayOf(SystemClock.uptimeMillis())
+            var samples = 0
+            val ticker = object : Runnable {
+                override fun run() {
+                    state[0] = SystemClock.uptimeMillis()
+                    mainHandler.postDelayed(this, 1000L)
+                }
+            }
+            mainHandler.post(ticker)
+            Thread({
+                while (true) {
+                    try {
+                        Thread.sleep(1000L)
+                        val blockedFor = SystemClock.uptimeMillis() - state[0]
+                        if (blockedFor > 2000L && samples < 4) {
+                            samples++
+                            runCatching {
+                                val fg = hostForegroundActivity ?: "?"
+                                val line = StringBuilder()
+                                if (samples == 1) {
+                                    line.append("${Date()} [$procName] HostStall: host main thread blocked for ${blockedFor}ms fg=$fg\n")
+                                } else {
+                                    line.append("HostStall: == sample $samples blocked ${blockedFor}ms fg=$fg ==\n")
+                                }
+                                try {
+                                    val st = Looper.getMainLooper().thread.stackTrace
+                                    for (el in st.take(50)) {
+                                        line.append("HostStall: at $el\n")
+                                    }
+                                } catch (_: Exception) { }
+                                java.io.File(cacheDir, "init_trace.txt").appendText(line.toString())
+                            }
+                        }
+                        if (blockedFor <= 2000L) samples = 0
+                    } catch (_: Exception) { }
+                }
+            }, "HostStallWatchdog").apply { isDaemon = true }.start()
+        } catch (e: Exception) {
+            Log.w("ClonerApp", "host stall watchdog start failed", e)
+        }
+    }
+
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
         // ANR watchdog: main thread 6 সেকেন্ডের বেশি আটকে থাকলে
         // সব thread-এর stack ফাইলে লিখে রাখে, যাতে hang-এর কারণ বোঝা যায়।
         startAnrWatchdog()
+        // v1.0.165: হোস্ট মেইন প্রসেসের জন্য সূক্ষ্ম HostStall জাল
+        // (শুধু main প্রসেসেই সক্রিয় হয় — ভেতরে proc যাচাই আছে)।
+        startHostStallWatchdog()
 
         try {
             BlackBoxCore.get().doAttachBaseContext(base, object : ClientConfiguration() {
@@ -306,6 +386,31 @@ class ClonerApp : Application() {
             }
             Engine.current = NoEngine
         }
+        // v1.0.165: হোস্টের foreground activity ট্র্যাক করো (শুধু
+        // মেইন প্রসেসে) — HostStall স্যাম্পলের fg= ট্যাগের জন্য।
+        // guest প্রসেসের BActivityThread static এখানে প্রযোজ্য নয়,
+        // তাই নিজের lifecycle callback-ই ভরসা।
+        try {
+            val proc = java.io.File("/proc/self/cmdline").readText()
+                .replace("\u0000", " ").trim()
+            if (proc == packageName) {
+                registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
+                    override fun onActivityResumed(activity: android.app.Activity) {
+                        hostForegroundActivity = activity.javaClass.name
+                    }
+                    override fun onActivityPaused(activity: android.app.Activity) {
+                        if (hostForegroundActivity == activity.javaClass.name) {
+                            hostForegroundActivity = null
+                        }
+                    }
+                    override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) { }
+                    override fun onActivityStarted(activity: android.app.Activity) { }
+                    override fun onActivityStopped(activity: android.app.Activity) { }
+                    override fun onActivitySaveInstanceState(activity: android.app.Activity, outState: android.os.Bundle) { }
+                    override fun onActivityDestroyed(activity: android.app.Activity) { }
+                })
+            }
+        } catch (_: Exception) { }
         // নোটিফিকেশন বাঁচিয়ে রাখার জন্য keep-alive সার্ভিস (শুধু মেইন প্রসেসে)
         try {
             val proc = java.io.File("/proc/self/cmdline").readText()

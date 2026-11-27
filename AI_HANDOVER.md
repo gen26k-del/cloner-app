@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-27, at version **1.0.164** (versionCode 149).
+> Last updated: 2026-11-27, at version **1.0.165** (versionCode 150).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -1277,6 +1277,98 @@ When they disagree, the user is right and the report is lying.
   wake-death question remain separate items; if the
   popup persists, the next report's stacks name the
   next path.
+- **v1.0.165** — **Popup fix round 7: catch the ANR
+  where it happens + a one-paste smart report**
+  (device evidence: the .164 smart report,
+  2026-11-27 12:50, plus the owner's verdict minutes
+  later — **the popup STILL comes repeatedly on
+  .164**; the owner approved this build 12:52 with
+  both parts). The mismatch that defines this round:
+  the .164 report recorded ZERO new MainStall lines
+  during the very window the owner watched the popup
+  recur, and across recent reports every MainStall
+  sample is from a :pN guest or :black process.
+  Investigation this round (code, not trace):
+  (a) The existing watchdog DOES run in the host
+  main process — ClonerApp.attachBaseContext starts
+  it unconditionally for every process of the app,
+  and it captured host-main stalls in the .152 era —
+  but its host settings are coarse (4 s threshold,
+  2 s ticker, 3 s check cycle, only 12 stack frames,
+  crash file only at >8 s blocked, and its fg tag
+  reads BActivityThread guest statics, which are
+  meaningless in the UI process). An owner who taps
+  Wait/Close at the ~5 s system dialog can free or
+  kill the process before the watchdog ever writes —
+  a dialog with no trace line is fully consistent
+  with this code. (b) The ANR dialog shows the
+  PACKAGE label ("CloneMe") for every process of
+  this app — main, :black and :pN alike — so the
+  dialog's name never identified the ANR'ing
+  process in the first place. (c) The host UI layer
+  was re-read for a synchronous main-thread blocker:
+  loadApps (PM query + icon decode for every
+  launcher app), launch, report generation, death
+  watch, FGS check and log/trace capture ALL run on
+  Dispatchers.IO (the launch path itself moved
+  off-main in v1.0.131) — NO provable host blocker
+  was found, so this build ships the agreed capture
+  instrumentation, not a guessed fix. Changes:
+  (1) **HostStall** (ClonerApp.kt) — a dedicated
+  watchdog for the HOST MAIN process only
+  (procName == packageName; :black/:pN skip it):
+  2 s threshold, 1 s ticker/check, up to 4 samples
+  per episode, each with the main thread's stack
+  (up to 50 frames) and the host's foreground
+  activity, tracked via ActivityLifecycleCallbacks
+  into a ClonerApp companion field. Lines go to the
+  same init trace; the report gains a dedicated
+  HostStall section (total + last 60) and the
+  keyword joins both diag lists. The existing
+  all-process MainStall watchdog is untouched.
+  (2) **AnrExit** — the report now asks the system
+  directly WHICH process ANR'd: a dedicated section
+  right after HostStall filters
+  getHistoricalProcessExitReasons (last 50 records)
+  to REASON_ANR and prints process name / pid /
+  timestamp / importance / rss / description for
+  each, plus a bounded excerpt (first 30 lines) of
+  the newest ANR's system trace via
+  getTraceInputStream() when the system kept one.
+  (The v1.0.117 all-reasons section further down
+  the report is unchanged.) (3) **One-paste report**
+  (owner's explicit request — his pastes kept
+  truncating mid-NotifyChannel, so the
+  PinShortcut/StopSvcToken evidence never arrived):
+  BlackStage prints only the LAST 2 startups
+  (block-aligned at "startup begin"; total count
+  stated in the report); NotifyChannel prints the
+  FIRST 10 lines + total; MainStallStack prints
+  the most recent 6 samples (sample-aligned;
+  counts stated); PinShortcut and StopSvcToken
+  gain dedicated sections (totals + last 10)
+  instead of living only in the grouped diagnosis;
+  the logcat tail sections are trimmed (tombstone
+  frames 100→40, death log 40→20, raw window
+  40→20, browser window 30→20, native exit trace
+  5000→2500 chars, death-watch tail 1500→1000).
+  Clone verdicts, crash files, LaunchTime and the
+  PushSvc totals stay complete. The report stays
+  ONE plain-text block in one file
+  (smart_report.txt): the dialog's existing Copy
+  button already copies the ENTIRE text (and the
+  same text is written to the file) — after this
+  trim, one Copy + one paste carries the whole
+  report. Estimated size for a .164-like window:
+  ~30–35k characters (was ~50k+). NO
+  BActivityManagerService changes; all .161–.164
+  fixes and tracing untouched. **First evidence to
+  check:** the AnrExit section of the first .165
+  report — the processName on ANR records from a
+  popup window names the ANR'ing process outright
+  (main vs :black vs :pN); HostStall lines if the
+  host main thread is the blocker; and — decisive
+  as always — the owner's popup count on .165.
 
 ## 7. Open problems (start here)
 
@@ -1527,6 +1619,33 @@ When they disagree, the user is right and the report is lying.
    StopSvcToken queued/done pairs, no repeat of
    the stopServiceToken stack, and the owner's
    popup count on .164.
+   **Update (v1.0.164 report + owner verdict +
+   v1.0.165, 2026-11-27):** the owner reports the
+   popup STILL comes repeatedly on .164 — while
+   its report recorded ZERO new MainStall lines in
+   the same window. That trace/verdict mismatch is
+   now the problem statement. Two code facts
+   reframe it: the ANR dialog's "CloneMe" label is
+   the package label shared by main, :black and
+   every :pN process, so it never named the
+   ANR'ing process; and the existing watchdog
+   (which DOES run in the host main process — it
+   caught the .152-era host stalls) samples too
+   coarsely there (4 s threshold / 3 s cycle /
+   crash file at >8 s) to guarantee a line for a
+   dialog the owner dismisses at ~5 s. The host
+   UI layer re-read found no main-thread blocker
+   (all heavy work is on Dispatchers.IO).
+   v1.0.165 therefore ships attribution, not a
+   guess: a host-only HostStall watchdog (2 s,
+   full main-thread stack + host foreground
+   activity) and an AnrExit report section (the
+   system's own REASON_ANR records with process
+   names + the newest ANR's system trace
+   excerpt), plus the one-paste report trim (see
+   §6). **First evidence to check:** the AnrExit
+   processName(s) from a popup window — that name
+   decides where round 8 aims.
 6. **Per-clone notifications unreliable — pinned symptom: the Facebook
    clone (com.facebook.katana) receives NO notifications at all, while
    the ORIGINAL Facebook app (outside CloneMe) notifies normally**
