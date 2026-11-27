@@ -323,6 +323,16 @@ public class BProcessManagerService implements ISystemService {
             BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
                     "child process died: " + record.processName);
         }
+        // v1.0.167: every guest process death is traced - the
+        // residency evidence for the notification work. A guest's
+        // own MQTT/socket connection is the only push route a clone
+        // has, so the report must show how long each guest lives.
+        try {
+            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                    "GuestDeath: pkg=" + record.getPackageName()
+                            + " proc=" + record.processName
+                            + " pid=" + record.pid + " user=" + record.userId);
+        } catch (Throwable ignored) { }
         synchronized (mProcessLock) {
             record.kill();
             Map<String, ProcessRecord> process = mProcessMap.get(record.buid);
@@ -335,7 +345,14 @@ public class BProcessManagerService implements ISystemService {
             mPidsSelfLocked.remove(record);
 
             removeProc(record);
-            BNotificationManagerService.get().deletePackageNotification(record.getPackageName(), record.userId);
+            // v1.0.167: process death no longer wipes the guest's
+            // notifications. Up to .166 this called
+            // deletePackageNotification (its ONLY caller), so every
+            // guest death - LMK included - cancelled that guest's
+            // notifications and deleted its channels, which real
+            // Android never does: a notification outlives its
+            // poster's process. Cleanup now happens on uninstall
+            // (BPackageManagerService), its proper home.
         }
     }
 

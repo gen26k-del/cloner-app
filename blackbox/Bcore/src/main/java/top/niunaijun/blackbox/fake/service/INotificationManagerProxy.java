@@ -9,6 +9,7 @@ import android.os.Build;
 import androidx.annotation.RequiresApi;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.List;
 
 import black.android.app.BRNotificationManager;
@@ -91,6 +92,23 @@ public class INotificationManagerProxy extends BinderInvocationStub {
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             List<NotificationChannel> notificationChannels = BNotificationManager.get().getNotificationChannels(BActivityThread.getAppPackageName());
             return ParceledListSliceCompat.create(notificationChannels);
+        }
+    }
+
+    // v1.0.167: DualSpaceLivre's rule - a guest asking for active
+    // notifications gets the space-local empty result instead of the
+    // host's list or a forbidden cross-user query. (The AIDL returns
+    // ParceledListSlice from API 31, a StatusBarNotification array
+    // before that.)
+    @ProxyMethod("getActiveNotifications")
+    public static class GetActiveNotifications extends MethodHook {
+
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                return ParceledListSliceCompat.create(new ArrayList<>());
+            }
+            return new android.service.notification.StatusBarNotification[0];
         }
     }
 

@@ -39,6 +39,7 @@ import top.niunaijun.blackbox.core.env.BEnvironment;
 import top.niunaijun.blackbox.core.system.BProcessManagerService;
 import top.niunaijun.blackbox.core.system.ISystemService;
 import top.niunaijun.blackbox.core.system.ProcessRecord;
+import top.niunaijun.blackbox.core.system.notification.BNotificationManagerService;
 import top.niunaijun.blackbox.core.system.user.BUserHandle;
 import top.niunaijun.blackbox.core.system.user.BUserInfo;
 import top.niunaijun.blackbox.core.system.user.BUserManagerService;
@@ -650,6 +651,11 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
                     ps.save();
                 }
                 onPackageUninstalled(packageName, removeApp, userId);
+                // v1.0.167: notification cleanup lives here (uninstall),
+                // not in process death - see BProcessManagerService.
+                try {
+                    BNotificationManagerService.get().deletePackageNotification(packageName, userId);
+                } catch (Throwable ignored) { }
             }
         }
     }
@@ -668,6 +674,9 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
                             continue;
                         }
                         onPackageUninstalled(packageName, true, userId);
+                        try {
+                            BNotificationManagerService.get().deletePackageNotification(packageName, userId);
+                        } catch (Throwable ignored) { }
                     }
                 mSettings.removePackage(packageName);
                 mComponentResolver.removeAllComponents(ps.pkg);

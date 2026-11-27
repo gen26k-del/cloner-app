@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-27, at version **1.0.166** (versionCode 151).
+> Last updated: 2026-11-27, at version **1.0.167** (versionCode 152).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -1369,6 +1369,63 @@ When they disagree, the user is right and the report is lying.
   (main vs :black vs :pN); HostStall lines if the
   host main thread is the blocker; and — decisive
   as always — the owner's popup count on .165.
+- **v1.0.167** — **Notification round 1: stop losing the
+  notifications guests DO post** (owner ordered the
+  notification work 2026-11-27 17:03, ahead of his
+  .166 popup verdict, which is still pending). Built
+  on the GitHub study (Part 1 Problem 2 + Part 2):
+  real FCM is architecturally unavailable to guests
+  in every engine of this family, so this round fixes
+  the attainable chain - the local posts a guest
+  makes once its own MQTT/socket delivers. Three
+  code-proven defects fixed in
+  `BNotificationManagerService`,
+  `BProcessManagerService`,
+  `BPackageManagerService` and
+  `INotificationManagerProxy` (BAMS untouched):
+  (1) **Silent drop removed.**
+  `enqueueNotificationWithTag` (and the
+  channel/cancel methods) began with
+  `findProcessByPid(callingPid); if (null) return;` -
+  a post from a guest process :black had no record
+  for vanished with no log. Resolution is now
+  layered: process record -> last-poster pid cache
+  -> owner of the notification's channel -> post
+  anyway under "unknown"; every fallback logs
+  `NotifyDrop:`. (2) **VA-style icon fixer**
+  (VirtualApp's NotificationFixer, in essence): a
+  resource small/large icon pointing at the guest
+  package is loaded from the guest's resources
+  (createPackageContext, AssetManager-on-sourceDir
+  fallback) and converted to a self-contained
+  bitmap icon; the notification is rebuilt via
+  `Notification.Builder.recoverBuilder`. Any
+  failure posts the original object unchanged;
+  `NotifyFix:` traces the outcome. (3) **Process
+  death no longer wipes notifications.**
+  `BProcessManagerService.onProcessDie` called
+  `deletePackageNotification` - its ONLY caller -
+  so every guest death (LMK included) cancelled
+  that guest's notifications and deleted its
+  channels, which real Android never does. The
+  cleanup moved to the two uninstall paths in
+  `BPackageManagerService`, its proper home. Plus
+  DualSpaceLivre's `getActiveNotifications` rule
+  (space-local empty result instead of a cross-user
+  query) in the guest proxy, and a `GuestDeath:`
+  trace on every guest process death - the
+  residency evidence for the next round, since
+  notification delivery IS guest liveness. Report
+  keywords added: NotifyDrop, NotifyFix, GuestDeath.
+  **First evidence to check:** the owner sends the
+  Facebook clone a message while the clone is alive
+  (recently opened) - does a notification appear? -
+  plus NotifyPost/NotifyFix/NotifyDrop/GuestDeath
+  lines in the .167 report. NOT claimed: real FCM
+  (impossible for clones), the shortcut badge
+  (separate, later), or that katana's MQTT stays
+  connected (liveness - the GuestDeath data decides
+  the next step).
 - **v1.0.166** — **Popup fix round 8: the broadcast
   ANR, fixed at its proven seams** (device evidence:
   the FULL .165 smart report, 2026-11-27 ~15:00,
@@ -1909,6 +1966,26 @@ When they disagree, the user is right and the report is lying.
    absent → the guest GMS never dispatches, and
    its MCS/checkin liveness is the target), and
    NotifyPost, still the bottom line.
+   **Update (v1.0.167, 2026-11-27):** the attainable
+   half of this problem is addressed - see §6: the
+   silent drop in BNotificationManagerService is
+   removed (layered package resolution + NotifyDrop
+   trace), guest notification icons are made
+   self-contained VA-style (NotifyFix), a guest
+   process's death no longer cancels its
+   notifications (the deletePackageNotification
+   call moved from onProcessDie to the uninstall
+   paths), getActiveNotifications returns the
+   space-local empty result, and GuestDeath tracing
+   records every guest death. Still open and NOT
+   solved by .167: whether katana's MQTT connection
+   stays alive long enough to receive at all
+   (liveness - the GuestDeath data is the evidence),
+   and real FCM (architecturally impossible for
+   clones - do not retry). First evidence: the
+   owner messages the Facebook clone with the clone
+   recently opened; then the .167 report's
+   NotifyPost/NotifyFix/GuestDeath lines.
 
 7. **Fresh clone opens then closes immediately (second
    Facebook clone, katana user 1) — FIXED in v1.0.156,
