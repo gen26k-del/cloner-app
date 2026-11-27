@@ -266,15 +266,53 @@ public class BActivityManager extends BlackManager<IBActivityManagerService> {
         });
     }
 
-    public void stopServiceToken(ComponentName componentName, IBinder token, int userId) {
+    // v1.0.164: stopServiceToken-এর remote কল background-এ পাঠানোর
+    // executor (নিচে দেখো)। Single-thread: stop-token কলগুলোর
+    // নিজেদের মধ্যে order ঠিক থাকে।
+    private static final ExecutorService sStopTokenExecutor = Executors.newSingleThreadExecutor();
+
+    public void stopServiceToken(final ComponentName componentName, final IBinder token, final int userId) {
+        // v1.0.164: আগে এই মেথড guest main thread-এ সরাসরি synchronous
+        // binder কল করত :black-এ (v1.0.163 রিপোর্ট: Chromium
+        // ChildProcessService.onBind → Service.stopSelf →
+        // IActivityManagerProxy$StopServiceToken.hook → এখানে →
+        // Stub$Proxy.stopServiceToken transact-এ main thread 4697ms
+        // parked — ANR-এর কিনারায়)। Server-পক্ষের কাজ নিজে trivial
+        // (token lookup + stopService), কিন্তু সেটা :black-এ shared
+        // mActiveServices monitor-এর নিচে চলে — :black ব্যস্ত থাকলেই
+        // guest-এর transact অপেক্ষা করে। stopServiceToken-এর ফল
+        // caller-এর দরকার নেই: framework-এর Service.stopSelf()
+        // return value ignore করে, আর hook এমনিতেও সব পথে true
+        // return করে; আসল service destruction server থেকে আলাদা
+        // async callback-এই আসে। Delayed stop নিরাপদও: server token
+        // দিয়ে record খোঁজে (পুরনো token নতুন instance-এর সাথে
+        // মেলে না — no-op) আর bindCount > 0 থাকলে stop করে না।
+        // তাই remote কলটা background executor-এ পাঠাও — semantics
+        // একই, শুধু calling thread আর অপেক্ষা করে না। (v1.0.156-এর
+        // async unbindService fix-এর একই pattern।)
+        final String pkg = componentName != null ? componentName.getPackageName() : null;
         try {
-            IBActivityManagerService service = getService();
-            if (service != null) {
-                service.stopServiceToken(componentName, token, userId);
+            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                    "StopSvcToken: pkg=" + pkg + " user=" + userId + " async=true queued");
+        } catch (Throwable ignored) { }
+        sStopTokenExecutor.execute(() -> {
+            long startMs = System.currentTimeMillis();
+            boolean ok = false;
+            try {
+                IBActivityManagerService service = getService();
+                if (service != null) {
+                    service.stopServiceToken(componentName, token, userId);
+                    ok = true;
+                }
+            } catch (Throwable e) {
+                Slog.e(TAG, "async stopServiceToken failed", e);
             }
-        } catch (RemoteException e) {
-            e.printStackTrace();
-        }
+            try {
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "StopSvcToken: done pkg=" + pkg + " elapsed="
+                                + (System.currentTimeMillis() - startMs) + "ms ok=" + ok);
+            } catch (Throwable ignored) { }
+        });
     }
 
     public void onStartCommand(Intent proxyIntent, int userId) {

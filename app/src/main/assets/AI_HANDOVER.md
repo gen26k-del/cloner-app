@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-27, at version **1.0.163** (versionCode 148).
+> Last updated: 2026-11-27, at version **1.0.164** (versionCode 149).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -1217,6 +1217,66 @@ When they disagree, the user is right and the report is lying.
   the :black wake deaths are separate items — if
   the popup persists, the next report's stacks
   name the next path.
+- **v1.0.164** — **Popup fix round 6: the guest
+  stopServiceToken wait** (device evidence: the .163
+  smart report, 2026-11-27 11:34, plus the owner's
+  verdict the same morning — **the popup STILL comes
+  on .163**; the owner ordered this build). What the
+  .163 report proved: (A) the .163 pin-shortcut fix
+  works — the requestPinShortcut stack is GONE from
+  the .163-era MainStall samples and there is NO new
+  crash file (the only crash is the old .162 ANR,
+  10:39:58); (B) the remaining samples are 2–2.5 s
+  blocks, plus one MainStallStack sample blocked
+  **4697 ms** in the service-stop path: Chromium's
+  ChildProcessService.onBind → Service.stopSelf →
+  IActivityManagerProxy$StopServiceToken.hook →
+  BActivityManager.stopServiceToken → synchronous
+  AIDL transact into :black, parked in
+  BinderProxy.transact. Root cause, code-proven:
+  the server-side work itself is trivial
+  (BActivityManagerService.stopServiceToken →
+  ActiveServices token lookup + stopService), but
+  it runs under :black's shared mActiveServices
+  monitor on a :black binder thread — the same lock
+  the bind/start service paths take — so whenever
+  :black is busy, the guest's main thread parks on
+  the transact, at the ANR edge. The wait is binder
+  contention, not server cost, so the fix is
+  guest-side, mirroring the v1.0.156 async-unbind
+  fix. Change (ONE engine file,
+  `fake/frameworks/BActivityManager.java`;
+  BActivityManagerService untouched; all .161–.163
+  fixes and tracing untouched):
+  `BActivityManager.stopServiceToken` now dispatches
+  the remote call to a dedicated single-thread
+  background executor and returns immediately.
+  Fire-and-forget is semantically safe here,
+  verified against the code: the framework's
+  Service.stopSelf() ignores the AIDL return value
+  (and the proxy hook already returns true on every
+  path); real destruction is delivered by the server
+  as a separate async callback
+  (ActiveServices.stopService →
+  bActivityThread.stopService), never as part of
+  this call's completion; and a delayed stop cannot
+  kill the wrong instance — the server looks the
+  record up BY TOKEN (a stale token matches nothing)
+  and refuses to stop while bindCount > 0. The
+  single-thread executor keeps stop-token calls in
+  order among themselves. A `StopSvcToken:` trace
+  (queued line with pkg/user; done line with the
+  remote call's elapsed + ok) proves the path on
+  device; the keyword joins the smart report's
+  diag/rare lists (MainActivity.kt). **First
+  evidence to check:** StopSvcToken queued/done
+  pairs in the next report, no new stopServiceToken
+  MainStallStack episodes, and — decisive as always —
+  the owner's popup count on .164. Honest limits:
+  the 2–2.5 s katana stalls and the :black
+  wake-death question remain separate items; if the
+  popup persists, the next report's stacks name the
+  next path.
 
 ## 7. Open problems (start here)
 
@@ -1449,6 +1509,24 @@ When they disagree, the user is right and the report is lying.
    showed clean startups in the .162 window; the
    10:44 restart's reason was not in the pasted
    excerpt).
+   **Update (v1.0.163 report + owner verdict +
+   v1.0.164, 2026-11-27):** the .163 report (11:34)
+   shows the pin-shortcut fix working — that stack
+   is gone from the .163-era MainStall samples and
+   there is no new crash file — and the owner
+   reports the popup STILL comes on .163 (11:37).
+   The same report's stacks name the next blocker:
+   a guest main thread parked 4697 ms in the
+   stopServiceToken binder transact into :black
+   (Chromium ChildProcessService.onBind →
+   Service.stopSelf). v1.0.164 makes that call
+   fire-and-forget: BActivityManager.stopServiceToken
+   dispatches to a single-thread background
+   executor and returns immediately (`StopSvcToken:`
+   traces; see §6). **First evidence to check:**
+   StopSvcToken queued/done pairs, no repeat of
+   the stopServiceToken stack, and the owner's
+   popup count on .164.
 6. **Per-clone notifications unreliable — pinned symptom: the Facebook
    clone (com.facebook.katana) receives NO notifications at all, while
    the ORIGINAL Facebook app (outside CloneMe) notifies normally**
