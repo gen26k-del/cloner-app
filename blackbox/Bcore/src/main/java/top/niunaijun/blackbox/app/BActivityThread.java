@@ -1702,6 +1702,21 @@ public class BActivityThread extends IBActivityThread.Stub {
                 Slog.e(TAG,
                         "Error receiving broadcast " + intent
                                 + " in " + mReceiver);
+                // v1.0.166: guest receiver exception ছুড়লে broadcast
+                // খোলা থেকে যেত — PendingResult finish হতো না,
+                // :black-এর record-ও ঝুলে থাকত; সিস্টেমের চোখে
+                // broadcast শেষই হয়নি → ANR (.165 AnrExit-এর :p0/:p1
+                // SCREEN_OFF রেকর্ড এই প্যাটার্নের)। DualSpaceLivre-এর
+                // হুবহু সমাধান: catch-এও pendingResult.finish() +
+                // finishBroadcast() — দুটোই guarded।
+                try {
+                    pendingResult.finish();
+                } catch (Throwable ignored) {
+                }
+                try {
+                    BlackBoxCore.getBActivityManager().finishBroadcast(data.data);
+                } catch (Throwable ignored) {
+                }
             }
         });
     }

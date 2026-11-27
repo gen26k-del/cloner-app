@@ -723,10 +723,41 @@ public class IActivityManagerProxy extends ClassInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             RunningAppProcessInfo runningAppProcesses = BActivityManager.get().getRunningAppProcesses(BActivityThread.getAppPackageName(), BActivityThread.getUserId());
-            if (runningAppProcesses == null) {
-                return new ArrayList<>();
+            java.util.List<ActivityManager.RunningAppProcessInfo> list;
+            if (runningAppProcesses == null || runningAppProcesses.mAppProcessInfoList == null) {
+                list = new ArrayList<>();
+            } else {
+                list = runningAppProcesses.mAppProcessInfoList;
             }
-            return runningAppProcesses.mAppProcessInfoList;
+            // v1.0.166: নিজের entry সবসময় নিশ্চিত করো (DualSpaceLivre-
+            // এর পর্যবেক্ষণ: Meta অ্যাপগুলো শুরুতেই getRunningAppProcesses
+            // যাচাই করে — নিজের প্রসেস তালিকায় না পেলে আচরণ ভেঙে
+            // যায়)। :black-পক্ষের তালিকা caller-এর ProcessRecord বা
+            // আসল সিস্টেম-তালিকার pid মিলের ওপর নির্ভর করে — দুটোর
+            // যেকোনো একটা ফাঁকা থাকলেই নিজের entry হারিয়ে যায়।
+            // এখানে (guest পক্ষে, BAMS সম্পাদনা ছাড়াই) ঘাটতি পূরণ হয়।
+            try {
+                int myPid = android.os.Process.myPid();
+                boolean hasSelf = false;
+                for (ActivityManager.RunningAppProcessInfo info : list) {
+                    if (info != null && info.pid == myPid) {
+                        hasSelf = true;
+                        break;
+                    }
+                }
+                if (!hasSelf) {
+                    ActivityManager.RunningAppProcessInfo self =
+                            new ActivityManager.RunningAppProcessInfo(
+                                    BActivityThread.getAppProcessName(),
+                                    myPid,
+                                    new String[]{BActivityThread.getAppPackageName()});
+                    self.uid = android.os.Process.myUid();
+                    self.importance = ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND;
+                    list.add(self);
+                }
+            } catch (Throwable ignored) {
+            }
+            return list;
         }
     }
 

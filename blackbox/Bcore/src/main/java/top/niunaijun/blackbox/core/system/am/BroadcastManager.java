@@ -3,9 +3,6 @@ package top.niunaijun.blackbox.core.system.am;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.os.Build;
-import android.os.Handler;
-import android.os.Looper;
-import android.os.Message;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -13,6 +10,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import top.niunaijun.blackbox.BlackBoxCore;
 import top.niunaijun.blackbox.core.system.pm.BPackage;
@@ -29,8 +30,6 @@ public class BroadcastManager implements PackageMonitor {
 
     public static final int TIMEOUT = 9000;
 
-    public static final int MSG_TIME_OUT = 1;
-
     private static BroadcastManager sBroadcastManager;
 
     private final BActivityManagerService mAms;
@@ -42,22 +41,23 @@ public class BroadcastManager implements PackageMonitor {
     // onPackageInstalled একই প্যাকেজ দুইবার register করা ঠেকায়।
     private final Set<String> mRegisteredPackages = new HashSet<>();
 
-    private final Handler mHandler = new Handler(Looper.getMainLooper()) {
-        @Override
-        public void handleMessage(Message msg) {
-            super.handleMessage(msg);
-            switch (msg.what) {
-                case MSG_TIME_OUT:
-                    try {
-                        PendingResultData data = (PendingResultData) msg.obj;
-                        data.build().finish();
-                        Slog.d(TAG, "Timeout Receiver: " + data);
-                    } catch (Throwable ignore) {
-                    }
-                    break;
-            }
-        }
-    };
+    // v1.0.166: broadcast timeout আর :black-এর MAIN LOOPER-এ চলে না।
+    // আগে timeout ছিল main-looper Handler-এ — main thread আটকে গেলে
+    // timeout-টাই চলতে পারত না, ফলে PendingResult কখনো finish হতো না
+    // আর সিস্টেম broadcast ANR দিত। .165-এর AnrExit রেকর্ডে ৫টা ANR-ই
+    // SCREEN_ON/OFF broadcast (ProxyBroadcastReceiver) — ঠিক এই গর্ত।
+    // DualSpaceLivre (GitHub-এর যাচাইকৃত ফোর্ক) একই সমাধান ব্যবহার
+    // করে: dedicated ScheduledExecutorService + প্রতি token-এ একটা
+    // ScheduledFuture, TIMEOUT-এ সবসময় finish()। এখানে হুবহু সেই
+    // পদ্ধতি — শুধু thread-টা daemon + নামকরা, যাতে :black বন্ধের
+    // পথে আটকে না থাকে।
+    private final Map<String, ScheduledFuture<?>> mReceiverTimeouts = new HashMap<>();
+    private final ScheduledExecutorService mTimeoutExecutor =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "BcastTimeout");
+                t.setDaemon(true);
+                return t;
+            });
 
     public static BroadcastManager startSystem(BActivityManagerService ams, BPackageManagerService pms) {
         if (sBroadcastManager == null) {
@@ -182,17 +182,41 @@ public class BroadcastManager implements PackageMonitor {
 
     public void sendBroadcast(PendingResultData pendingResultData) {
         synchronized (mReceiversData) {
-            
             mReceiversData.put(pendingResultData.mBToken, pendingResultData);
-            Message obtain = Message.obtain(mHandler, MSG_TIME_OUT, pendingResultData);
-            mHandler.sendMessageDelayed(obtain, TIMEOUT);
+            // v1.0.166: একই token-এ পুরনো timeout থাকলে বাতিল করো
+            // (DualSpaceLivre পদ্ধতি)।
+            ScheduledFuture<?> oldTimeout = mReceiverTimeouts.remove(pendingResultData.mBToken);
+            if (oldTimeout != null) {
+                oldTimeout.cancel(false);
+            }
+            ScheduledFuture<?> timeout = mTimeoutExecutor.schedule(() -> {
+                try {
+                    synchronized (mReceiversData) {
+                        mReceiversData.remove(pendingResultData.mBToken);
+                        mReceiverTimeouts.remove(pendingResultData.mBToken);
+                    }
+                    pendingResultData.build().finish();
+                    Slog.d(TAG, "Timeout Receiver: " + pendingResultData);
+                    try {
+                        BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                                "BcastTimeout: forced finish after " + TIMEOUT + "ms");
+                    } catch (Throwable ignored) { }
+                } catch (Throwable ignored) {
+                }
+            }, TIMEOUT, TimeUnit.MILLISECONDS);
+            mReceiverTimeouts.put(pendingResultData.mBToken, timeout);
         }
     }
 
     public void finishBroadcast(PendingResultData data) {
         synchronized (mReceiversData) {
-            
-            mHandler.removeMessages(MSG_TIME_OUT, mReceiversData.get(data.mBToken));
+            // v1.0.166: record সরাও + timeout বাতিল করো (আগে শুধু
+            // main-looper message সরানো হতো, record থেকে যেত)।
+            mReceiversData.remove(data.mBToken);
+            ScheduledFuture<?> timeout = mReceiverTimeouts.remove(data.mBToken);
+            if (timeout != null) {
+                timeout.cancel(false);
+            }
         }
     }
 

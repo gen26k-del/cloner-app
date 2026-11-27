@@ -10,6 +10,8 @@ import android.os.RemoteException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import top.niunaijun.blackbox.BlackBoxCore;
 import top.niunaijun.blackbox.core.system.user.BUserInfo;
@@ -28,6 +30,26 @@ public class ProxyBroadcastReceiver extends BroadcastReceiver {
     // আলাদাই থাকে।
     private static final long RAW_DEDUPE_WINDOW_MS = 2000;
     private static final Map<String, Long> sRecentRawBroadcasts = new HashMap<>();
+
+    // v1.0.166: broadcast fan-out আর receiver-এর MAIN THREAD-এ চলে না।
+    // .165-এর AnrExit রেকর্ড: ৫টা ANR-এর ৩টাই :black প্রসেসে
+    // SCREEN_ON/OFF broadcast-এ — onReceive main thread-এ বসে
+    // queryBroadcastReceivers + scheduleBroadcastReceiver binder কল
+    // শেষ হওয়ার অপেক্ষা করত, আর :black ব্যস্ত থাকলেই broadcast
+    // timeout → ANR। DualSpaceLivre-এর যাচাইকৃত পদ্ধতি: delivery
+    // binder কলের বাইরে, আলাদা executor-এ; goAsync-এর PendingResult
+    // ওই thread থেকেই finish হয় (বা BroadcastManager-এর executor
+    // timeout শেষ পর্যন্ত finish করে — দুই দিক থেকেই নিশ্চিত)।
+    // BActivityManagerService সম্পাদনা করা যায় না বলে তাদের BAMS-
+    // পক্ষের অংশটা এখানে, receiver প্রান্তে বসানো হলো। pool=2 —
+    // একটা আটকে থাকা fan-out পরের broadcast-গুলোকে অনির্দিষ্টকাল
+    // আটকে রাখতে পারে না।
+    private static final ExecutorService sFanoutExecutor =
+            Executors.newFixedThreadPool(2, r -> {
+                Thread t = new Thread(r, "BcastFanout");
+                t.setDaemon(true);
+                return t;
+            });
 
     private static boolean isPushAction(String action) {
         return "com.google.android.c2dm.intent.RECEIVE".equals(action)
@@ -119,38 +141,66 @@ public class ProxyBroadcastReceiver extends BroadcastReceiver {
                 pendingResult.finish();
                 return;
             }
-            boolean handedOff = false;
-            try {
-                List<BUserInfo> users = BlackBoxCore.get().getUsers();
-                if (users != null) {
-                    for (BUserInfo user : users) {
-                        if (user == null) {
-                            continue;
+            // v1.0.166: fan-out (query + schedule binder কল) background
+            // executor-এ — onReceive সাথে সাথে ফেরত আসে, main thread
+            // আর binder উত্তরের অপেক্ষায় বসে থাকে না। PendingResult
+            // executor থেকেই finish হয়; fan-out ব্যর্থ হলেও finish
+            // নিশ্চিত (নিচের catch)।
+            final PendingResult fanoutResult = pendingResult;
+            final Intent fanoutIntent = intent;
+            final Context fanoutContext = context;
+            sFanoutExecutor.execute(() -> {
+                boolean handedOff = false;
+                try {
+                    List<BUserInfo> users = BlackBoxCore.get().getUsers();
+                    if (users != null) {
+                        for (BUserInfo user : users) {
+                            if (user == null) {
+                                continue;
+                            }
+                            List<ResolveInfo> resolves = BlackBoxCore.getBPackageManager()
+                                    .queryBroadcastReceivers(fanoutIntent, PackageManager.GET_META_DATA, null, user.id);
+                            if (resolves == null || resolves.isEmpty()) {
+                                continue;
+                            }
+                            BlackBoxCore.getBActivityManager().scheduleBroadcastReceiver(
+                                    fanoutIntent, new PendingResultData(fanoutResult), user.id);
+                            handedOff = true;
                         }
-                        List<ResolveInfo> resolves = BlackBoxCore.getBPackageManager()
-                                .queryBroadcastReceivers(intent, PackageManager.GET_META_DATA, null, user.id);
-                        if (resolves == null || resolves.isEmpty()) {
-                            continue;
-                        }
-                        BlackBoxCore.getBActivityManager().scheduleBroadcastReceiver(
-                                intent, new PendingResultData(pendingResult), user.id);
-                        handedOff = true;
                     }
+                } catch (Throwable e) {
+                    // fan-out ব্যর্থ হলে নিচে finish — broadcast হারালেও
+                    // :black প্রসেস যেন আটকে না থাকে।
+                    try {
+                        BlackBoxCore.traceInitPublic(fanoutContext,
+                                "BlackInitFail: fan-out action=" + fanoutIntent.getAction()
+                                        + " -> " + e.getClass().getName() + ": " + e.getMessage());
+                    } catch (Throwable ignored) { }
                 }
-            } catch (Throwable e) {
-                // fan-out ব্যর্থ হলে নিচে finish — broadcast হারালেও
-                // :black প্রসেস যেন আটকে না থাকে।
-            }
-            if (!handedOff) {
-                pendingResult.finish();
-            }
+                if (!handedOff) {
+                    try { fanoutResult.finish(); } catch (Throwable ignored) { }
+                }
+            });
             return;
         }
-        try {
-            BlackBoxCore.getBActivityManager().scheduleBroadcastReceiver(record.mIntent, new PendingResultData(pendingResult), record.mUserId);
-        } catch (RemoteException e) {
-            pendingResult.finish();
-        }
+        // v1.0.166: stub-path dispatch-ও একই executor-এ (উপরে দেখো) —
+        // binder কল main thread-এ নয়; ব্যর্থতায় finish নিশ্চিত।
+        final PendingResult stubResult = pendingResult;
+        final ProxyBroadcastRecord stubRecord = record;
+        sFanoutExecutor.execute(() -> {
+            try {
+                BlackBoxCore.getBActivityManager().scheduleBroadcastReceiver(
+                        stubRecord.mIntent, new PendingResultData(stubResult), stubRecord.mUserId);
+            } catch (Throwable e) {
+                try {
+                    BlackBoxCore.traceInitPublic(context,
+                            "BlackInitFail: stub dispatch action="
+                                    + (stubRecord.mIntent != null ? stubRecord.mIntent.getAction() : null)
+                                    + " -> " + e.getClass().getName() + ": " + e.getMessage());
+                } catch (Throwable ignored) { }
+                try { stubResult.finish(); } catch (Throwable ignored) { }
+            }
+        });
         } catch (Throwable e) {
             // v1.0.154: BlackInitFail — ঠিক কোন throwable, কোন
             // action-এ, তা ট্রেসে থাকল; প্রসেস মরল না। goAsync নেওয়া

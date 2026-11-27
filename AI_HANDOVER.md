@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-27, at version **1.0.165** (versionCode 150).
+> Last updated: 2026-11-27, at version **1.0.166** (versionCode 151).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -1369,6 +1369,112 @@ When they disagree, the user is right and the report is lying.
   (main vs :black vs :pN); HostStall lines if the
   host main thread is the blocker; and — decisive
   as always — the owner's popup count on .165.
+- **v1.0.166** — **Popup fix round 8: the broadcast
+  ANR, fixed at its proven seams** (device evidence:
+  the FULL .165 smart report, 2026-11-27 ~15:00,
+  received complete via a Google Doc after chat
+  pastes kept truncating; owner's .165 verdict
+  14:52 — **the popup STILL comes**). The .165
+  attribution paid off outright. **AnrExit named
+  the ANR'ing processes — 5 system ANR records,
+  ALL of them broadcast ANRs on screen on/off:**
+  14:50:33 :black SCREEN_ON →
+  ProxyBroadcastReceiver; 14:49:51 :p1 SCREEN_OFF
+  → guest GMS DeviceStateReceiver; 14:49:44 :black
+  SCREEN_OFF → ProxyBroadcastReceiver; 14:49:34
+  :p0 SCREEN_OFF → a Facebook guest receiver;
+  13:40:52 :black SCREEN_ON →
+  ProxyBroadcastReceiver (.164 era — same pattern
+  across builds). HostStall caught one 2001 ms
+  host-main block at 14:47:10 —
+  ClonerApp.onCreate → BlackBoxCore.doCreate →
+  areServicesAvailable → isBlackProcessRunning →
+  ProviderCall → FutureTask.get() — inside the
+  existing 5 s+5 s bounds (.140) and the parallel
+  fetch (.158); NOT an ANR record, so this round
+  deliberately leaves startup alone (already
+  bounded; all 5 ANRs are broadcasts). At the
+  owner's direction the round was preceded by a
+  full GitHub mining pass (NewBlackbox 93 issues,
+  FBlackBox 182 issues, DualSpaceLivre code +
+  release notes, VirtualApp lineage; study +
+  Part 2 in the goal's hidden_files/
+  github-virtualization-study.md). The proven
+  holes, and this build's fixes — NONE of them in
+  BActivityManagerService (their fix's BAMS part
+  is substituted at the editable ends):
+  (1) **BroadcastManager timeout moved off the
+  main looper** — the 9000 ms PendingResult
+  timeout ran on a :black MAIN-LOOPER Handler, so
+  a blocked :black main thread disabled its own
+  safety net and the finish never fired.
+  DualSpaceLivre's verbatim machinery replaces
+  it: a dedicated single-thread
+  ScheduledExecutorService ("BcastTimeout",
+  daemon) + a per-token ScheduledFuture map;
+  sendBroadcast cancels any stale future and
+  schedules a finish that ALWAYS runs;
+  finishBroadcast now also removes the record
+  (before, it only removed the looper message).
+  Timeout firings trace as `BcastTimeout:` (new
+  report keyword). Our .157 deferred registration
+  in startup() is KEPT (ahead of both upstream
+  and DualSpaceLivre — do not port their
+  startup()).
+  (2) **ProxyBroadcastReceiver fan-out moved off
+  the receiver thread** — onReceive (main thread)
+  parked on queryBroadcastReceivers +
+  scheduleBroadcastReceiver binder calls into a
+  busy :black. Both paths (raw fan-out and stub
+  dispatch) now run on a static 2-thread daemon
+  executor ("BcastFanout"); goAsync's
+  PendingResult is finished from the executor,
+  and every failure path finishes it too
+  (BlackInitFail traces kept). onReceive returns
+  immediately.
+  (3) **BActivityThread.scheduleReceiver catch
+  now finishes** (DualSpaceLivre verbatim): a
+  throwing guest receiver left the broadcast open
+  forever — our catch only logged. It now calls
+  pendingResult.finish() +
+  BActivityManager.finishBroadcast(data.data),
+  both guarded — the :p0/:p1 SCREEN_OFF pattern.
+  (4) **Proxy job cap 64** (DualSpaceLivre port):
+  all guests share the host UID against Android's
+  100-jobs-per-UID limit — uncapped proxy jobs
+  crash-looped their host and ANR'd the engine.
+  BJobManagerService: MAX_PROXY_JOBS=64, records
+  keyed userId+processName+jobId (LinkedHashMap,
+  synchronized), scheduleJob returns null at cap
+  (`JobCap:` trace, new keyword), cancel/cancelAll
+  now actually remove records (ours were stubs),
+  systemReady() cancels stale ProxyJobService
+  pending jobs + clears records. Guest side
+  (IJobServiceProxy Schedule/Enqueue): a null
+  from the job manager now returns RESULT_FAILURE
+  immediately instead of falling through to a
+  doomed real-scheduler attempt.
+  (5) **getRunningAppProcesses self-entry
+  guarantee** (guest-side hook
+  IActivityManagerProxy, no BAMS contact): if
+  the returned list lacks the caller's own pid
+  (ProcessRecord/system-list gap), a synthetic
+  entry (virtual process name, myPid, host uid,
+  IMPORTANCE_FOREGROUND) is appended — Meta apps
+  validate this list early (DualSpaceLivre).
+  Audits that came back NO-OP: ServiceConnection
+  Delegate is byte-identical to upstream +
+  DualSpaceLivre (the NewBlackbox #60 Android-14
+  signature problem is not in our copy); the host
+  startup provider wait is already bounded
+  (.140/.158). **First evidence to check:** the
+  .166 report's AnrExit section after screen
+  on/off cycles — new broadcast ANR records
+  should be ABSENT; `BcastTimeout:` lines are
+  acceptable proof the net now fires (they mean a
+  guest was slow, not that the system ANR'd);
+  and — decisive as always — the owner's popup
+  verdict on .166.
 
 ## 7. Open problems (start here)
 
@@ -1646,6 +1752,29 @@ When they disagree, the user is right and the report is lying.
    §6). **First evidence to check:** the AnrExit
    processName(s) from a popup window — that name
    decides where round 8 aims.
+   **Update (FULL .165 report + v1.0.166,
+   2026-11-27):** the AnrExit evidence arrived
+   complete (via Google Doc — chat pastes truncate;
+   the full report is 61,978 chars) and it is
+   unambiguous: **5 system ANR records, ALL
+   broadcast ANRs on SCREEN_ON/OFF** — :black ×3
+   (ProxyBroadcastReceiver), :p1 (guest GMS
+   receiver), :p0 (Facebook guest receiver). The
+   popup is the broadcast path, not the host UI.
+   v1.0.166 (see §6) fixes the three proven seams
+   without touching BActivityManagerService:
+   BroadcastManager's timeout moved from :black's
+   main looper to a dedicated executor (the safety
+   net could not run while the main thread was
+   blocked — the central hole), ProxyBroadcast
+   Receiver's fan-out moved off the receiver
+   thread, and BActivityThread's scheduleReceiver
+   catch now finishes the broadcast; plus the
+   64-job proxy cap and the getRunningAppProcesses
+   self-entry guarantee. **First evidence to
+   check:** .166 report AnrExit after screen
+   on/off cycles (expect NO new broadcast ANRs)
+   + the owner's popup verdict.
 6. **Per-clone notifications unreliable — pinned symptom: the Facebook
    clone (com.facebook.katana) receives NO notifications at all, while
    the ORIGINAL Facebook app (outside CloneMe) notifies normally**

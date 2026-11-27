@@ -61,6 +61,7 @@ public class IJobServiceProxy extends BinderInvocationStub {
                 Slog.d(TAG, "Schedule: Processing JobInfo for package: " + jobInfo.getService().getPackageName());
                 
                 
+                boolean quotaReached = false;
                 try {
                     JobInfo proxyJobInfo = BlackBoxCore.getBJobManager().schedule(jobInfo);
                     if (proxyJobInfo != null) {
@@ -68,11 +69,19 @@ public class IJobServiceProxy extends BinderInvocationStub {
                         Slog.d(TAG, "Schedule: Successfully created proxy JobInfo");
                         return method.invoke(who, args);
                     }
+                    // v1.0.166: null মানেই proxy-job cap (64) পূর্ণ —
+                    // DualSpaceLivre-এর আচরণ: সাথে সাথে RESULT_FAILURE,
+                    // আসল scheduler-এ ভুয়া component দিয়ে চেষ্টা নয়।
+                    quotaReached = true;
                 } catch (Exception e) {
                     Slog.w(TAG, "Schedule: BlackBox job manager failed, trying system fallback", e);
                 }
-                
-                
+
+                if (quotaReached) {
+                    Slog.w(TAG, "Schedule: Proxy job quota reached, returning RESULT_FAILURE");
+                    return 0;
+                }
+
                 return scheduleWithUIDSpoofing(who, method, args, jobInfo);
                 
             } catch (Exception e) {
@@ -237,6 +246,7 @@ public class IJobServiceProxy extends BinderInvocationStub {
                 Slog.d(TAG, "Enqueue: Processing JobInfo for package: " + jobInfo.getService().getPackageName());
                 
                 
+                boolean quotaReached = false;
                 try {
                     JobInfo proxyJobInfo = BlackBoxCore.getBJobManager().schedule(jobInfo);
                     if (proxyJobInfo != null) {
@@ -244,11 +254,18 @@ public class IJobServiceProxy extends BinderInvocationStub {
                         Slog.d(TAG, "Enqueue: Successfully created proxy JobInfo");
                         return method.invoke(who, args);
                     }
+                    // v1.0.166: Schedule-এর মতোই — cap পূর্ণ হলে
+                    // RESULT_FAILURE (DualSpaceLivre)।
+                    quotaReached = true;
                 } catch (Exception e) {
                     Slog.w(TAG, "Enqueue: BlackBox job manager failed, trying system fallback", e);
                 }
-                
-                
+
+                if (quotaReached) {
+                    Slog.w(TAG, "Enqueue: Proxy job quota reached, returning RESULT_FAILURE");
+                    return 0;
+                }
+
                 return enqueueWithUIDSpoofing(who, method, args, jobInfo);
                 
             } catch (Exception e) {
