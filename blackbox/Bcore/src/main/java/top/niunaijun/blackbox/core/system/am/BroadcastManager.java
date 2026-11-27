@@ -95,12 +95,24 @@ public class BroadcastManager implements PackageMonitor {
         Thread registerThread = new Thread(() -> {
             long startMs = System.currentTimeMillis();
             int registered = 0;
+            // v1.0.162: BlackStage — BcastReg thread কোন ধাপে আছে
+            // (PmReady-র অপেক্ষা vs আসল registration loop) তা আলাদা
+            // লাইনে থাকে; wake-মৃত্যুর সঙ্গে মিলিয়ে পড়তে হবে।
+            try {
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "BlackStage: BcastReg begin (awaiting PmReady)");
+            } catch (Throwable ignored) { }
             try {
                 // v1.0.161: the PM package scan is itself deferred
                 // (PmReady thread) — wait for it before taking the
                 // snapshot, or this sweep would see an empty package
                 // list and register no guest receivers at all.
-                mPms.awaitReady(20000);
+                boolean pmReady = mPms.awaitReady(20000);
+                try {
+                    BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                            "BlackStage: BcastReg pmReady=" + pmReady
+                                    + " waited=" + (System.currentTimeMillis() - startMs) + "ms");
+                } catch (Throwable ignored) { }
                 final List<BPackageSettings> bPackageSettings = mPms.getBPackageSettings();
                 for (BPackageSettings bPackageSetting : bPackageSettings) {
                     try {

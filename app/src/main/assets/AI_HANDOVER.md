@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-26, at version **1.0.161** (versionCode 146).
+> Last updated: 2026-11-27, at version **1.0.162** (versionCode 147).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -1079,6 +1079,81 @@ When they disagree, the user is right and the report is lying.
   wake deaths gone or sharply reduced across a full
   evening of screen on/off; and — decisive as always —
   the owner's popup count on .161.
+- **v1.0.162** — **Tracing only: :black startup stages +
+  the notification chain's last hops (NO behaviour
+  change)** (device evidence: the .161 smart report,
+  2026-11-27 09:18 — the first report with clones
+  actually opened — plus the owner's verdict the same
+  morning: **the popup STILL comes on .161, exactly as
+  before, and notifications still never arrive**).
+  What the .161 report proved: (A) MainStall = 0 lines
+  in the window and katana launches fast (142–401 ms),
+  yet **:black STILL died INIT_FAILURE on SCREEN_OFF
+  (09:16:11) and SCREEN_ON (09:18:24)**, with guest
+  :p0/:p1/:p2 INIT_FAILURE on the same SCREEN_OFF —
+  the .161 PmReady deferral did NOT cure the
+  wake-death, and no trace says WHICH init stage the
+  process died in. (B) The notification chain finally
+  has data: GmsBind outcome=virtual (katana's c2dm
+  REGISTER binds reach the GUEST GMS clone), guest
+  GMS alive (GmsSvc lines), MqttServiceV2 starts
+  repeatedly, 27 NotifyChannels created — but FcmReg
+  0, PushRx 0, and **NotifyPost still 0**: no
+  registration result and no message ever reaches a
+  guest, and no notification is ever posted. (C)
+  WhatsApp again: bind completes, activity never
+  starts. Changes (tracing only; BActivityManager
+  Service untouched; all .161 fixes untouched):
+  (1) **`BlackStage:`** — stage tracing of the whole
+  :black init path through the existing traceInit
+  file (one flushed line per stage): SystemCall
+  Provider.onCreate enter/exit; BlackBoxSystem
+  .startup() begin, env load, services collected,
+  and a begin/done pair with elapsed around EVERY
+  service's systemReady(); inside the deferred
+  threads — PmReady thread begin / scan done /
+  resolver done (in BPackageManagerService
+  .systemReady), BcastReg begin + pmReady waited
+  result (BroadcastManager.startup), PreInstall
+  begin (with the await outcome) / done. A mid-init
+  death leaves the last completed stage on record:
+  the stage with a begin but no done is the death
+  stage. The report gains a dedicated BlackStage
+  section (total + last 40) and the keyword joins
+  both diag lists. (2) **`FcmReg: delivered`** —
+  BActivityThread.scheduleReceiver (the guest-side
+  final hop, where a broadcast is actually handed
+  to a guest receiver) now traces delivery attempts
+  of c2dm REGISTRATION and RECEIVE intents: to=
+  guest pkg, user, receiver class, action. This
+  hop was previously invisible: PushRx covers raw
+  arrival at :black's proxy receivers, PushBcast /
+  the .159 FcmReg cover guests SENDING broadcasts —
+  neither proves delivery INTO a guest. (3)
+  **`MqttTrace: startService FAILED`** — the
+  StartService hook now captures the virtual start
+  result for MQTT classes; a null result (virtual
+  AMS start failed after retries, e.g. :black dead
+  or slow) writes a FAILED line. Successful starts
+  add no line (PushSvc already logs them with
+  resolved=). MQTT bind outcomes were already
+  traced in .159 (virtual/failed0/real). NOT
+  changed, deliberately: the NotifyPost hook
+  already exists (v1.0.150, at INotificationManager
+  Proxy's enqueue hook — pkg/user/id/tag; it has
+  simply never fired for katana), and PushRx
+  already covers raw RECEIVE/REGISTRATION arrivals,
+  so neither was duplicated. **First evidence to
+  check in the next report:** the BlackStage
+  section read against the death records — which
+  stage lacks its done line at a wake death;
+  FcmReg delivered lines (any = the registration
+  result/message reaches a guest and the break is
+  inside the receiver; none = the break is
+  upstream, in the guest GMS's dispatch); MqttTrace
+  FAILED lines; NotifyPost, still the bottom line;
+  and — decisive as always — the owner's popup
+  count on .162.
 
 ## 7. Open problems (start here)
 
@@ -1268,6 +1343,27 @@ When they disagree, the user is right and the report is lying.
    check:** PmReady traces, :black wake deaths in
    the death-records section, and the owner's popup
    count on .161.
+   **Update (v1.0.161 report + owner verdict,
+   2026-11-27):** the owner reports the popup on
+   .161 comes **exactly as before — NOT fixed** —
+   and its report (09:18, the first with clones
+   actually opened) shows why the hunt continues:
+   MainStall = 0 in the window, yet :black STILL
+   died INIT_FAILURE on SCREEN_OFF (09:16:11) and
+   SCREEN_ON (09:18:24), with :p0/:p1/:p2 dying on
+   the same SCREEN_OFF. The PmReady deferral did
+   not cure the wake-death, and no existing trace
+   says which init stage dies. v1.0.162 is a
+   tracing-only build for exactly that question:
+   `BlackStage:` begin/done lines around every
+   :black startup stage (provider onCreate,
+   BlackBoxSystem.startup, each systemReady, the
+   PmReady scan/resolver, BcastReg, PreInstall),
+   in a dedicated report section. **First evidence
+   to check:** the BlackStage section against the
+   death records — the stage with a begin but no
+   done at a wake death is the next fix target;
+   plus the owner's popup count on .162.
 6. **Per-clone notifications unreliable — pinned symptom: the Facebook
    clone (com.facebook.katana) receives NO notifications at all, while
    the ORIGINAL Facebook app (outside CloneMe) notifies normally**
@@ -1377,6 +1473,31 @@ When they disagree, the user is right and the report is lying.
    FCM-shaped in-clone and suspicion moves to its
    in-app push arming (e.g. its own settings/token
    state), not to transport.
+   **Update (v1.0.161 report, 2026-11-27 09:18 —
+   the first report with clones actually opened;
+   owner verdict the same morning: notifications
+   STILL never arrive):** the .159 evidence finally
+   landed. GmsBind outcome=virtual — katana's c2dm
+   REGISTER binds reach the guest GMS (never
+   failed0); the guest GMS is alive (GmsSvc lines);
+   MqttServiceV2 starts repeatedly (PushSvc /
+   MqttTrace); 27 notification channels exist for
+   katana user 0. But FcmReg = 0, PushRx = 0, and
+   NotifyPost = 0 — no REGISTRATION result and no
+   RECEIVE ever reaches a guest, and katana never
+   posts. The unobserved hop is now precise: does
+   anything get DELIVERED into a guest process?
+   v1.0.162 traces exactly that —
+   `FcmReg: delivered` at BActivityThread
+   .scheduleReceiver for REGISTRATION/RECEIVE
+   intents, plus `MqttTrace: startService FAILED`
+   for virtual MQTT starts that return null.
+   **First evidence to check:** FcmReg delivered
+   lines in the next report (present → the break
+   is inside the guest receiver/Firebase handling;
+   absent → the guest GMS never dispatches, and
+   its MCS/checkin liveness is the target), and
+   NotifyPost, still the bottom line.
 
 7. **Fresh clone opens then closes immediately (second
    Facebook clone, katana user 1) — FIXED in v1.0.156,

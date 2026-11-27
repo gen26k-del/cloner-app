@@ -1656,6 +1656,28 @@ public class BActivityThread extends IBActivityThread.Stub {
         if (!isInit()) {
             bindApplication();
         }
+        // v1.0.162: FcmReg ডেলিভারি ট্রেস (শুধু প্রমাণ — আচরণে কোনো
+        // বদল নয়)। C2DM REGISTRATION (রেজিস্ট্রেশনের ফলাফল) বা
+        // RECEIVE (আসল FCM মেসেজ) intent guest প্রসেসে ডেলিভারির
+        // জন্য এখানে পৌঁছালেই এই লাইন — এটাই শৃঙ্খলের শেষ ধাপ।
+        // আগের জালগুলো অন্য ধাপ ধরে: PushRx = raw broadcast
+        // :black-এর proxy receiver-এ আসা, PushBcast/FcmReg(.159) =
+        // guest broadcast পাঠানো। এখানে লাইন না থাকলে REGISTRATION/
+        // RECEIVE guest-এর দরজা পর্যন্তই পৌঁছায়নি; লাইন থাকলে
+        // ডেলিভারি ঘটেছে এবং সমস্যা তার পরের ধাপে (receiver-এর
+        // ভেতরে)। mH.post-এর আগেই লেখা হয়, যাতে onReceive-এর
+        // মধ্যে প্রসেস মরলেও চেষ্টাটা রেকর্ডে থাকে।
+        try {
+            String action = data.intent != null ? data.intent.getAction() : null;
+            if ("com.google.android.c2dm.intent.REGISTRATION".equals(action)
+                    || "com.google.android.c2dm.intent.RECEIVE".equals(action)) {
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "FcmReg: delivered to=" + getAppPackageName()
+                                + " user=" + getUserId()
+                                + " receiver=" + (data.activityInfo != null ? data.activityInfo.name : null)
+                                + " action=" + action);
+            }
+        } catch (Throwable ignored) { }
         mH.post(() -> {
             BroadcastReceiver mReceiver = null;
             Intent intent = data.intent;

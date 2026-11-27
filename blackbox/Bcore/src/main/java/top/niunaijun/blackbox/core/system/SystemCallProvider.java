@@ -10,6 +10,7 @@ import android.os.IBinder;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import top.niunaijun.blackbox.BlackBoxCore;
 import top.niunaijun.blackbox.utils.Slog;
 import top.niunaijun.blackbox.utils.compat.BundleCompat;
 
@@ -19,13 +20,37 @@ public class SystemCallProvider extends ContentProvider {
 
     @Override
     public boolean onCreate() {
+        // v1.0.162: BlackStage ট্রেস (শুধু প্রমাণ সংগ্রহ — আচরণে কোনো
+        // বদল নয়)। .161-তেও :black SCREEN_ON/OFF wake-এ INIT_FAILURE
+        // মরেছে, অথচ কোন stage-এ মরে তা জানা যায়নি। :black init-এর
+        // একদম প্রথম entry এখানে; trace লাইনের prefix-এ প্রসেসের নাম
+        // (cmdline) এমনিতেই থাকে। প্রতিটি stage লাইন আলাদা ফাইল-
+        // write-এ flush হয়, তাই মাঝপথে প্রসেস মরলেও শেষ সম্পূর্ণ
+        // stage-টা রেকর্ডে থেকে যায়।
+        long stageStart = System.currentTimeMillis();
+        traceStage162("provider onCreate enter");
         try {
             Slog.d(TAG, "SystemCallProvider onCreate called");
-            return initSystem();
+            boolean ok = initSystem();
+            traceStage162("provider onCreate exit ok=" + ok
+                    + " elapsed=" + (System.currentTimeMillis() - stageStart) + "ms");
+            return ok;
         } catch (Exception e) {
             Slog.e(TAG, "Error in SystemCallProvider onCreate", e);
             return false;
         }
+    }
+
+    // v1.0.162: BlackStage লাইন লেখার ছোট্ট helper — traceInitPublic
+    // নিজেই সব Throwable গিলে নেয়, তবু belt-and-braces guard।
+    private void traceStage162(String stage) {
+        try {
+            android.content.Context ctx = getContext();
+            if (ctx == null) {
+                ctx = BlackBoxCore.getContext();
+            }
+            BlackBoxCore.traceInitPublic(ctx, "BlackStage: " + stage);
+        } catch (Throwable ignored) { }
     }
 
     private boolean initSystem() {

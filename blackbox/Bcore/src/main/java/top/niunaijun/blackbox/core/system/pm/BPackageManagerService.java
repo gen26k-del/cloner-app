@@ -935,12 +935,23 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
     public void systemReady() {
         Thread pmReadyThread = new Thread(() -> {
             long start = System.currentTimeMillis();
+            // v1.0.162: BlackStage — PmReady thread-এর ভেতরের ধাপগুলো
+            // (scan / resolver rebuild) আলাদা করে মাপা; wake-মৃত্যু এই
+            // thread-এ আটকে থাকলে শেষ লাইনটাই তা দেখাবে।
+            BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                    "BlackStage: PmReady thread begin");
             try {
                 mSettings.scanPackage();
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "BlackStage: PmReady scan done elapsed="
+                                + (System.currentTimeMillis() - start) + "ms");
                 for (BPackageSettings value : mPackages.values()) {
                     mComponentResolver.removeAllComponents(value.pkg);
                     mComponentResolver.addAllComponents(value.pkg);
                 }
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "BlackStage: PmReady resolver done elapsed="
+                                + (System.currentTimeMillis() - start) + "ms");
             } catch (Throwable e) {
                 e.printStackTrace();
             } finally {

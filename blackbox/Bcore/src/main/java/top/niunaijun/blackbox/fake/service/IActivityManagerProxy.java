@@ -246,7 +246,9 @@ public class IActivityManagerProxy extends ClassInvocationStub {
             if (requireForegroundIndex != -1) {
                 requireForeground = (boolean) args[requireForegroundIndex];
             }
-            return BlackBoxCore.getBActivityManager().startService(intent, resolvedType, requireForeground, BActivityThread.getUserId());
+            ComponentName started = BlackBoxCore.getBActivityManager().startService(intent, resolvedType, requireForeground, BActivityThread.getUserId());
+            traceMqttStartOutcome(intent, resolveInfo, started);
+            return started;
         }
 
         public int getRequireForeground() {
@@ -335,6 +337,36 @@ public class IActivityManagerProxy extends ClassInvocationStub {
                                 + " class=" + cls
                                 + " target=" + targetPkg
                                 + " resolved=" + (resolveInfo != null));
+            } catch (Throwable ignored) { }
+        }
+
+        // v1.0.162: MQTT start-এর ফলাফল (শুধু প্রমাণ — আচরণে কোনো
+        // বদল নয়)। tracePushService চেষ্টাটা লেখে (resolved= সহ),
+        // কিন্তু virtual AMS-এর আসল start ব্যর্থ হলে (BActivityManager
+        // .startService retries শেষে null ফেরত দেয় — যেমন :black
+        // মৃত/ধীর হলে) এতদিন কোনো লাইন থাকত না; .161-এর রিপোর্টে
+        // তাই শুধু resolved=true লাইনই দেখা গেছে। এখন MQTT ক্লাসের
+        // start null ফিরলেই FAILED লাইন থাকে। সফল start-এ কোনো
+        // বাড়তি লাইন নয় (PushSvc-তেই তা ধরা আছে)।
+        private static void traceMqttStartOutcome(Intent intent, ResolveInfo resolveInfo, ComponentName started) {
+            try {
+                if (started != null) {
+                    return;
+                }
+                String cls = null;
+                if (intent.getComponent() != null) {
+                    cls = intent.getComponent().getClassName();
+                } else if (resolveInfo != null && resolveInfo.serviceInfo != null) {
+                    cls = resolveInfo.serviceInfo.name;
+                }
+                if (cls == null || !(cls.contains("Mqtt") || cls.contains("mqtt"))) {
+                    return;
+                }
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "MqttTrace: startService FAILED from=" + BActivityThread.getAppPackageName()
+                                + " class=" + cls
+                                + " resolved=" + (resolveInfo != null)
+                                + " result=null");
             } catch (Throwable ignored) { }
         }
     }

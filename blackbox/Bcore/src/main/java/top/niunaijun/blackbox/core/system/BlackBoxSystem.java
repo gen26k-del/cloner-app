@@ -46,10 +46,21 @@ public class BlackBoxSystem {
         return sBlackBoxSystem;
     }
 
+    // v1.0.162: BlackStage ট্রেস helper (SystemCallProvider দেখো)।
+    // startup()-এর প্রতিটি ধাপের শুরু/শেষ আলাদা লাইনে লেখা হয় —
+    // wake-এ :black মরলে শেষ "done" লাইনটাই বলে দেয় মৃত্যু ঠিক
+    // কোন ধাপে। traceInitPublic নিজে সব Throwable গেলে।
+    private static void traceStage162(String stage) {
+        BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(), "BlackStage: " + stage);
+    }
+
     public void startup() {
         if (isStartup.getAndSet(true))
             return;
+        long startupStart = System.currentTimeMillis();
+        traceStage162("startup begin");
         BEnvironment.load();
+        traceStage162("env load done elapsed=" + (System.currentTimeMillis() - startupStart) + "ms");
 
         mServices.add(BPackageManagerService.get());
         mServices.add(BUserManagerService.get());
@@ -62,9 +73,15 @@ public class BlackBoxSystem {
         mServices.add(BAccountManagerService.get());
         mServices.add(BLocationManagerService.get());
         mServices.add(BNotificationManagerService.get());
+        traceStage162("services collected elapsed=" + (System.currentTimeMillis() - startupStart) + "ms");
 
         for (ISystemService service : mServices) {
+            String serviceName = service.getClass().getSimpleName();
+            long serviceStart = System.currentTimeMillis();
+            traceStage162("systemReady begin " + serviceName);
             service.systemReady();
+            traceStage162("systemReady done " + serviceName
+                    + " elapsed=" + (System.currentTimeMillis() - serviceStart) + "ms");
         }
 
         // v1.0.161: the pre-install pass reads the package list, which
@@ -73,7 +90,10 @@ public class BlackBoxSystem {
         // scan, instead of blocking startup (SystemCallProvider
         // .onCreate) on it.
         Thread preInstallThread = new Thread(() -> {
-            BPackageManagerService.get().awaitReady(20000);
+            long preInstallStart = System.currentTimeMillis();
+            boolean pmReady = BPackageManagerService.get().awaitReady(20000);
+            traceStage162("PreInstall begin pmReady=" + pmReady
+                    + " waited=" + (System.currentTimeMillis() - preInstallStart) + "ms");
             List<String> preInstallPackages = AppSystemEnv.getPreInstallPackages();
             for (String preInstallPackage : preInstallPackages) {
                 try {
@@ -84,11 +104,14 @@ public class BlackBoxSystem {
                 } catch (PackageManager.NameNotFoundException ignored) {
                 }
             }
+            traceStage162("PreInstall done elapsed=" + (System.currentTimeMillis() - preInstallStart) + "ms");
         }, "PreInstall");
         preInstallThread.setDaemon(true);
         preInstallThread.start();
-        
+        traceStage162("preinstall thread started elapsed=" + (System.currentTimeMillis() - startupStart) + "ms");
+
         JarManager.getInstance().initializeAsync();
+        traceStage162("startup done total=" + (System.currentTimeMillis() - startupStart) + "ms");
         
         
      
