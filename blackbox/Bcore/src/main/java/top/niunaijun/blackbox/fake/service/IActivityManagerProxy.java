@@ -1085,7 +1085,7 @@ public class IActivityManagerProxy extends ClassInvocationStub {
         }
         for (int i = 0; i < filter.countDataAuthorities(); i++) {
             IntentFilter.AuthorityEntry authority = filter.getDataAuthority(i);
-            copy.addDataAuthority(authority.getHost(), authority.getPort());
+            copy.addDataAuthority(authority.getHost(), String.valueOf(authority.getPort()));
         }
         for (int i = 0; i < filter.countDataPaths(); i++) {
             android.os.PatternMatcher path = filter.getDataPath(i);
