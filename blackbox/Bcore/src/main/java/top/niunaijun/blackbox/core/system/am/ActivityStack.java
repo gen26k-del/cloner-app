@@ -102,6 +102,14 @@ public class ActivityStack {
         if (resolveInfo == null || resolveInfo.activityInfo == null) {
             return 0;
         }
+
+        // v1.0.169: one-foreground-space residency — a successful launch in a
+        // space makes it the foreground space; the previous spaces' guest
+        // processes are parked after a grace delay (BProcessManagerService).
+        try {
+            BProcessManagerService.get().onSpaceForeground(userId);
+        } catch (Throwable ignored) {
+        }
         Log.d(TAG, "startActivityLocked : " + resolveInfo.activityInfo);
         ActivityInfo activityInfo = resolveInfo.activityInfo;
 

@@ -42,6 +42,13 @@ public class BProcessManagerService implements ISystemService {
     private final List<ProcessRecord> mPidsSelfLocked = new ArrayList<>();
     private final Object mProcessLock = new Object();
 
+    // v1.0.169: one-foreground-space residency state (DualSpaceLivre pattern).
+    private final Object mParkLock = new Object();
+    private int mForegroundUser = -1;
+    private long mParkGeneration = 0;
+    private java.util.concurrent.ScheduledExecutorService mParkExecutor;
+    private java.util.concurrent.ScheduledFuture<?> mParkFuture;
+
     public static BProcessManagerService get() {
         return sBProcessManagerService;
     }
@@ -397,6 +404,111 @@ public class BProcessManagerService implements ISystemService {
                 mPidsSelfLocked.remove(value);
             }
             mProcessMap.remove(buid);
+        }
+    }
+
+    /** v1.0.169: snapshot of the virtual users that currently own a live guest process. */
+    public Set<Integer> getRunningUserIds() {
+        synchronized (mPidsSelfLocked) {
+            Set<Integer> users = new HashSet<>();
+            for (ProcessRecord record : mPidsSelfLocked) {
+                if (record.pid > 0) {
+                    users.add(record.userId);
+                }
+            }
+            return users;
+        }
+    }
+
+    /**
+     * v1.0.169: kill every guest process of one virtual user (space parking,
+     * DualSpaceLivre killAllByUserId pattern). Deliberately does NOT delete
+     * the user's notifications (v1.0.167 rule: only uninstall cleans those)
+     * and does NOT touch the user's data — the space cold-reopens on its
+     * next launch.
+     */
+    public void killAllByUserId(int userId) {
+        synchronized (mProcessLock) {
+            synchronized (mPidsSelfLocked) {
+                List<ProcessRecord> records = new ArrayList<>(mPidsSelfLocked);
+                for (ProcessRecord record : records) {
+                    if (record.userId != userId) {
+                        continue;
+                    }
+                    Map<String, ProcessRecord> userProcesses = mProcessMap.get(record.buid);
+                    if (userProcesses != null) {
+                        userProcesses.remove(record.processName);
+                        if (userProcesses.isEmpty()) {
+                            mProcessMap.remove(record.buid);
+                        }
+                    }
+                    mPidsSelfLocked.remove(record);
+                    BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                            "ParkTrace: kill user=" + userId + " proc=" + record.processName
+                                    + " pid=" + record.pid);
+                    record.kill();
+                }
+            }
+        }
+    }
+
+    /**
+     * v1.0.169: called from ActivityStack.startActivityLocked on every guest
+     * activity launch. When the foreground space changes, the other spaces'
+     * guest processes are parked after a 2000ms grace delay (DualSpaceLivre
+     * PROCESS_FLUSH_GRACE_MS pattern). Fewer resident heavy guests means
+     * less memory pressure and fewer restart storms at screen on/off — the
+     * .165–.168 AnrExit pattern (four processes ANR'ing on one SCREEN_OFF).
+     */
+    public void onSpaceForeground(int userId) {
+        final long generation;
+        synchronized (mParkLock) {
+            if (mForegroundUser == userId) {
+                return;
+            }
+            mForegroundUser = userId;
+            generation = ++mParkGeneration;
+            if (mParkExecutor == null) {
+                mParkExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread t = new Thread(r, "SpacePark");
+                    t.setDaemon(true);
+                    return t;
+                });
+            }
+            if (mParkFuture != null) {
+                mParkFuture.cancel(false);
+            }
+            final int foregroundUser = userId;
+            mParkFuture = mParkExecutor.schedule(() -> {
+                try {
+                    parkBackgroundUsers(foregroundUser, generation);
+                } catch (Throwable e) {
+                    Slog.w(TAG, "space parking failed", e);
+                }
+            }, 2000, java.util.concurrent.TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private void parkBackgroundUsers(int foregroundUser, long generation) {
+        synchronized (mParkLock) {
+            if (generation != mParkGeneration || mForegroundUser != foregroundUser) {
+                return; // a newer launch superseded this run
+            }
+        }
+        Set<Integer> backgroundUsers = getRunningUserIds();
+        backgroundUsers.remove(foregroundUser);
+        if (backgroundUsers.isEmpty()) {
+            return;
+        }
+        BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                "ParkTrace: parking users=" + backgroundUsers + " foreground=" + foregroundUser);
+        for (int userId : backgroundUsers) {
+            synchronized (mParkLock) {
+                if (generation != mParkGeneration) {
+                    return;
+                }
+            }
+            killAllByUserId(userId);
         }
     }
 

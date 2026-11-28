@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-27, at version **1.0.168** (versionCode 153).
+> Last updated: 2026-11-28, at version **1.0.169** (versionCode 154).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -1533,6 +1533,47 @@ When they disagree, the user is right and the report is lying.
   and — decisive as always — the owner's popup
   verdict on .166.
 
+- **v1.0.169** — **One-foreground-space
+  residency** (owner's verdict 2026-11-28 12:51:
+  the popup STILL comes repeatedly on .168; he
+  approved this round the same hour). Evidence:
+  the .168 report's AnrExit section — 5 fresh
+  broadcast ANRs on SCREEN_OFF/SCREEN_ON in one
+  minute (12:49–12:50), FOUR processes (:p2, :p0,
+  :black, :p1) ANR'ing on the same screen-off
+  sequence, the :p0 Facebook-clone process at
+  ~790 MB RSS. The broadcast/service fixes
+  (.166/.168) cannot cure ANRs in a process that
+  is frozen under memory pressure or mid-restart;
+  the ranked list's residency item (§7.5) is the
+  remaining lever. Port of DualSpaceLivre's
+  pattern, adapted because BAMS is untouchable
+  here: (1) `BProcessManagerService.killAllByUserId`
+  + `getRunningUserIds` (their names/recipes);
+  removal uses our record.buid map key directly
+  (our lineage stores the full uid there — cf.
+  killAllByPackageName); notifications are NOT
+  deleted (v1.0.167 rule — DSL deletes them, we
+  deliberately differ) and user data is untouched,
+  so a parked space cold-reopens intact.
+  (2) `BProcessManagerService.onSpaceForeground`:
+  a generation-guarded run on a daemon "SpacePark"
+  scheduled executor fires 2000ms after a space
+  switch (DSL PROCESS_FLUSH_GRACE_MS) and parks
+  every other running user. (3) Trigger:
+  `ActivityStack.startActivityLocked` calls
+  onSpaceForeground(userId) after a successful
+  resolve — DSL triggers inside their BAMS; ours
+  is the equivalent editable seam in :black.
+  DSL's clearAllTasks/stopAll pre-steps are NOT
+  ported (that state is BAMS-owned here); process
+  death cleans service records via the existing
+  onProcessDie paths, as in DSL's own kill step.
+  Trace: `ParkTrace:` (parking run + per-process
+  kill lines). Expected trade-off, told to the
+  owner in advance: background spaces cold-reopen,
+  and a parked space's messages wait until it is
+  opened again (the last-used space stays awake).
 - **v1.0.168** — **Proxy-service creation the
   DualSpaceLivre way + the report in named parts**
   (owner's verdict 2026-11-27 19:51: the popup
@@ -1633,6 +1674,11 @@ When they disagree, the user is right and the report is lying.
    creation could previously rebuild the guest
    Application. Pending the owner's device test:
    does WhatsApp open now?
+   **Update (.168 report, 2026-11-28):** the
+   summary trace STILL reads bind-without-start
+   for WhatsApp — the createProxyService port did
+   not change the trace picture; the owner's own
+   device word on .168 WhatsApp is still pending.
 4. **Google Photos clone** opens but crashed on a tap with
    `SecurityException: Package ... does not belong to <uid>` from
    `ICrossProfileApps.getTargetUserProfiles` (same calling-UID family as the
@@ -1653,7 +1699,17 @@ When they disagree, the user is right and the report is lying.
    residency policy and the dead-hook audit (now
    including the native layer — NewBlackbox #89:
    FileSystemHook replacements are defined but
-   never installed). v1.0.150 added `MainStall:`
+   never installed). **Update (2026-11-28):** the
+   popup DID persist on .168 — owner's verdict
+   12:51, and the .168 report's AnrExit section
+   shows 5 fresh broadcast ANRs on SCREEN_OFF/
+   SCREEN_ON within one minute (12:49–12:50),
+   four processes (:p2/:p0/:black/:p1) ANR'ing on
+   the same screen-off sequence, :p0 (Facebook
+   clone) at ~790 MB RSS. v1.0.169 implements the
+   residency policy (§6); the dead-hook audit
+   (incl. the native layer) is the next remaining
+   candidate. v1.0.150 added `MainStall:`
    tracing only (watchdog writes one trace line per stall episode at
    >4 s blocked) — **no cure is claimed**. The launch path already runs
    off the main thread (v1.0.131). The 2026-11-23 18:58 report shows
