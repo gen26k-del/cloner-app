@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-28, at version **1.0.170** (versionCode 155).
+> Last updated: 2026-11-28, at version **1.0.171** (versionCode 156).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -1533,6 +1533,19 @@ When they disagree, the user is right and the report is lying.
   and — decisive as always — the owner's popup
   verdict on .166.
 
+- **v1.0.171** — **Emergency revert of the
+  FileSystemHook installation** (owner's report
+  2026-11-28 19:21, minutes after installing
+  .170: "আগে যা চলত এখন Open ই হয়না" — Facebook
+  and other clones no longer open AT ALL). The
+  broadcast gate from .170 is unchanged; only the
+  DobbyHook-on-libc-open/open64 installation is
+  removed, restoring FileSystemHook.cpp to its
+  pre-.170 (upstream) state. Lesson recorded in
+  §7: never ship a libc-level hook without
+  on-device testing. Installs as an update over
+  .170 (versionCode 156), so clones/logins are
+  preserved.
 - **v1.0.170** — **Broadcast gate + FileSystemHook
   installed** (owner's .169 verdict 2026-11-28
   18:53: popup STILL comes; he chose the
