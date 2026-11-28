@@ -5,6 +5,7 @@
 #include "FileSystemHook.h"
 #include "Log.h"
 #include "xdl.h"
+#include "Dobby/dobby.h"
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -82,6 +83,21 @@ void FileSystemHook::init() {
     } else {
         ALOGE("FileSystemHook: Failed to find open function");
     }
+
+    // v1.0.170: replacements were DEFINED but NEVER INSTALLED (upstream
+    // NewBlackbox issue #89 — init() only resolved the original symbols).
+    // Install them now: DobbyHook on the resolved libc addresses, keeping
+    // the original pointer only when the hook actually took (trampoline).
+    if (orig_open) {
+        void *trampoline = nullptr;
+        int rc = DobbyHook((void *) orig_open, (void *) new_open, &trampoline);
+        if (rc == 0 && trampoline != nullptr) {
+            orig_open = (int (*)(const char *, int, ...)) trampoline;
+            ALOGD("FileSystemHook: open hook installed");
+        } else {
+            ALOGD("FileSystemHook: open hook FAILED rc=%d", rc);
+        }
+    }
     
     
     orig_open64 = (int (*)(const char*, int, ...))xdl_sym(handle, "open64", nullptr);
@@ -89,6 +105,17 @@ void FileSystemHook::init() {
         ALOGD("FileSystemHook: Found open64 function at %p", orig_open64);
     } else {
         ALOGE("FileSystemHook: Failed to find open64 function");
+    }
+
+    if (orig_open64) {
+        void *trampoline = nullptr;
+        int rc = DobbyHook((void *) orig_open64, (void *) new_open64, &trampoline);
+        if (rc == 0 && trampoline != nullptr) {
+            orig_open64 = (int (*)(const char *, int, ...)) trampoline;
+            ALOGD("FileSystemHook: open64 hook installed");
+        } else {
+            ALOGD("FileSystemHook: open64 hook FAILED rc=%d", rc);
+        }
     }
     
     xdl_close(handle);

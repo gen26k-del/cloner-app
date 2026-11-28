@@ -1653,6 +1653,33 @@ public class BActivityThread extends IBActivityThread.Stub {
 
     @Override
     public void scheduleReceiver(ReceiverData data) throws RemoteException {
+        // v1.0.170: BROADCAST GATE (guest প্রান্ত) — SCREEN_ON/OFF যদি
+        // অন্য কোনো পথে এখানে পৌঁছেও যায়, guest receiver চালানো হয়
+        // না, প্রসেস ঘুমন্ত থাকলে তাকে জাগানোও (bindApplication) হয়
+        // না; chain সঙ্গে সঙ্গে finish হয়। কারণ উপরে
+        // ProxyBroadcastReceiver-এর .170 নোটে। mH.post-এর ভেতরে গিয়ে
+        // main thread-এর ব্যস্ততার ওপর finish নির্ভর করলে ঠিক সেই
+        // ANR-টাই ফিরে আসে (.169 MainStallStack: guest main thread
+        // নিজের কাজে 6–7s আটকে ছিল)।
+        try {
+            String gateAction = data.intent != null ? data.intent.getAction() : null;
+            if (Intent.ACTION_SCREEN_ON.equals(gateAction)
+                    || Intent.ACTION_SCREEN_OFF.equals(gateAction)) {
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "BcastGate: dropped at guest action=" + gateAction
+                                + " pkg=" + getAppPackageName() + " user=" + getUserId());
+                try {
+                    BroadcastReceiver.PendingResult gatePr = data.data.build();
+                    if (gatePr != null) {
+                        gatePr.finish();
+                    }
+                } catch (Throwable ignored) { }
+                try {
+                    BlackBoxCore.getBActivityManager().finishBroadcast(data.data);
+                } catch (Throwable ignored) { }
+                return;
+            }
+        } catch (Throwable ignored) { }
         if (!isInit()) {
             bindApplication();
         }

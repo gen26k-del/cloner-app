@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-28, at version **1.0.169** (versionCode 154).
+> Last updated: 2026-11-28, at version **1.0.170** (versionCode 155).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -1533,6 +1533,42 @@ When they disagree, the user is right and the report is lying.
   and — decisive as always — the owner's popup
   verdict on .166.
 
+- **v1.0.170** — **Broadcast gate + FileSystemHook
+  installed** (owner's .169 verdict 2026-11-28
+  18:53: popup STILL comes; he chose the
+  dead-hook audit first, then approved
+  "gate + FileSystemHook" together). Evidence:
+  the .169 report — 8 fresh broadcast ANRs, ALL
+  on SCREEN_OFF/SCREEN_ON; residency (.169)
+  cannot help because the cascades strike
+  processes of the same space while their main
+  threads sit blocked 6–7s in their own work
+  under swap pressure. (A) **Broadcast gate**:
+  ACTION_SCREEN_ON / ACTION_SCREEN_OFF are no
+  longer delivered to guests at all. Two points:
+  `ProxyBroadcastReceiver.onReceive` (in :black)
+  finishes and returns before any fan-out — the
+  downstream-chained PendingResult was why :black
+  itself kept ANR'ing after .166 — and
+  `BActivityThread.scheduleReceiver` finishes
+  the chain and returns BEFORE bindApplication,
+  so a screen broadcast never cold-wakes a guest
+  and never waits on its main thread. Guest
+  screen-event receivers do no user-visible work
+  (analytics/reconnect nudges; apps reconnect on
+  launch/network change) — the accepted
+  trade-off, told to the owner: a sleeping
+  clone's message connection may wait until the
+  app is opened. Trace: `BcastGate:`. (B)
+  **FileSystemHook installed** (cpp): init() only
+  resolved orig_open/orig_open64 via xdl_sym for
+  the family's whole history (upstream #89); it
+  now DobbyHooks both (trampoline kept only on
+  success), so the written replacements — ENOENT
+  for resource-cache/@idmap/.frro/systemui opens
+  — finally run. No openat hook (none was ever
+  written). Expected gain is guest resource-crash
+  reduction; NO popup claim is made for (B).
 - **v1.0.169** — **One-foreground-space
   residency** (owner's verdict 2026-11-28 12:51:
   the popup STILL comes repeatedly on .168; he
@@ -1709,7 +1745,23 @@ When they disagree, the user is right and the report is lying.
    clone) at ~790 MB RSS. v1.0.169 implements the
    residency policy (§6); the dead-hook audit
    (incl. the native layer) is the next remaining
-   candidate. v1.0.150 added `MainStall:`
+   candidate. **Update (2026-11-28 evening):** the
+   owner's .169 verdict is POPUP STILL COMES
+   (18:53), and the .169 report (11 parts) shows
+   8 fresh broadcast ANRs on SCREEN_OFF/SCREEN_ON
+   — residency did not cure it: the cascades
+   struck processes of the SAME space (plus both
+   spaces' GMS), :p0 at ~952 MB RSS, three
+   LOW_MEMORY deaths (:p4/:p5/:p6) between the
+   cascades, and MainStallStack shows the katana
+   main thread blocked 6–7s in its own work when
+   SCREEN_OFF arrived. The dead-hook audit
+   (owner's choice; done 2026-11-28, full text in
+   the study file) found 7 dead Java injectors +
+   FileSystemHook dead verbatim — all family-wide,
+   none explains the ANRs. v1.0.170 therefore
+   implements the broadcast gate and installs
+   FileSystemHook (§6). v1.0.150 added `MainStall:`
    tracing only (watchdog writes one trace line per stall episode at
    >4 s blocked) — **no cure is claimed**. The launch path already runs
    off the main thread (v1.0.131). The 2026-11-23 18:58 report shows

@@ -101,6 +101,28 @@ public class ProxyBroadcastReceiver extends BroadcastReceiver {
                 BlackBoxCore.traceInitPublic(context, "BlackWake: action=" + action);
             }
         } catch (Throwable ignored) { }
+        // v1.0.170: BROADCAST GATE — SCREEN_ON / SCREEN_OFF আর guest-দের
+        // কাছে পাঠানোই হয় না। প্রমাণ (.165/.168/.169 AnrExit): এই দুই
+        // action-এর ডেলিভারিই সব ANR-এর কারণ — জমে থাকা/ঘুমন্ত ভারী
+        // guest প্রসেসে ডেলিভারি গেলেই তার main thread সময়মতো finish
+        // করতে পারে না, আর :black-এর নিজের PendingResult-ও downstream
+        // chain-এ ঝুলে থেকে :black-ও ANR খায়। guest receiver-রা এই দুই
+        // action-এ ব্যবহারকারীর কাজের কিছু করে না (analytics/reconnect
+        // nudge মাত্র; অ্যাপ খুললেই/নেটওয়ার্ক বদলালেই reconnect হয়)।
+        // এখানে finish করে ফিরে গেলে chain-টাই তৈরি হয় না।
+        try {
+            String gateAction = intent.getAction();
+            if (Intent.ACTION_SCREEN_ON.equals(gateAction)
+                    || Intent.ACTION_SCREEN_OFF.equals(gateAction)) {
+                BlackBoxCore.traceInitPublic(context,
+                        "BcastGate: dropped at proxy action=" + gateAction);
+                PendingResult gateResult = goAsync();
+                if (gateResult != null) {
+                    gateResult.finish();
+                }
+                return;
+            }
+        } catch (Throwable ignored) { }
         record = ProxyBroadcastRecord.create(intent);
         pendingResult = goAsync();
         if (record.mIntent == null) {
