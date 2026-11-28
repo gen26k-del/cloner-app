@@ -7,6 +7,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.IIntentReceiver;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ProviderInfo;
 import android.content.pm.ResolveInfo;
@@ -1031,10 +1032,110 @@ public class IActivityManagerProxy extends ClassInvocationStub {
     }
 
     
+    // v1.0.172: BROADCAST GATE v2 — আসল choke point। .171 রিপোর্টের
+    // AnrExit প্রমাণ করেছে: ANR খাওয়া SCREEN_ON/OFF broadcast
+    // ভার্চুয়াল chain (ProxyBroadcastReceiver → BAMS →
+    // scheduleReceiver, যেখানে .170-র gate বসে) দিয়ে আসেই না।
+    // guest কোড dynamically registerReceiver করলে নিচের দুই হুক সেই
+    // registration আসল AMS-এর কাছে হুবহু পাঠিয়ে দেয় — আসল
+    // IntentFilter-সহ। ফলে সিস্টেম SCREEN_ON/OFF সরাসরি guest
+    // প্রসেসের main thread-এ ডেলিভারি দেয় (AMS রেকর্ডে
+    // cmp=com.example.cloner/<guest class>), আর main thread ব্যস্ত
+    // থাকলেই broadcast ANR। সমাধান: registration আসল AMS-এ পৌঁছানোর
+    // আগেই filter থেকে SCREEN_ON/OFF খুলে ফেলা — ওই দুই action-এর
+    // জন্য guest প্রসেসে কোনো ডেলিভারিই আসবে না। বাকি action,
+    // category, data, priority হুবহু থাকে; filter-এ আর কিছু না
+    // থাকলে registration-টাই বাদ (null ফেরত — sticky intent নেই
+    // বোঝায়, caller-এর জন্য নিরাপদ)।
+    private static boolean isScreenAction(String action) {
+        return Intent.ACTION_SCREEN_ON.equals(action)
+                || Intent.ACTION_SCREEN_OFF.equals(action);
+    }
+
+    private static boolean filterHasScreenAction(IntentFilter filter) {
+        if (filter == null) {
+            return false;
+        }
+        for (int i = 0; i < filter.countActions(); i++) {
+            if (isScreenAction(filter.getAction(i))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static IntentFilter filterWithoutScreenActions(IntentFilter filter) {
+        IntentFilter copy = new IntentFilter();
+        for (int i = 0; i < filter.countActions(); i++) {
+            String action = filter.getAction(i);
+            if (!isScreenAction(action)) {
+                copy.addAction(action);
+            }
+        }
+        for (int i = 0; i < filter.countCategories(); i++) {
+            copy.addCategory(filter.getCategory(i));
+        }
+        for (int i = 0; i < filter.countDataSchemes(); i++) {
+            copy.addDataScheme(filter.getDataScheme(i));
+        }
+        for (int i = 0; i < filter.countDataTypes(); i++) {
+            try {
+                copy.addDataType(filter.getDataType(i));
+            } catch (Throwable ignored) { }
+        }
+        for (int i = 0; i < filter.countDataAuthorities(); i++) {
+            IntentFilter.AuthorityEntry authority = filter.getDataAuthority(i);
+            copy.addDataAuthority(authority.getHost(), authority.getPort());
+        }
+        for (int i = 0; i < filter.countDataPaths(); i++) {
+            android.os.PatternMatcher path = filter.getDataPath(i);
+            copy.addDataPath(path.getPath(), path.getType());
+        }
+        copy.setPriority(filter.getPriority());
+        return copy;
+    }
+
+    // true ফেরত দিলে registration-টাই বাদ দিতে হবে (filter-এ
+    // SCREEN_ON/OFF ছাড়া আর কিছু ছিল না)।
+    private static boolean gateScreenFilter(Object[] args, int filterIndex) {
+        try {
+            if (filterIndex < 0 || filterIndex >= args.length
+                    || !(args[filterIndex] instanceof IntentFilter)) {
+                return false;
+            }
+            IntentFilter filter = (IntentFilter) args[filterIndex];
+            if (!filterHasScreenAction(filter)) {
+                return false;
+            }
+            IntentFilter copy = filterWithoutScreenActions(filter);
+            boolean drop = copy.countActions() == 0
+                    && copy.countCategories() == 0
+                    && copy.countDataSchemes() == 0
+                    && copy.countDataTypes() == 0;
+            try {
+                BlackBoxCore.traceInitPublic(BlackBoxCore.getContext(),
+                        "BcastGate: stripped screen actions from dynamic registration"
+                                + " result=" + (drop ? "dropped" : "kept-rest"));
+            } catch (Throwable ignored) { }
+            if (drop) {
+                return true;
+            }
+            args[filterIndex] = copy;
+            return false;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     @ProxyMethod("registerReceiverWithFeature")
     public static class RegisterReceiverWithFeature extends MethodHook{
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            // v1.0.172: gate v2 (উপরে gateScreenFilter দেখো) —
+            // এই signature-এ filter index = permission index - 1।
+            if (gateScreenFilter(args, getPermissionIndex() - 1)) {
+                return null;
+            }
             MethodParameterUtils.replaceFirstAppPkg(args);
             int receiverIndex = getReceiverIndex();
             if (args[receiverIndex] != null) {
@@ -1086,6 +1187,10 @@ public class IActivityManagerProxy extends ClassInvocationStub {
 
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            // v1.0.172: gate v2 — এই signature-এ filter index 3।
+            if (gateScreenFilter(args, 3)) {
+                return null;
+            }
             MethodParameterUtils.replaceFirstAppPkg(args);
             int receiverIndex = 2;
             if (args[receiverIndex] != null) {

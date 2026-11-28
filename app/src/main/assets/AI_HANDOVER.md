@@ -1,7 +1,7 @@
 # CloneMe — AI Handover Guide
 
 > For any AI assistant or developer picking up this project cold. Read this first.
-> Last updated: 2026-11-28, at version **1.0.171** (versionCode 156).
+> Last updated: 2026-11-28, at version **1.0.172** (versionCode 157).
 
 > ⭐ **KEEP THIS FILE CURRENT — standing rule from the owner.**
 > This document is the project's memory. **Every release MUST update it in the
@@ -1533,6 +1533,32 @@ When they disagree, the user is right and the report is lying.
   and — decisive as always — the owner's popup
   verdict on .166.
 
+- **v1.0.172** — **Broadcast gate v2: strip
+  SCREEN_ON/OFF at dynamic registration**
+  (owner's go-ahead 2026-11-28 19:44). Root
+  cause, proven from the .171 report + code: the
+  ANR'd screen broadcasts never travel the
+  virtual chain at all. Guest code registers
+  receivers dynamically, and
+  IActivityManagerProxy's RegisterReceiver /
+  RegisterReceiverWithFeature hooks pass those
+  registrations through to the REAL AMS with the
+  real IntentFilter — so the system delivers
+  SCREEN_ON/OFF straight into the guest main
+  thread (AMS records them as
+  cmp=com.example.cloner/<guest class>), and a
+  busy main thread turns each delivery into a
+  broadcast ANR. The .170 gate points
+  (ProxyBroadcastReceiver, BActivityThread.
+  scheduleReceiver) guard only the virtual chain
+  and remain as a second layer. v2: both
+  registerReceiver hooks strip ACTION_SCREEN_ON /
+  ACTION_SCREEN_OFF from the filter before it
+  reaches the real AMS — a filtered copy
+  preserving other actions, categories, data and
+  priority; if nothing remains, the registration
+  is skipped and null returned. Trace:
+  `BcastGate:`.
 - **v1.0.171** — **Emergency revert of the
   FileSystemHook installation** (owner's report
   2026-11-28 19:21, minutes after installing
@@ -1774,7 +1800,19 @@ When they disagree, the user is right and the report is lying.
    FileSystemHook dead verbatim — all family-wide,
    none explains the ANRs. v1.0.170 therefore
    implements the broadcast gate and installs
-   FileSystemHook (§6). v1.0.150 added `MainStall:`
+   FileSystemHook (§6). **Update 2 (2026-11-28
+   ~19:44):** the owner's .171 verdict — popup
+   STILL comes (rarely inside Facebook now, mostly
+   at app switching) — and the .171 report's
+   AnrExit (4 fresh SCREEN_ON/OFF broadcast ANRs)
+   plus a code read proved the gate guarded the
+   wrong door: those broadcasts are DYNAMIC
+   registrations by guest code, passed through to
+   the real AMS by IActivityManagerProxy's
+   registerReceiver hooks, so the system delivers
+   them straight into guest main threads. v1.0.172
+   strips the two actions at that registration
+   point (§6). v1.0.150 added `MainStall:`
    tracing only (watchdog writes one trace line per stall episode at
    >4 s blocked) — **no cure is claimed**. The launch path already runs
    off the main thread (v1.0.131). The 2026-11-23 18:58 report shows
